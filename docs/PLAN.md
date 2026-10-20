@@ -34,8 +34,8 @@ contracts.
 |---|---|---|
 | M1 Skeleton & CI | done | #2 |
 | M2 Schema & seed | done | #3 |
-| M3 Domain logic | in review | #4 |
-| M4 API & contracts | todo | |
+| M3 Domain logic | done | #4 |
+| M4 API & contracts | in review | #5 |
 | M5 Web UI & auth | todo | |
 | M6 Python worker | todo | |
 | M7 Agent skill pack & tools | todo | |
@@ -341,7 +341,103 @@ diagnostics rendering snapshot.
 
 **Out of scope:** UI pages, Python code beyond generated contracts.
 
-**Notes:** —
+**Notes:**
+
+*Shipped as one PR* (no M4a/M4b split). All 25 routes of DESIGN §3.2 plus
+`POST /api/products/{id}/reject` and Auth.js's `/api/auth/[...nextauth]`.
+
+*Versions added:* web: `zod` 4.6.7 (`z.toJSONSchema` — no OpenAPI library needed), `aws4fetch`
+1.0.20 (SigV4 query presigning for R2), `next-auth` 5.0.0-beta.32, `drizzle-orm`/`@libsql/client`
+(same versions as `/db`), `ulid`, `@pandabase/db` (workspace). Root: `tsx`. Python: `pydantic`
+≥ 2.14 (runtime, both projects); `datamodel-code-generator` 0.86.0 pinned in `worker`'s dev group
+(the generator runs from `worker/.venv` for both outputs). Lockfiles stay at uv revision 5 — lock
+with uv ≥ 0.13 (an older uv rewrites them as revision 3).
+
+*Deviations / choices (DESIGN §2.6, §3, §4.3, §5, §7, §9, §10 #27–29 updated):*
+- Generated Python lives at `worker/src/pandabase_worker/contracts.py` and
+  `agent/tools/src/pandabase_tools/contracts.py` (the `src/` layout from M1; the plan's paths
+  predate it). Wire format is snake_case. `pnpm contracts:gen` = `scripts/gen-contracts.ts`:
+  Zod registry + route table → `contracts/openapi.json` (sorted keys; `anyOf [X, null]` flattened
+  to `type: [X, "null"]` and date `pattern`s dropped so Pydantic gets plain `str | None` / `date`)
+  → `datamodel-codegen` → `ruff`. CI job `contracts` runs it and fails on `git diff`.
+- Touched M2's `db/src/env.ts`/`client.ts`: `new URL("…", import.meta.url)` became
+  `packagePath("…")` — Turbopack tried to bundle `db/migrations` as an asset when `/web` imports
+  `@pandabase/db`. `web/next.config.ts` transpiles `@pandabase/db` and keeps libSQL external.
+  The web app's default DB URL is `../db/dev.db` from its cwd (`web/lib/context.ts`).
+- API routes call Next's `connection()` first (`AppContext.requestBoundary`): with
+  `cacheComponents`, Next otherwise executes GET handlers at build time (it did — and wrote
+  telemetry).
+- Cycle status route takes `nudged | building | ready | skipped | other_store | closed` (all
+  §4.7 events), not just the three terminal ones; `reason` replaces the default close reason.
+  `cart-result` also advances an open/building cycle to `ready` (one call after the build).
+- `POST /api/inventory/events` kinds: `observed`, `critical` (null-quantity observed +
+  override), `consumed`, `discarded`, `moved`, `acquired` (text purchase → one manual receipt per
+  vendor through `applyReceipt`, dedupe key `manual:{Idempotency-Key or ULID}:{vendor}`;
+  `quantity` = purchase units). Domain addition: `ReceiptLineInput.itemId/productId` → match
+  method `manual`, confirmed.
+- New domain modules (pure, tested, no `@/` imports): `jobs.ts` (leases, retries, `vendorSlug`,
+  `paperReceiptInput`, `resolveTrashCam`), `lookup.ts` (`searchItems`, `lookupAnswer`), and
+  `predictions.ts` gained `pleaseCheckReason`/`pleaseCheckList`. New config knobs: `cartVendors`,
+  `checkin.*`, `lookup.*`, `jobs.*`, `trashCam.applyConfidence`, `retention.*`,
+  `diagnostics.slowRouteMs` (arrays like `cartVendors` can't be overridden by a `setting` row).
+- Review expiry: every §4.6 default is "leave as is", so the cron only marks reviews `expired`
+  and logs `review_expired`; it reads the default from the review kind, not the stored
+  `default_action` (the seed stores `keep` / `keep_unverified`, which differ from the domain's
+  names — harmless, but M5 shouldn't rely on the stored value's spelling for seeded rows).
+- Telemetry `source`s: `state_engine`, `api`, `cron`, `agent`, `worker`, `session` (DESIGN §7
+  lists every metric name and the client payload fields the report reads).
+- Not built (no route needs them yet; for M5): receipt-review resolution
+  (`resolveReceiptReview` → persist), merge confirmation (`NEW_PRODUCT_STANCE` product on the
+  target item), "we're out"/critical from the UI (use `recordInventoryEvents`).
+- Known domain quirk (M3, unchanged): shelf life is FIFO over *acquisitions*, so a fresh count of a
+  perishable with no acquisition in its window is presumed expired at read time (e.g. counting 2
+  chicken thighs bought 5 days ago shows 0 in the fridge). Worth revisiting with a count resetting
+  the freshness window.
+
+*For M5 (web UI):*
+- Server actions call the services, never the routes: `web/lib/services/*`
+  (`cycles.ts`: `currentCycle`, `openCycle`, `addOverride`, `setCycleStatus`, `predictions`,
+  `cart`, `checkin`, `recordPriceQuotes`, `recordCartResult`; `inventory.ts`:
+  `recordInventoryEvents`, `lookupItems`, `freezerAging`, `createAwayPeriod`, `rejectProductById`;
+  `receipts.ts`: `ingestReceipt`/`ingestReceiptIn`, `persistReceiptEffects`; `jobs.ts`;
+  `maintenance.ts`). Each takes `ServiceCtx {now, config, actor}`: `now` = `appContext().now()`,
+  `config` from `loadConfig(db)` (`web/lib/repo/settings.ts`), `actor = {memberId, system: null}`.
+  `appContext().db` is the database. Return values are contract-shaped (snake_case).
+- Auth.js: `web/auth.ts` exports `auth`, `signIn`, `signOut`, `handlers` (Google provider, JWT,
+  allowlist `signIn` callback); add the sign-in page and middleware. API routes resolve sessions
+  through `web/lib/auth/session.ts` (`setSessionResolver` in tests).
+- Reads for pages: `loadEstimates` (`web/lib/repo/inventory.ts`), `planFor`
+  (`web/lib/services/cycles.ts`), `renderWeekly` (`web/lib/diagnostics/weekly.ts`) for Insights.
+- Contracts: `import { … } from "@/lib/contracts"` (Zod schemas + types).
+
+*For M6 (worker):* models in `pandabase_worker.contracts` (`JobClaimRequest/Response`,
+`ClaimedJob`, `JobCompleteRequest/Response`, `PaperReceiptResult`, `TrashCamResult`,
+`MergeSuggestResult`, `TelemetryRequest`). Auth: `Authorization: Bearer $WORKER_API_TOKEN`.
+`POST /api/jobs/claim` `{}` (optional `job_types`) → `{job: ClaimedJob | null}`; upload keyframes
+to the presigned `keyframe_uploads[n].url` (PUT) and list their keys in `complete`. Echo
+`attempt`; a 409 means the lease was lost — drop the job. Post `result` as the job type's
+contract (money in cents) or `{status: "failed", error}`; an invalid result counts as a failed
+attempt. Send `Idempotency-Key` on `complete` (retries are safe). Emit `vlm_inference {model,
+prompt_version, latency_ms, totals_check, parse_failure}` (and `vlm_parse_failure`) via
+`POST /api/telemetry`.
+
+*For M7 (agent pack):* models in `pandabase_tools.contracts`; `Authorization: Bearer
+$AGENT_API_TOKEN`; every write that a human asked for carries `actor_discord_id` (403 if unknown —
+register members' Discord ids in Settings). Send `Idempotency-Key` on every POST (replays are
+returned verbatim for 24h). Cycle flow: `POST …/cycle/open` (idempotent; call it whenever there's
+no active cycle) → overrides → Fri `status: nudged` with `GET /api/grocery/checkin` → Sat
+`status: building` (may come back `skipped` when away) → `GET /api/predictions` → price quotes for
+`needs_price_check_item_ids` → `GET …/cart` → inject → `POST …/cart-result` (cycle → `ready`;
+include `order_ids` if seen) → the order's digital receipt closes it (or `status: closed`).
+"Do we have X?": `GET /api/items/lookup?q=` → post `matches[0].text`. Text purchases: inventory
+events `kind: acquired`. "Never buy X": `POST /api/products/{id}/reject`. Receipt sweep:
+`GET /api/receipts/cursor?account={discord id}` → `POST /api/receipts/ingest` (`source: digital`,
+`account`, `external_order_id`). Media: `POST /api/media/upload-url` → PUT bytes with the returned
+`headers` → `POST /api/jobs` → poll `GET /api/jobs/notifications` → reply → `POST
+/api/jobs/{id}/notified`. Weekly: `GET /api/diagnostics/weekly` → write `markdown` to
+`/diagnostics/{week}.md` and each extract to `/diagnostics/{week}/{name}`. Emit
+`selector_error`, `price_lookup_failed`, `cart_tier1_line`, `clarifying_question {question}` via
+`POST /api/telemetry`.
 
 ---
 

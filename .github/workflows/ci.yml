@@ -39,6 +39,30 @@ jobs:
         run: pnpm db:reset && pnpm db:seed
       - run: pnpm --filter web build
 
+  contracts:
+    # Zod contracts → openapi.json → Pydantic models must be committed and up to date.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - uses: astral-sh/setup-uv@v7
+        with:
+          version: "0.13.3"
+          enable-cache: true
+          cache-dependency-glob: worker/uv.lock
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm contracts:gen
+      - name: Generated contracts are up to date
+        run: |
+          if ! git diff --exit-code; then
+            echo "::error::Generated contracts are stale — run pnpm contracts:gen and commit."
+            exit 1
+          fi
+
   python:
     runs-on: ubuntu-latest
     strategy:

@@ -2,14 +2,13 @@
 import { createClient, type Client } from "@libsql/client";
 import { drizzle, type LibSQLDatabase } from "drizzle-orm/libsql";
 import { migrate } from "drizzle-orm/libsql/migrator";
-import { fileURLToPath } from "node:url";
-import { databaseUrlFromEnv } from "./env";
+import { databaseUrlFromEnv, packagePath } from "./env";
 import * as schema from "./schema/index";
 
 export type Schema = typeof schema;
 export type Db = LibSQLDatabase<Schema> & { $client: Client };
 
-export const MIGRATIONS_FOLDER = fileURLToPath(new URL("../migrations", import.meta.url));
+export const MIGRATIONS_FOLDER = packagePath("../migrations");
 
 export interface DbOptions {
   url?: string;

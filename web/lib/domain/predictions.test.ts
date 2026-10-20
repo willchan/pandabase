@@ -4,6 +4,8 @@ import type { InventoryItem } from "./inventory";
 import {
   cartQuantity,
   planCart,
+  pleaseCheckList,
+  pleaseCheckReason,
   restockReason,
   type CycleOverride,
   type PlanItemInput,
@@ -235,5 +237,74 @@ describe("planCart — flags, overrides, product choice", () => {
   it("no candidate from the cart vendors → line without a product", () => {
     // Sized in base units (14 eggs) so a human can still act on it.
     expect(line(plan([], ["amazon"]), "eggs")).toMatchObject({ product: null, quantity: 14 });
+  });
+});
+
+describe("pleaseCheckReason / pleaseCheckList — PRD §4.1", () => {
+  const base = {
+    item: { ...eggs, auditHint: null },
+    estimate: { runoutAt: at("2026-10-30"), status: "stocked" as const },
+    lastVerifiedAt: null,
+    inPlan: false,
+    now,
+    config,
+  };
+  it.each([
+    ["runout within today + 3 + 4 days", {}, "near_runout"],
+    ["already in the plan", { inPlan: true }, null],
+    [
+      "runout beyond the margin",
+      { estimate: { runoutAt: at("2026-11-01"), status: "stocked" } },
+      null,
+    ],
+    ["no runout (no EMA)", { estimate: { runoutAt: null, status: "unknown" } }, null],
+    [
+      "audit hint, never counted",
+      {
+        item: { ...tp, auditHint: "count the rolls" },
+        estimate: { runoutAt: null, status: "stocked" },
+      },
+      "audit_hint",
+    ],
+    [
+      "audit hint, counted recently",
+      {
+        item: { ...tp, auditHint: "count the rolls" },
+        estimate: { runoutAt: null, status: "stocked" },
+        lastVerifiedAt: at("2026-10-10"),
+      },
+      null,
+    ],
+    [
+      "audit hint, counted > 21 days ago",
+      {
+        item: { ...tp, auditHint: "count the rolls" },
+        estimate: { runoutAt: null, status: "stocked" },
+        lastVerifiedAt: at("2026-09-01"),
+      },
+      "audit_hint",
+    ],
+  ] as const)("%s", (_, o, want) => {
+    expect(pleaseCheckReason({ ...base, ...o } as Parameters<typeof pleaseCheckReason>[0])).toBe(
+      want,
+    );
+  });
+
+  it("orders near-runout (soonest first) before audit hints and caps the list", () => {
+    const list = pleaseCheckList(
+      [
+        { id: "a", reason: "audit_hint" as const, runoutAt: null },
+        { id: "b", reason: "near_runout" as const, runoutAt: at("2026-10-30") },
+        { id: "c", reason: "near_runout" as const, runoutAt: at("2026-10-29") },
+        ...Array.from({ length: 6 }, (_, i) => ({
+          id: `z${i}`,
+          reason: "audit_hint" as const,
+          runoutAt: null,
+        })),
+      ],
+      config,
+    );
+    expect(list.map((x) => x.id).slice(0, 3)).toEqual(["c", "b", "a"]);
+    expect(list).toHaveLength(config.checkin.pleaseCheckMax);
   });
 });

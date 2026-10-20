@@ -170,7 +170,9 @@ for v1.1 and already allowed by the CHECK), `status` (`queued`|`claimed`|`comple
 
 **grocery_cycle** — `week_label` (e.g. `2026-W43`), `discord_thread_id`, `status`
 (`open`|`building`|`ready`|`closed`|`skipped`|`other_store`), `opened_at`, `nudge_sent_at`,
-`built_at`, `closed_at`, `close_reason`, `cart_result` (json). `week_label` is unique (opening is
+`built_at`, `closed_at`, `close_reason`, `cart_result` (json: `{vendors, order_ids, lines:
+[{item_id, product_id, asin, free_text, quantity, outcome: tier1|tier2|failed, error}],
+please_check_item_ids, recorded_at}` — contract `CartResult`). `week_label` is unique (opening is
 idempotent per week). At most one *active* cycle (`open`|`building`|`ready`; `closed`, `skipped`
 and `other_store` are terminal per §4.7), enforced by a partial unique index.
 
@@ -195,49 +197,78 @@ Retained 24h.
 
 All routes under `/web/app/api`. Payloads defined once as **Zod schemas** in `web/lib/contracts/`.
 `pnpm contracts:gen` emits `contracts/openapi.json`; Python models are generated from it
-(`datamodel-code-generator`) into `worker/pandabase_worker/contracts.py` and
-`agent/tools/pandabase/contracts.py`. CI fails if generated files are stale.
+(`datamodel-code-generator`, Pydantic v2) into `worker/src/pandabase_worker/contracts.py` and
+`agent/tools/src/pandabase_tools/contracts.py`. CI fails if generated files are stale.
+
+- **Wire format:** snake_case JSON; money in integer cents; timestamps ISO-8601 instants (any
+  offset accepted, stored and returned as `toISOString()` UTC); household dates `YYYY-MM-DD`;
+  quantities in base units unless a field says purchase units.
+- **Route table:** `web/lib/contracts/routes.ts` lists every route (method, path, scopes,
+  idempotent, body/query/response schemas). Handlers are built from it (`handle(def, fn)` in
+  `web/lib/route.ts`: `withAuth` → Zod-validate query/body → service call → JSON), and the
+  OpenAPI document is generated from it, so routes and contracts can't drift.
+- **Errors:** `{error, details?}` with 400 (invalid JSON / contract; `details` = issue paths), 401
+  (no/invalid credentials), 403 (wrong scope, email not allowed, unknown `actor_discord_id`), 404,
+  409 (invalid cycle transition, inactive cycle, stale job attempt), 500.
+- **Layers:** route handlers stay thin; orchestration lives in `web/lib/services/*` (shared with
+  M5's server actions), reads/writes in `web/lib/repo/*` (Drizzle), rules in `web/lib/domain/*`.
+  Each mutating service commits in one transaction and emits its telemetry inside it.
+- API routes are never prerendered: `withAuth` awaits Next's `connection()` first, so nothing
+  runs (or writes) at build time.
 
 ### 3.1 Auth
 
-- **Session** (Auth.js v5, Google, JWT sessions): `signIn` callback rejects emails not in
-  `ALLOWED_EMAILS`. Session users have all scopes.
-- **Bearer tokens:** `AGENT_API_TOKEN` (scope `agent`), `WORKER_API_TOKEN` (scope `worker`).
-  Constant-time compare. One `withAuth(scopes, handler)` wrapper on every route.
-- **Actor:** agent writes include `actor_discord_id`; unknown IDs → 403. System actions record
-  `actor_system`.
-- **Idempotency:** mutating machine routes honor `Idempotency-Key`; replay returns the stored response.
-- **Dev:** `DEV_AUTH_BYPASS=1` works only when `NODE_ENV=development`.
-- **Cron:** `/api/cron/maintenance` requires `Authorization: Bearer ${CRON_SECRET}` (Vercel Cron).
+- **Session** (Auth.js v5, Google, JWT sessions; config in `web/auth.ts`): `signIn` callback
+  rejects emails not in `ALLOWED_EMAILS`. Session users have every scope except `cron`; an API
+  request with a session is re-checked against the allowlist and acts as the member with that email.
+- **Bearer tokens:** `AGENT_API_TOKEN` (scope `agent`), `WORKER_API_TOKEN` (scope `worker`),
+  `CRON_SECRET` (scope `cron`). Constant-time compare (SHA-256 then `timingSafeEqual`); an unset
+  secret never matches. A bearer header wins over a session. One `withAuth(scopes, handler)`
+  wrapper on every route (`web/lib/auth/withAuth.ts`).
+- **Actor:** agent writes include `actor_discord_id`; unknown IDs → 403, missing on routes that
+  attribute to a human (overrides, inventory events, receipts ingest, jobs, away periods, product
+  reject) → 400. Events record `actor_member_id` and `actor_system` (`agent` for the agent acting
+  for a member, `worker`, `cron`); session writes record only the member.
+- **Idempotency:** mutating routes (every POST except `/api/jobs/claim`, which hands out leases)
+  honor `Idempotency-Key` (≤ 200 chars). The key is scoped to `{principal scope}:{METHOD path}`;
+  responses with status < 500 are stored and replayed verbatim with `Idempotent-Replayed: true`
+  for 24h. Manual receipts and text purchases also use the key as their dedupe key.
+- **Dev:** `DEV_AUTH_BYPASS=1` works only when `NODE_ENV=development` (acts as the first member by
+  email).
+- **Cron:** `/api/cron/maintenance` requires `Authorization: Bearer ${CRON_SECRET}` (Vercel Cron,
+  `web/vercel.json`, daily 11:17 UTC).
+- **Latency middleware:** every request logs `api_request {route, method, status, latencyMs,
+  scope}` (source `api`); a telemetry failure never fails the request.
 
 ### 3.2 Routes (v1)
 
 | Method & path | Scope | Purpose |
 |---|---|---|
 | `GET /api/grocery/cycle/current` | agent | Current non-closed cycle (or null) |
-| `POST /api/grocery/cycle/open` | agent | Open a new cycle (idempotent per week); body: `discord_thread_id` |
-| `POST /api/grocery/cycle/{id}/overrides` | agent | add/skip/qty/product; free-text adds allowed |
-| `POST /api/grocery/cycle/{id}/status` | agent | `skipped` / `other_store` / `closed` with reason |
+| `POST /api/grocery/cycle/open` | agent | Open a new cycle (idempotent: returns the active cycle, filling in its thread if the cron opened it); body: `discord_thread_id` |
+| `POST /api/grocery/cycle/{id}/overrides` | agent | add/skip/qty/product; free-text adds allowed; a `product` override that differs from the plan's choice teaches the switch threshold (§4.4) |
+| `POST /api/grocery/cycle/{id}/status` | agent | §4.7 transitions: `nudged` / `building` (→ `skipped` if away) / `ready` / `skipped` / `other_store` / `closed`, optional reason; invalid → 409 |
 | `GET /api/grocery/checkin` | agent | Friday nudge lists: likely_needed, please_check, freezer, pending_review_count |
 | `GET /api/predictions?cycle_id=` | agent | Cart plan: lines with item, qty, candidate products, `needs_price_check` |
 | `POST /api/grocery/price-quotes` | agent | Agent-observed prices for candidates |
 | `GET /api/grocery/cycle/{id}/cart` | agent | Final cart lines (product chosen, reason text) after quotes |
-| `POST /api/grocery/cycle/{id}/cart-result` | agent | Per-line injection outcome (tier1/tier2/failed) |
+| `POST /api/grocery/cycle/{id}/cart-result` | agent | Per-line injection outcome (tier1/tier2/failed), vendors, order ids; an open/building cycle becomes `ready` |
 | `GET /api/items/lookup?q=` | agent | "Do we have X?" — matches + estimate + confidence text |
-| `POST /api/inventory/events` | agent | Observations, manual purchases, consumed, moved ("froze the chicken") |
+| `POST /api/inventory/events` | agent | Counts (`observed`), `critical` flags, `consumed` ("we're out"), `discarded`, `moved` ("froze the chicken"), text purchases (`acquired` → a manual receipt through `applyReceipt`) |
 | `GET /api/freezer/aging?limit=` | agent | Oldest freezer stock |
-| `POST /api/away-periods` | agent | Create away period |
+| `POST /api/away-periods` | agent | Create away period (re-projects `inventory_state`) |
+| `POST /api/products/{id}/reject` | agent | "Never buy X": stance `rejected` + `reject` preference event |
 | `GET /api/receipts/cursor?account=` | agent | Last ingested `external_order_id`/date for a member's account |
 | `POST /api/receipts/ingest` | agent | Digital/manual receipt JSON → resolve, apply, EMA |
 | `POST /api/media/upload-url` | agent | R2 presigned PUT for a new media key |
 | `POST /api/jobs` | agent | Create audit job |
 | `GET /api/jobs/notifications` | agent | Completed/failed jobs not yet replied to in Discord |
 | `POST /api/jobs/{id}/notified` | agent | Mark reply sent |
-| `POST /api/jobs/claim` | worker | Lease next queued job (+ presigned GET URLs) |
-| `POST /api/jobs/complete` | worker | Result or failure for a claimed job |
+| `POST /api/jobs/claim` | worker | Lease next queued job (+ presigned media GET and keyframe PUT URLs); `{job: null}` when empty |
+| `POST /api/jobs/complete` | worker | Result or failure for the claimed attempt (`attempt` echoed; stale → 409) |
 | `POST /api/telemetry` | agent, worker | Telemetry events (batched) |
 | `GET /api/diagnostics/weekly?week=` | agent | Rendered Markdown + JSONL extracts |
-| `GET /api/cron/maintenance` | cron | Expire review items, purge idempotency/telemetry, release stale leases |
+| `GET /api/cron/maintenance` | cron | Expire review items, shelf-life discards, release stale leases, purge idempotency/telemetry, open an overdue cycle |
 
 UI mutations use server actions that call the same domain functions as the routes.
 
@@ -346,6 +377,17 @@ the next cycle (min 1): `ceil((cartCoverDays / ema − on_hand) / unit_quantity)
 7; static (or no EMA yet) → 1 purchase unit unless overridden. A line with no candidate product is
 sized in base units. Overrides apply in order; a `product` override re-sizes the line for the new
 pack unless a human set the quantity; `add` / `qty` on an unflagged item inserts it.
+
+**Check-in lists** (`GET /api/grocery/checkin`, PRD §4.1): *likely needed* = plan lines with a
+restock reason; *please check* = items not in the plan (nor skipped) whose runout is within
+`lowWithinDays + checkin.pleaseCheckMarginDays` (4) days, or that have an `audit_hint` and no count
+in `checkin.staleVerifiedDays` (21) — near-runout first, capped at `checkin.pleaseCheckMax` (6);
+*freezer* = the `checkin.freezerOldest` (3) oldest freezer rows with stock (by `frozen_at`, else
+anchor time). The please-check ids are stored in `cart_result` when the cart is built (review
+impact, §4.6). **Lookup** (`GET /api/items/lookup`): canonical names by token-set score
+≥ `lookup.minScore` (top `lookup.maxResults`), each with its estimate and a one-line answer —
+high confidence after a count within `lookup.freshVerifiedDays`, medium after a confirmed
+purchase or an older count, low otherwise (`web/lib/domain/lookup.ts`).
 
 ### 4.4 Product choice
 
@@ -464,20 +506,36 @@ unless its build time has passed or its label is taken, then the next free week.
    from text + image; asks once if ambiguous.
 2. Agent → `POST /api/media/upload-url` → PUT bytes to R2 (`media/{yyyy}/{mm}/{ulid}.{ext}`).
 3. Agent → `POST /api/jobs` with type, key, actor, Discord message/channel, current cycle.
-4. Worker loop (every 10s): `POST /api/jobs/claim` → lease 5 min, `attempts += 1`.
+4. Worker loop (every 10s): `POST /api/jobs/claim` → lease 5 min (`jobs.leaseMinutes`),
+   `attempts += 1`; the response carries `attempt`, a presigned media GET and
+   `jobs.maxKeyframes` presigned keyframe PUTs (`jobs.presignSeconds` = 900).
    Download via presigned GET, normalize (EXIF rotate, resize to ≤ 2048px), save keyframe(s) to
    `keyframes/{job_id}/{n}.jpg` (R2), call Ollama with the versioned prompt from
    `worker/prompts/{job_type}.v{N}.md`, validate JSON against the contract, post
    `POST /api/jobs/complete`.
-   Failures post `{status: failed, error}`; after 3 attempts the job is `failed` and a review item
-   is created. Expired leases return to `queued`.
-5. App applies results (§4.5 / Trash Cam → `consumed` event provisional if confidence ≥ 0.8 and
-   item resolved; else a `trash_cam` review item).
-6. Agent polls `GET /api/jobs/notifications` and replies in a thread under the original message.
+   Failures post `{status: failed, error}` (an invalid result counts as a failure); after 3
+   attempts (`jobs.maxAttempts`) the job is `failed` and a `failed_job` review item is created.
+   Expired leases return to `queued` (on claim and in the daily cron) — except a lease that
+   expires on the last attempt, which fails the job. `complete` must echo the current `attempt`:
+   a late result from an expired lease is a 409.
+5. App applies results in the same transaction as `complete` (`web/lib/services/jobs.ts`):
+   paper receipt → `applyReceipt` (vendor = store name slug, e.g. `WHOLE FOODS MARKET` →
+   `wholefoods`; acquired at local noon of the receipt date; deduped like any paper receipt);
+   Trash Cam → the most confident detection, if ≥ `trashCam.applyConfidence` (0.8) and its name
+   fuzzy-matches an item (paper-line rule), becomes a provisional `consumed` event at the job's
+   creation time; else a `trash_cam` review item; merge-suggest → one `merge_suggestion` review per
+   suggestion.
+6. Agent polls `GET /api/jobs/notifications` (finished jobs with a Discord message and no
+   `notified_at`, each with a one-line `summary`), replies in a thread under the original
+   message, then `POST /api/jobs/{id}/notified`.
 
 **Paper receipt prompt contract:** transcribe only — `{store, date, lines:[{raw_text, qty,
-unit_price, line_total}], subtotal, tax, total}`. The worker runs the totals check
-(`|Σ line_total − subtotal| ≤ 2¢`) and reports it.
+unit_price, line_total}], subtotal, tax, total}`. The worker converts money to cents, runs the
+totals check (`|Σ line_total − subtotal| ≤ 2¢`) and posts contract `PaperReceiptResult`
+(`{store, date, lines:[{raw_text, qty, unit_price_cents, line_total_cents}], subtotal_cents,
+tax_cents, total_cents, totals_check}`). The receipt row's `totals_check` is the app's own exact
+check; the worker's is kept in `job_finished` telemetry. Trash Cam posts `TrashCamResult`
+(`{detections:[{name, confidence, bbox?}]}`); merge-suggest posts `MergeSuggestResult`.
 
 **Retention (R2 lifecycle rules):** `media/` videos 90 days (v1.1); photos and `keyframes/`
 indefinitely.
@@ -528,6 +586,18 @@ receipt_line_match, preference events, shelf-life presumed discards, review expi
 questions asked by agent). Domain functions return these payloads (`metric` + fields); the API
 layer emits them.
 
+`system_telemetry.source` is `state_engine` (services/domain), `api` (latency middleware), `cron`
+(maintenance) or the posting client (`agent`, `worker`). State Engine metrics: `api_request`,
+the `ReceiptEffects` metrics (with `receiptId`, `vendor`), `estimate_vs_observed {itemId, item,
+location, estimated, observed, error}`, `preference_event`, `cart_line_result {cycleId, itemId,
+productId, vendor, outcome, error}`, `cycle_opened`, `cycle_transition`, `job_created`,
+`job_finished {jobType, outcome, attempts, model, promptVersion, …}`, `job_lease_expired`,
+`review_expired {reviewId, kind, action}`, `presumed_discarded`, `maintenance_run`,
+`settings_rejected {keys}`. The report reads these client metrics (payload fields it uses):
+`vlm_inference {model, prompt_version, latency_ms, totals_check, parse_failure}`,
+`vlm_parse_failure`, `selector_error {selector, error}`, `price_lookup_failed`,
+`cart_tier1_line`, `clarifying_question {question}`.
+
 **Weekly report** — rendered by the app (`web/lib/diagnostics/`), written by the agent to
 `/diagnostics/YYYY-Www.md` with extracts in `/diagnostics/YYYY-Www/*.jsonl`. Fixed sections, each
 *metrics → notable examples → suggested investigation*:
@@ -540,6 +610,13 @@ layer emits them.
 6. Cart injection (tier-1 success, tier-2 fallbacks, failures with selector/error)
 7. UX friction (expired items, clarifying questions, slow routes)
 8. Data appendix (extract paths, keyframe R2 keys)
+
+`GET /api/diagnostics/weekly?week=` (default: the last complete household-TZ ISO week) returns
+`{week, markdown, extracts:[{name, jsonl}]}`; extracts are `velocity`, `receipt_lines`, `vlm`,
+`product_choice`, `cart_injection`, `ux` (`.jsonl`), always present. The summary ranks findings
+(cart failures and tier-1 rate below 90% first, then paper exact-alias rate below 70%, totals-check
+failures and server errors, then overbuys, estimate error, pending lines, failed jobs, overrides,
+then expired reviews and slow routes over `diagnostics.slowRouteMs`) and keeps the top 3.
 
 `/diagnostics` is gitignored. The Claude review playbook lives in [CLAUDE.md](../CLAUDE.md).
 
@@ -565,7 +642,8 @@ Agent tools: `PANDABASE_API_URL`, `AGENT_API_TOKEN`, `PANDABASE_CONFIG`.
 ```
 /web            Next.js app (UI, API, domain logic)        pnpm workspace
 /db             @pandabase/db: Drizzle schema, migrations, seed   pnpm workspace
-/contracts      openapi.json (generated)
+/contracts      openapi.json (generated by scripts/gen-contracts.ts)
+/scripts        repo-level scripts (contract generation)
 /worker         Python worker (uv) + Dockerfile + prompts/
 /agent/skills   OpenClaw SKILL.md folders
 /agent/tools    Python tools (uv)
@@ -604,3 +682,6 @@ docker-compose.yml, Makefile, CLAUDE.md, README.md, .github/workflows/ci.yml
 | 24 | Invariants as DB constraints (enum/bool/JSON CHECKs, partial uniques); drizzle-kit migrations, schema drift checked in CI | A backstop under domain code; one active cycle / one cart account can't be violated by a buggy caller |
 | 25 | Domain functions return effects; repositories only read | Business rules testable without a DB; M4 commits each operation in one transaction |
 | 26 | EMA learns from provisional acquisitions; product preference only from confirmed lines | Paper receipts are mostly provisional and EMA has an outlier guard; a wrong product match would teach the wrong brand |
+| 27 | One route table (`web/lib/contracts/routes.ts`) drives handlers and the OpenAPI document; orchestration in `web/lib/services` | Scopes, idempotency and contracts can't drift between code and docs; server actions (M5) reuse the same services |
+| 28 | Snake_case wire format; Pydantic models generated from OpenAPI 3.1 with nullable unions flattened | Python clients read naturally; generated models stay plain (`str \| None`, no wrapper root models) |
+| 29 | Text purchases become manual receipts | One `applyReceipt` path, so velocity, overbuy and product stats learn from "bought milk" too |

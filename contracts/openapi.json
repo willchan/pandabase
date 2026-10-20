@@ -1,0 +1,4854 @@
+{
+  "components": {
+    "schemas": {
+      "AwayPeriod": {
+        "properties": {
+          "ends_on": {
+            "format": "date",
+            "type": "string"
+          },
+          "id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          },
+          "note": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "starts_on": {
+            "format": "date",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "starts_on",
+          "ends_on",
+          "note"
+        ],
+        "type": "object"
+      },
+      "AwayPeriodRequest": {
+        "properties": {
+          "actor_discord_id": {
+            "maxLength": 32,
+            "minLength": 1,
+            "type": "string"
+          },
+          "ends_on": {
+            "format": "date",
+            "type": "string"
+          },
+          "note": {
+            "maxLength": 200,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "starts_on": {
+            "format": "date",
+            "type": "string"
+          }
+        },
+        "required": [
+          "actor_discord_id",
+          "starts_on",
+          "ends_on"
+        ],
+        "type": "object"
+      },
+      "AwayPeriodResponse": {
+        "properties": {
+          "away_period": {
+            "$ref": "#/components/schemas/AwayPeriod"
+          }
+        },
+        "required": [
+          "away_period"
+        ],
+        "type": "object"
+      },
+      "CartLine": {
+        "properties": {
+          "free_text": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "item_id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "product": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ProductRef"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "quantity": {
+            "type": "number"
+          },
+          "reason_text": {
+            "type": "string"
+          },
+          "switched": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "item_id",
+          "name",
+          "free_text",
+          "product",
+          "quantity",
+          "reason_text",
+          "switched"
+        ],
+        "type": "object"
+      },
+      "CartResponse": {
+        "properties": {
+          "cycle_id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          },
+          "lines": {
+            "items": {
+              "$ref": "#/components/schemas/CartLine"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "cycle_id",
+          "lines"
+        ],
+        "type": "object"
+      },
+      "CartResult": {
+        "properties": {
+          "lines": {
+            "items": {
+              "$ref": "#/components/schemas/CartResultLine"
+            },
+            "type": "array"
+          },
+          "order_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "please_check_item_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "recorded_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "vendors": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "vendors",
+          "order_ids",
+          "lines",
+          "please_check_item_ids",
+          "recorded_at"
+        ],
+        "type": "object"
+      },
+      "CartResultLine": {
+        "properties": {
+          "asin": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "free_text": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "item_id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "outcome": {
+            "enum": [
+              "tier1",
+              "tier2",
+              "failed"
+            ],
+            "type": "string"
+          },
+          "product_id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "quantity": {
+            "exclusiveMinimum": 0,
+            "type": "number"
+          }
+        },
+        "required": [
+          "item_id",
+          "product_id",
+          "quantity",
+          "outcome"
+        ],
+        "type": "object"
+      },
+      "CartResultRequest": {
+        "properties": {
+          "lines": {
+            "items": {
+              "$ref": "#/components/schemas/CartResultLine"
+            },
+            "maxItems": 500,
+            "type": "array"
+          },
+          "order_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "vendors": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "lines"
+        ],
+        "type": "object"
+      },
+      "CartResultResponse": {
+        "properties": {
+          "cycle": {
+            "$ref": "#/components/schemas/Cycle"
+          }
+        },
+        "required": [
+          "cycle"
+        ],
+        "type": "object"
+      },
+      "CheckinItem": {
+        "properties": {
+          "audit_hint": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "base_unit": {
+            "type": "string"
+          },
+          "item_id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "on_hand": {
+            "type": "number"
+          },
+          "reason": {
+            "enum": [
+              "runout",
+              "critical",
+              "consumed",
+              "static_threshold",
+              "near_runout",
+              "audit_hint"
+            ],
+            "type": "string"
+          },
+          "runout_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "$ref": "#/components/schemas/InventoryStatus"
+          }
+        },
+        "required": [
+          "item_id",
+          "name",
+          "base_unit",
+          "on_hand",
+          "status",
+          "runout_at",
+          "reason",
+          "audit_hint"
+        ],
+        "type": "object"
+      },
+      "CheckinResponse": {
+        "properties": {
+          "cycle_id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "freezer": {
+            "items": {
+              "$ref": "#/components/schemas/FreezerItem"
+            },
+            "type": "array"
+          },
+          "likely_needed": {
+            "items": {
+              "$ref": "#/components/schemas/CheckinItem"
+            },
+            "type": "array"
+          },
+          "pending_review_count": {
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "please_check": {
+            "items": {
+              "$ref": "#/components/schemas/CheckinItem"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "cycle_id",
+          "likely_needed",
+          "please_check",
+          "freezer",
+          "pending_review_count"
+        ],
+        "type": "object"
+      },
+      "ClaimedJob": {
+        "properties": {
+          "attempt": {
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "expected_state_snapshot": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          },
+          "input": {
+            "additionalProperties": {},
+            "propertyNames": {
+              "type": "string"
+            },
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "job_type": {
+            "$ref": "#/components/schemas/JobType"
+          },
+          "keyframe_uploads": {
+            "items": {
+              "properties": {
+                "key": {
+                  "type": "string"
+                },
+                "url": {
+                  "format": "uri",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "key",
+                "url"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "lease_expires_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "media_r2_key": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "media_url": {
+            "format": "uri",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "job_type",
+          "attempt",
+          "lease_expires_at",
+          "media_r2_key",
+          "media_url",
+          "input",
+          "expected_state_snapshot",
+          "keyframe_uploads"
+        ],
+        "type": "object"
+      },
+      "Cycle": {
+        "properties": {
+          "built_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "cart_result": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CartResult"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "close_reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "closed_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "discord_thread_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          },
+          "nudge_sent_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "opened_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/CycleStatus"
+          },
+          "week_label": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "week_label",
+          "status",
+          "discord_thread_id",
+          "opened_at",
+          "nudge_sent_at",
+          "built_at",
+          "closed_at",
+          "close_reason",
+          "cart_result"
+        ],
+        "type": "object"
+      },
+      "CycleCurrentResponse": {
+        "properties": {
+          "cycle": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Cycle"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "cycle"
+        ],
+        "type": "object"
+      },
+      "CycleOpenRequest": {
+        "properties": {
+          "discord_thread_id": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "discord_thread_id"
+        ],
+        "type": "object"
+      },
+      "CycleOpenResponse": {
+        "properties": {
+          "created": {
+            "type": "boolean"
+          },
+          "cycle": {
+            "$ref": "#/components/schemas/Cycle"
+          }
+        },
+        "required": [
+          "cycle",
+          "created"
+        ],
+        "type": "object"
+      },
+      "CycleOverride": {
+        "properties": {
+          "actor_member_id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "cycle_id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          },
+          "free_text": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          },
+          "item_id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "kind": {
+            "$ref": "#/components/schemas/OverrideKind"
+          },
+          "product_id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "quantity": {
+            "type": [
+              "number",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "cycle_id",
+          "kind",
+          "item_id",
+          "free_text",
+          "quantity",
+          "product_id",
+          "actor_member_id",
+          "created_at"
+        ],
+        "type": "object"
+      },
+      "CycleOverrideRequest": {
+        "properties": {
+          "actor_discord_id": {
+            "maxLength": 32,
+            "minLength": 1,
+            "type": "string"
+          },
+          "free_text": {
+            "maxLength": 200,
+            "minLength": 1,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "item_id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "kind": {
+            "$ref": "#/components/schemas/OverrideKind"
+          },
+          "product_id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "quantity": {
+            "exclusiveMinimum": 0,
+            "type": [
+              "number",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "actor_discord_id",
+          "kind"
+        ],
+        "type": "object"
+      },
+      "CycleOverrideResponse": {
+        "properties": {
+          "override": {
+            "$ref": "#/components/schemas/CycleOverride"
+          }
+        },
+        "required": [
+          "override"
+        ],
+        "type": "object"
+      },
+      "CycleStatus": {
+        "enum": [
+          "open",
+          "building",
+          "ready",
+          "closed",
+          "skipped",
+          "other_store"
+        ],
+        "type": "string"
+      },
+      "CycleStatusRequest": {
+        "properties": {
+          "actor_discord_id": {
+            "maxLength": 32,
+            "minLength": 1,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "reason": {
+            "maxLength": 200,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "enum": [
+              "nudged",
+              "building",
+              "ready",
+              "skipped",
+              "other_store",
+              "closed"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "type": "object"
+      },
+      "CycleStatusResponse": {
+        "properties": {
+          "changed": {
+            "type": "boolean"
+          },
+          "cycle": {
+            "$ref": "#/components/schemas/Cycle"
+          }
+        },
+        "required": [
+          "cycle",
+          "changed"
+        ],
+        "type": "object"
+      },
+      "DiagnosticsQuery": {
+        "properties": {
+          "week": {
+            "pattern": "^\\d{4}-W\\d{2}$",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "DiagnosticsResponse": {
+        "properties": {
+          "extracts": {
+            "items": {
+              "properties": {
+                "jsonl": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "name",
+                "jsonl"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "markdown": {
+            "type": "string"
+          },
+          "week": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "week",
+          "markdown",
+          "extracts"
+        ],
+        "type": "object"
+      },
+      "EmptyRequest": {
+        "properties": {},
+        "type": "object"
+      },
+      "ErrorResponse": {
+        "properties": {
+          "details": {},
+          "error": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "type": "object"
+      },
+      "FreezerAgingQuery": {
+        "properties": {
+          "limit": {
+            "maximum": 50,
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "FreezerAgingResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/FreezerItem"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
+      "FreezerItem": {
+        "properties": {
+          "base_unit": {
+            "type": "string"
+          },
+          "frozen_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "item_id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "quantity": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "item_id",
+          "name",
+          "base_unit",
+          "quantity",
+          "frozen_at"
+        ],
+        "type": "object"
+      },
+      "InventoryEventInput": {
+        "properties": {
+          "item_id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "observed",
+              "critical",
+              "consumed",
+              "discarded",
+              "moved",
+              "acquired"
+            ],
+            "type": "string"
+          },
+          "location": {
+            "$ref": "#/components/schemas/Location"
+          },
+          "occurred_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "product_id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "quantity": {
+            "minimum": 0,
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "source": {
+            "enum": [
+              "manual",
+              "checkin"
+            ],
+            "type": "string"
+          },
+          "to_location": {
+            "$ref": "#/components/schemas/Location"
+          },
+          "vendor": {
+            "maxLength": 40,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "item_id",
+          "kind"
+        ],
+        "type": "object"
+      },
+      "InventoryEventsRequest": {
+        "properties": {
+          "actor_discord_id": {
+            "maxLength": 32,
+            "minLength": 1,
+            "type": "string"
+          },
+          "events": {
+            "items": {
+              "$ref": "#/components/schemas/InventoryEventInput"
+            },
+            "maxItems": 50,
+            "minItems": 1,
+            "type": "array"
+          }
+        },
+        "required": [
+          "actor_discord_id",
+          "events"
+        ],
+        "type": "object"
+      },
+      "InventoryEventsResponse": {
+        "properties": {
+          "estimates": {
+            "items": {
+              "$ref": "#/components/schemas/ItemEstimate"
+            },
+            "type": "array"
+          },
+          "event_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "receipt_id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "event_ids",
+          "receipt_id",
+          "estimates"
+        ],
+        "type": "object"
+      },
+      "InventoryStatus": {
+        "enum": [
+          "out",
+          "low",
+          "stocked",
+          "unknown",
+          "critical",
+          "consumed"
+        ],
+        "type": "string"
+      },
+      "ItemEstimate": {
+        "properties": {
+          "item_id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          },
+          "on_hand": {
+            "type": "number"
+          },
+          "runout_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "$ref": "#/components/schemas/InventoryStatus"
+          }
+        },
+        "required": [
+          "item_id",
+          "on_hand",
+          "status",
+          "runout_at"
+        ],
+        "type": "object"
+      },
+      "Job": {
+        "properties": {
+          "attempts": {
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "completed_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "cycle_id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "discord_channel_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "discord_message_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          },
+          "job_type": {
+            "enum": [
+              "paper_receipt",
+              "trash_cam",
+              "merge_suggest",
+              "storage_audit"
+            ],
+            "type": "string"
+          },
+          "media_r2_key": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "notified_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "$ref": "#/components/schemas/JobStatus"
+          }
+        },
+        "required": [
+          "id",
+          "job_type",
+          "status",
+          "media_r2_key",
+          "attempts",
+          "error",
+          "cycle_id",
+          "discord_channel_id",
+          "discord_message_id",
+          "created_at",
+          "completed_at",
+          "notified_at"
+        ],
+        "type": "object"
+      },
+      "JobClaimRequest": {
+        "properties": {
+          "job_types": {
+            "items": {
+              "$ref": "#/components/schemas/JobType"
+            },
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
+      "JobClaimResponse": {
+        "properties": {
+          "job": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ClaimedJob"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "job"
+        ],
+        "type": "object"
+      },
+      "JobCompleteRequest": {
+        "properties": {
+          "attempt": {
+            "maximum": 9007199254740991,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "error": {
+            "maxLength": 2000,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "job_id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          },
+          "keyframe_r2_keys": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 32,
+            "type": "array"
+          },
+          "model": {
+            "maxLength": 100,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "prompt_version": {
+            "maxLength": 100,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "raw_model_response": {},
+          "result": {
+            "additionalProperties": {},
+            "propertyNames": {
+              "type": "string"
+            },
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "status": {
+            "enum": [
+              "completed",
+              "failed"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "job_id",
+          "attempt",
+          "status"
+        ],
+        "type": "object"
+      },
+      "JobCompleteResponse": {
+        "properties": {
+          "job": {
+            "$ref": "#/components/schemas/Job"
+          },
+          "outcome": {
+            "enum": [
+              "applied",
+              "review",
+              "retry",
+              "failed"
+            ],
+            "type": "string"
+          },
+          "receipt_id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "review_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "job",
+          "outcome",
+          "receipt_id",
+          "review_ids"
+        ],
+        "type": "object"
+      },
+      "JobCreateRequest": {
+        "properties": {
+          "actor_discord_id": {
+            "maxLength": 32,
+            "minLength": 1,
+            "type": "string"
+          },
+          "cycle_id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "discord_channel_id": {
+            "maxLength": 32,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "discord_message_id": {
+            "maxLength": 32,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "input": {
+            "additionalProperties": {},
+            "propertyNames": {
+              "type": "string"
+            },
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "job_type": {
+            "$ref": "#/components/schemas/JobType"
+          },
+          "media_r2_key": {
+            "maxLength": 200,
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "actor_discord_id",
+          "job_type"
+        ],
+        "type": "object"
+      },
+      "JobNotification": {
+        "properties": {
+          "job": {
+            "$ref": "#/components/schemas/Job"
+          },
+          "receipt_id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "review_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "summary": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "job",
+          "summary",
+          "receipt_id",
+          "review_ids"
+        ],
+        "type": "object"
+      },
+      "JobNotificationsResponse": {
+        "properties": {
+          "notifications": {
+            "items": {
+              "$ref": "#/components/schemas/JobNotification"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "notifications"
+        ],
+        "type": "object"
+      },
+      "JobResponse": {
+        "properties": {
+          "job": {
+            "$ref": "#/components/schemas/Job"
+          }
+        },
+        "required": [
+          "job"
+        ],
+        "type": "object"
+      },
+      "JobStatus": {
+        "enum": [
+          "queued",
+          "claimed",
+          "completed",
+          "failed"
+        ],
+        "type": "string"
+      },
+      "JobType": {
+        "enum": [
+          "paper_receipt",
+          "trash_cam",
+          "merge_suggest"
+        ],
+        "type": "string"
+      },
+      "Location": {
+        "enum": [
+          "fridge",
+          "freezer",
+          "pantry",
+          "bathroom",
+          "utility",
+          "garden",
+          "garage"
+        ],
+        "type": "string"
+      },
+      "LookupMatch": {
+        "properties": {
+          "base_unit": {
+            "type": "string"
+          },
+          "by_location": {
+            "items": {
+              "properties": {
+                "location": {
+                  "$ref": "#/components/schemas/Location"
+                },
+                "on_hand": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "location",
+                "on_hand"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "confidence": {
+            "enum": [
+              "high",
+              "medium",
+              "low"
+            ],
+            "type": "string"
+          },
+          "item_id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "on_hand": {
+            "type": "number"
+          },
+          "runout_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "score": {
+            "type": "number"
+          },
+          "status": {
+            "$ref": "#/components/schemas/InventoryStatus"
+          },
+          "text": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "item_id",
+          "name",
+          "score",
+          "base_unit",
+          "on_hand",
+          "status",
+          "runout_at",
+          "confidence",
+          "text",
+          "by_location"
+        ],
+        "type": "object"
+      },
+      "LookupQuery": {
+        "properties": {
+          "q": {
+            "maxLength": 100,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "q"
+        ],
+        "type": "object"
+      },
+      "LookupResponse": {
+        "properties": {
+          "matches": {
+            "items": {
+              "$ref": "#/components/schemas/LookupMatch"
+            },
+            "type": "array"
+          },
+          "query": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "query",
+          "matches"
+        ],
+        "type": "object"
+      },
+      "MaintenanceResponse": {
+        "properties": {
+          "expired_reviews": {
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "failed_jobs": {
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "opened_cycle_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "presumed_discards": {
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "purged_idempotency_keys": {
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "purged_telemetry": {
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "released_leases": {
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "expired_reviews",
+          "released_leases",
+          "failed_jobs",
+          "presumed_discards",
+          "purged_idempotency_keys",
+          "purged_telemetry",
+          "opened_cycle_id"
+        ],
+        "type": "object"
+      },
+      "MatchMethod": {
+        "enum": [
+          "asin",
+          "alias_exact",
+          "fuzzy",
+          "manual",
+          "none"
+        ],
+        "type": "string"
+      },
+      "MergeSuggestResult": {
+        "properties": {
+          "suggestions": {
+            "items": {
+              "properties": {
+                "confidence": {
+                  "maximum": 1,
+                  "minimum": 0,
+                  "type": "number"
+                },
+                "item_id": {
+                  "maxLength": 64,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "merge_into_item_id": {
+                  "maxLength": 64,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "reason": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "item_id",
+                "merge_into_item_id",
+                "confidence"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "suggestions"
+        ],
+        "type": "object"
+      },
+      "OverrideKind": {
+        "enum": [
+          "add",
+          "skip",
+          "qty",
+          "product"
+        ],
+        "type": "string"
+      },
+      "PaperReceiptResult": {
+        "properties": {
+          "date": {
+            "format": "date",
+            "type": "string"
+          },
+          "lines": {
+            "items": {
+              "properties": {
+                "line_total_cents": {
+                  "maximum": 9007199254740991,
+                  "minimum": 0,
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                },
+                "qty": {
+                  "exclusiveMinimum": 0,
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "raw_text": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "unit_price_cents": {
+                  "maximum": 9007199254740991,
+                  "minimum": 0,
+                  "type": [
+                    "integer",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "raw_text",
+                "qty",
+                "unit_price_cents",
+                "line_total_cents"
+              ],
+              "type": "object"
+            },
+            "maxItems": 300,
+            "type": "array"
+          },
+          "store": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "subtotal_cents": {
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "tax_cents": {
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "total_cents": {
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "totals_check": {
+            "enum": [
+              "pass",
+              "fail",
+              "n/a"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "store",
+          "date",
+          "lines",
+          "subtotal_cents",
+          "tax_cents",
+          "total_cents",
+          "totals_check"
+        ],
+        "type": "object"
+      },
+      "PlanLine": {
+        "properties": {
+          "base_unit": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "candidates": {
+            "items": {
+              "$ref": "#/components/schemas/ProductRef"
+            },
+            "type": "array"
+          },
+          "choice_reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "free_text": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "item_id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "needs_price_check": {
+            "type": "boolean"
+          },
+          "overrides": {
+            "items": {
+              "$ref": "#/components/schemas/OverrideKind"
+            },
+            "type": "array"
+          },
+          "product": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ProductRef"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "quantity": {
+            "type": "number"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RestockReason"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "item_id",
+          "name",
+          "free_text",
+          "base_unit",
+          "quantity",
+          "reason",
+          "overrides",
+          "product",
+          "candidates",
+          "needs_price_check",
+          "choice_reason"
+        ],
+        "type": "object"
+      },
+      "PredictionsQuery": {
+        "properties": {
+          "cycle_id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "PredictionsResponse": {
+        "properties": {
+          "cycle_id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "generated_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "lines": {
+            "items": {
+              "$ref": "#/components/schemas/PlanLine"
+            },
+            "type": "array"
+          },
+          "needs_price_check_item_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "skipped_item_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "cycle_id",
+          "generated_at",
+          "lines",
+          "skipped_item_ids",
+          "needs_price_check_item_ids"
+        ],
+        "type": "object"
+      },
+      "PriceQuotesRequest": {
+        "properties": {
+          "cycle_id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          },
+          "quotes": {
+            "items": {
+              "properties": {
+                "observed_at": {
+                  "format": "date-time",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "price_cents": {
+                  "maximum": 9007199254740991,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "product_id": {
+                  "maxLength": 64,
+                  "minLength": 1,
+                  "type": "string"
+                }
+              },
+              "required": [
+                "product_id",
+                "price_cents"
+              ],
+              "type": "object"
+            },
+            "maxItems": 200,
+            "minItems": 1,
+            "type": "array"
+          }
+        },
+        "required": [
+          "cycle_id",
+          "quotes"
+        ],
+        "type": "object"
+      },
+      "PriceQuotesResponse": {
+        "properties": {
+          "accepted": {
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "accepted"
+        ],
+        "type": "object"
+      },
+      "ProductRef": {
+        "properties": {
+          "asin": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          },
+          "last_price_cents": {
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "quote_cents": {
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "stance": {
+            "enum": [
+              "preferred",
+              "acceptable",
+              "rejected"
+            ],
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "unit_quantity": {
+            "type": "number"
+          },
+          "vendor": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "vendor",
+          "asin",
+          "title",
+          "unit_quantity",
+          "stance",
+          "last_price_cents",
+          "quote_cents"
+        ],
+        "type": "object"
+      },
+      "ProductRejectRequest": {
+        "properties": {
+          "actor_discord_id": {
+            "maxLength": 32,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "actor_discord_id"
+        ],
+        "type": "object"
+      },
+      "ProductRejectResponse": {
+        "properties": {
+          "changed": {
+            "type": "boolean"
+          },
+          "item_id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          },
+          "product_id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          },
+          "stance": {
+            "const": "rejected",
+            "type": "string"
+          }
+        },
+        "required": [
+          "product_id",
+          "item_id",
+          "stance",
+          "changed"
+        ],
+        "type": "object"
+      },
+      "ReceiptCursorQuery": {
+        "properties": {
+          "account": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "account"
+        ],
+        "type": "object"
+      },
+      "ReceiptCursorResponse": {
+        "properties": {
+          "account_member_id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          },
+          "acquired_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "external_order_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "ordered_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "account_member_id",
+          "external_order_id",
+          "acquired_at",
+          "ordered_at"
+        ],
+        "type": "object"
+      },
+      "ReceiptIngestRequest": {
+        "properties": {
+          "account": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "acquired_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "actor_discord_id": {
+            "maxLength": 32,
+            "minLength": 1,
+            "type": "string"
+          },
+          "external_order_id": {
+            "maxLength": 100,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "fulfillment": {
+            "enum": [
+              "delivery",
+              "pickup",
+              "in_store",
+              "unknown"
+            ],
+            "type": "string"
+          },
+          "lines": {
+            "items": {
+              "$ref": "#/components/schemas/ReceiptLineIn"
+            },
+            "maxItems": 300,
+            "type": "array"
+          },
+          "ordered_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "source": {
+            "enum": [
+              "digital",
+              "manual"
+            ],
+            "type": "string"
+          },
+          "subtotal_cents": {
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "total_cents": {
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "vendor": {
+            "maxLength": 40,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "actor_discord_id",
+          "source",
+          "vendor",
+          "acquired_at",
+          "lines"
+        ],
+        "type": "object"
+      },
+      "ReceiptIngestResponse": {
+        "properties": {
+          "closed_cycle_id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "duplicate": {
+            "type": "boolean"
+          },
+          "lines": {
+            "items": {
+              "$ref": "#/components/schemas/ReceiptLineOut"
+            },
+            "type": "array"
+          },
+          "new_item_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "receipt_id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          },
+          "review_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "status": {
+            "enum": [
+              "applied",
+              "pending_review",
+              "partial"
+            ],
+            "type": "string"
+          },
+          "totals_check": {
+            "enum": [
+              "pass",
+              "fail",
+              "n/a"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "receipt_id",
+          "duplicate",
+          "status",
+          "totals_check",
+          "lines",
+          "new_item_ids",
+          "review_ids",
+          "closed_cycle_id"
+        ],
+        "type": "object"
+      },
+      "ReceiptLineIn": {
+        "properties": {
+          "asin": {
+            "maxLength": 20,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "item_id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "line_total_cents": {
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "product_id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "qty": {
+            "exclusiveMinimum": 0,
+            "type": "number"
+          },
+          "raw_text": {
+            "maxLength": 300,
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": {
+            "maxLength": 300,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "unit_price_cents": {
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "raw_text",
+          "qty"
+        ],
+        "type": "object"
+      },
+      "ReceiptLineOut": {
+        "properties": {
+          "id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          },
+          "ignored": {
+            "type": "boolean"
+          },
+          "item_id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "match_method": {
+            "$ref": "#/components/schemas/MatchMethod"
+          },
+          "match_score": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "pending": {
+            "type": "boolean"
+          },
+          "product_id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "raw_text": {
+            "type": "string"
+          },
+          "trust": {
+            "enum": [
+              "confirmed",
+              "unverified"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "raw_text",
+          "item_id",
+          "product_id",
+          "match_method",
+          "match_score",
+          "trust",
+          "pending",
+          "ignored"
+        ],
+        "type": "object"
+      },
+      "RestockReason": {
+        "enum": [
+          "runout",
+          "critical",
+          "consumed",
+          "static_threshold"
+        ],
+        "type": "string"
+      },
+      "TelemetryEvent": {
+        "properties": {
+          "metric_type": {
+            "pattern": "^[a-z][a-z0-9_]{0,63}$",
+            "type": "string"
+          },
+          "occurred_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "payload": {
+            "additionalProperties": {},
+            "propertyNames": {
+              "type": "string"
+            },
+            "type": "object"
+          }
+        },
+        "required": [
+          "metric_type",
+          "payload"
+        ],
+        "type": "object"
+      },
+      "TelemetryRequest": {
+        "properties": {
+          "events": {
+            "items": {
+              "$ref": "#/components/schemas/TelemetryEvent"
+            },
+            "maxItems": 500,
+            "minItems": 1,
+            "type": "array"
+          }
+        },
+        "required": [
+          "events"
+        ],
+        "type": "object"
+      },
+      "TelemetryResponse": {
+        "properties": {
+          "accepted": {
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "accepted"
+        ],
+        "type": "object"
+      },
+      "TrashCamResult": {
+        "properties": {
+          "detections": {
+            "items": {
+              "properties": {
+                "bbox": {
+                  "items": {
+                    "type": "number"
+                  },
+                  "maxItems": 4,
+                  "minItems": 4,
+                  "type": [
+                    "array",
+                    "null"
+                  ]
+                },
+                "confidence": {
+                  "maximum": 1,
+                  "minimum": 0,
+                  "type": "number"
+                },
+                "name": {
+                  "minLength": 1,
+                  "type": "string"
+                }
+              },
+              "required": [
+                "name",
+                "confidence"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "detections"
+        ],
+        "type": "object"
+      },
+      "UploadUrlRequest": {
+        "properties": {
+          "content_type": {
+            "pattern": "^(image|video)\\/[\\w.+-]+$",
+            "type": "string"
+          },
+          "ext": {
+            "enum": [
+              "jpg",
+              "jpeg",
+              "png",
+              "webp",
+              "heic",
+              "mp4",
+              "mov"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "content_type",
+          "ext"
+        ],
+        "type": "object"
+      },
+      "UploadUrlResponse": {
+        "properties": {
+          "expires_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "headers": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "propertyNames": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "key": {
+            "type": "string"
+          },
+          "method": {
+            "const": "PUT",
+            "type": "string"
+          },
+          "url": {
+            "format": "uri",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "url",
+          "method",
+          "headers",
+          "expires_at"
+        ],
+        "type": "object"
+      }
+    },
+    "securitySchemes": {
+      "agent": {
+        "description": "AGENT_API_TOKEN",
+        "scheme": "bearer",
+        "type": "http"
+      },
+      "cron": {
+        "description": "CRON_SECRET (Vercel Cron)",
+        "scheme": "bearer",
+        "type": "http"
+      },
+      "worker": {
+        "description": "WORKER_API_TOKEN",
+        "scheme": "bearer",
+        "type": "http"
+      }
+    }
+  },
+  "info": {
+    "description": "Generated from web/lib/contracts by `pnpm contracts:gen` — do not edit. See docs/DESIGN.md §3.",
+    "title": "PandaBase State Engine API",
+    "version": "1"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/api/away-periods": {
+      "post": {
+        "operationId": "createAwayPeriod",
+        "parameters": [
+          {
+            "description": "Replays the stored response for 24h (same key + route + scope).",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "maxLength": 200,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AwayPeriodRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AwayPeriodResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Wrong scope, or unknown actor_discord_id"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict (e.g. invalid cycle transition, stale job attempt)"
+          }
+        },
+        "security": [
+          {
+            "agent": []
+          }
+        ],
+        "summary": "Create an away period",
+        "x-scopes": [
+          "agent"
+        ]
+      }
+    },
+    "/api/cron/maintenance": {
+      "get": {
+        "operationId": "runMaintenance",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MaintenanceResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Wrong scope, or unknown actor_discord_id"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict (e.g. invalid cycle transition, stale job attempt)"
+          }
+        },
+        "security": [
+          {
+            "cron": []
+          }
+        ],
+        "summary": "Expire reviews, shelf-life discards, release stale leases, purge, open overdue cycle",
+        "x-scopes": [
+          "cron"
+        ]
+      }
+    },
+    "/api/diagnostics/weekly": {
+      "get": {
+        "operationId": "getWeeklyDiagnostics",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "week",
+            "required": false,
+            "schema": {
+              "pattern": "^\\d{4}-W\\d{2}$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DiagnosticsResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Wrong scope, or unknown actor_discord_id"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict (e.g. invalid cycle transition, stale job attempt)"
+          }
+        },
+        "security": [
+          {
+            "agent": []
+          }
+        ],
+        "summary": "Rendered weekly Markdown + JSONL extracts",
+        "x-scopes": [
+          "agent"
+        ]
+      }
+    },
+    "/api/freezer/aging": {
+      "get": {
+        "operationId": "getFreezerAging",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "maximum": 50,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FreezerAgingResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Wrong scope, or unknown actor_discord_id"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict (e.g. invalid cycle transition, stale job attempt)"
+          }
+        },
+        "security": [
+          {
+            "agent": []
+          }
+        ],
+        "summary": "Oldest freezer stock",
+        "x-scopes": [
+          "agent"
+        ]
+      }
+    },
+    "/api/grocery/checkin": {
+      "get": {
+        "operationId": "getCheckin",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CheckinResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Wrong scope, or unknown actor_discord_id"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict (e.g. invalid cycle transition, stale job attempt)"
+          }
+        },
+        "security": [
+          {
+            "agent": []
+          }
+        ],
+        "summary": "Friday nudge lists: likely_needed, please_check, freezer, pending_review_count",
+        "x-scopes": [
+          "agent"
+        ]
+      }
+    },
+    "/api/grocery/cycle/current": {
+      "get": {
+        "operationId": "getCurrentCycle",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CycleCurrentResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Wrong scope, or unknown actor_discord_id"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict (e.g. invalid cycle transition, stale job attempt)"
+          }
+        },
+        "security": [
+          {
+            "agent": []
+          }
+        ],
+        "summary": "Current non-closed cycle (or null)",
+        "x-scopes": [
+          "agent"
+        ]
+      }
+    },
+    "/api/grocery/cycle/open": {
+      "post": {
+        "operationId": "openCycle",
+        "parameters": [
+          {
+            "description": "Replays the stored response for 24h (same key + route + scope).",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "maxLength": 200,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CycleOpenRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CycleOpenResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Wrong scope, or unknown actor_discord_id"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict (e.g. invalid cycle transition, stale job attempt)"
+          }
+        },
+        "security": [
+          {
+            "agent": []
+          }
+        ],
+        "summary": "Open a new cycle (idempotent per week; returns the active cycle if there is one)",
+        "x-scopes": [
+          "agent"
+        ]
+      }
+    },
+    "/api/grocery/cycle/{id}/cart": {
+      "get": {
+        "operationId": "getCycleCart",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CartResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Wrong scope, or unknown actor_discord_id"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict (e.g. invalid cycle transition, stale job attempt)"
+          }
+        },
+        "security": [
+          {
+            "agent": []
+          }
+        ],
+        "summary": "Final cart lines (product chosen, reason text) after quotes",
+        "x-scopes": [
+          "agent"
+        ]
+      }
+    },
+    "/api/grocery/cycle/{id}/cart-result": {
+      "post": {
+        "operationId": "postCartResult",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Replays the stored response for 24h (same key + route + scope).",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "maxLength": 200,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CartResultRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CartResultResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Wrong scope, or unknown actor_discord_id"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict (e.g. invalid cycle transition, stale job attempt)"
+          }
+        },
+        "security": [
+          {
+            "agent": []
+          }
+        ],
+        "summary": "Per-line injection outcome (tier1/tier2/failed); a building cycle becomes ready",
+        "x-scopes": [
+          "agent"
+        ]
+      }
+    },
+    "/api/grocery/cycle/{id}/overrides": {
+      "post": {
+        "operationId": "addCycleOverride",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Replays the stored response for 24h (same key + route + scope).",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "maxLength": 200,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CycleOverrideRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CycleOverrideResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Wrong scope, or unknown actor_discord_id"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict (e.g. invalid cycle transition, stale job attempt)"
+          }
+        },
+        "security": [
+          {
+            "agent": []
+          }
+        ],
+        "summary": "add / skip / qty / product override; free-text adds allowed",
+        "x-scopes": [
+          "agent"
+        ]
+      }
+    },
+    "/api/grocery/cycle/{id}/status": {
+      "post": {
+        "operationId": "setCycleStatus",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Replays the stored response for 24h (same key + route + scope).",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "maxLength": 200,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CycleStatusRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CycleStatusResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Wrong scope, or unknown actor_discord_id"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict (e.g. invalid cycle transition, stale job attempt)"
+          }
+        },
+        "security": [
+          {
+            "agent": []
+          }
+        ],
+        "summary": "Advance the cycle: nudged / building / ready / skipped / other_store / closed",
+        "x-scopes": [
+          "agent"
+        ]
+      }
+    },
+    "/api/grocery/price-quotes": {
+      "post": {
+        "operationId": "postPriceQuotes",
+        "parameters": [
+          {
+            "description": "Replays the stored response for 24h (same key + route + scope).",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "maxLength": 200,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PriceQuotesRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PriceQuotesResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Wrong scope, or unknown actor_discord_id"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict (e.g. invalid cycle transition, stale job attempt)"
+          }
+        },
+        "security": [
+          {
+            "agent": []
+          }
+        ],
+        "summary": "Agent-observed prices for candidate products",
+        "x-scopes": [
+          "agent"
+        ]
+      }
+    },
+    "/api/inventory/events": {
+      "post": {
+        "operationId": "postInventoryEvents",
+        "parameters": [
+          {
+            "description": "Replays the stored response for 24h (same key + route + scope).",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "maxLength": 200,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InventoryEventsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InventoryEventsResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Wrong scope, or unknown actor_discord_id"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict (e.g. invalid cycle transition, stale job attempt)"
+          }
+        },
+        "security": [
+          {
+            "agent": []
+          }
+        ],
+        "summary": "Counts, critical flags, consumed, discarded, moved, text purchases",
+        "x-scopes": [
+          "agent"
+        ]
+      }
+    },
+    "/api/items/lookup": {
+      "get": {
+        "operationId": "lookupItems",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "q",
+            "required": true,
+            "schema": {
+              "maxLength": 100,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LookupResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Wrong scope, or unknown actor_discord_id"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict (e.g. invalid cycle transition, stale job attempt)"
+          }
+        },
+        "security": [
+          {
+            "agent": []
+          }
+        ],
+        "summary": "\"Do we have X?\" — matches + estimate + confidence text",
+        "x-scopes": [
+          "agent"
+        ]
+      }
+    },
+    "/api/jobs": {
+      "post": {
+        "operationId": "createJob",
+        "parameters": [
+          {
+            "description": "Replays the stored response for 24h (same key + route + scope).",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "maxLength": 200,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/JobCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Wrong scope, or unknown actor_discord_id"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict (e.g. invalid cycle transition, stale job attempt)"
+          }
+        },
+        "security": [
+          {
+            "agent": []
+          }
+        ],
+        "summary": "Create an audit job",
+        "x-scopes": [
+          "agent"
+        ]
+      }
+    },
+    "/api/jobs/claim": {
+      "post": {
+        "operationId": "claimJob",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/JobClaimRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobClaimResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Wrong scope, or unknown actor_discord_id"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict (e.g. invalid cycle transition, stale job attempt)"
+          }
+        },
+        "security": [
+          {
+            "worker": []
+          }
+        ],
+        "summary": "Lease the next queued job (+ presigned URLs); null when the queue is empty",
+        "x-scopes": [
+          "worker"
+        ]
+      }
+    },
+    "/api/jobs/complete": {
+      "post": {
+        "operationId": "completeJob",
+        "parameters": [
+          {
+            "description": "Replays the stored response for 24h (same key + route + scope).",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "maxLength": 200,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/JobCompleteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobCompleteResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Wrong scope, or unknown actor_discord_id"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict (e.g. invalid cycle transition, stale job attempt)"
+          }
+        },
+        "security": [
+          {
+            "worker": []
+          }
+        ],
+        "summary": "Result or failure for a claimed job",
+        "x-scopes": [
+          "worker"
+        ]
+      }
+    },
+    "/api/jobs/notifications": {
+      "get": {
+        "operationId": "getJobNotifications",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobNotificationsResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Wrong scope, or unknown actor_discord_id"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict (e.g. invalid cycle transition, stale job attempt)"
+          }
+        },
+        "security": [
+          {
+            "agent": []
+          }
+        ],
+        "summary": "Completed/failed jobs not yet replied to in Discord",
+        "x-scopes": [
+          "agent"
+        ]
+      }
+    },
+    "/api/jobs/{id}/notified": {
+      "post": {
+        "operationId": "markJobNotified",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Replays the stored response for 24h (same key + route + scope).",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "maxLength": 200,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EmptyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Wrong scope, or unknown actor_discord_id"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict (e.g. invalid cycle transition, stale job attempt)"
+          }
+        },
+        "security": [
+          {
+            "agent": []
+          }
+        ],
+        "summary": "Mark the Discord reply sent",
+        "x-scopes": [
+          "agent"
+        ]
+      }
+    },
+    "/api/media/upload-url": {
+      "post": {
+        "operationId": "createUploadUrl",
+        "parameters": [
+          {
+            "description": "Replays the stored response for 24h (same key + route + scope).",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "maxLength": 200,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UploadUrlRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadUrlResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Wrong scope, or unknown actor_discord_id"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict (e.g. invalid cycle transition, stale job attempt)"
+          }
+        },
+        "security": [
+          {
+            "agent": []
+          }
+        ],
+        "summary": "R2 presigned PUT for a new media key",
+        "x-scopes": [
+          "agent"
+        ]
+      }
+    },
+    "/api/predictions": {
+      "get": {
+        "operationId": "getPredictions",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "cycle_id",
+            "required": false,
+            "schema": {
+              "maxLength": 64,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PredictionsResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Wrong scope, or unknown actor_discord_id"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict (e.g. invalid cycle transition, stale job attempt)"
+          }
+        },
+        "security": [
+          {
+            "agent": []
+          }
+        ],
+        "summary": "Cart plan: lines with item, qty, candidate products, needs_price_check",
+        "x-scopes": [
+          "agent"
+        ]
+      }
+    },
+    "/api/products/{id}/reject": {
+      "post": {
+        "operationId": "rejectProduct",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Replays the stored response for 24h (same key + route + scope).",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "maxLength": 200,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProductRejectRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProductRejectResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Wrong scope, or unknown actor_discord_id"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict (e.g. invalid cycle transition, stale job attempt)"
+          }
+        },
+        "security": [
+          {
+            "agent": []
+          }
+        ],
+        "summary": "\"Never buy X\": product stance → rejected",
+        "x-scopes": [
+          "agent"
+        ]
+      }
+    },
+    "/api/receipts/cursor": {
+      "get": {
+        "operationId": "getReceiptCursor",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "account",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReceiptCursorResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Wrong scope, or unknown actor_discord_id"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict (e.g. invalid cycle transition, stale job attempt)"
+          }
+        },
+        "security": [
+          {
+            "agent": []
+          }
+        ],
+        "summary": "Last ingested external_order_id / date for a member's account",
+        "x-scopes": [
+          "agent"
+        ]
+      }
+    },
+    "/api/receipts/ingest": {
+      "post": {
+        "operationId": "ingestReceipt",
+        "parameters": [
+          {
+            "description": "Replays the stored response for 24h (same key + route + scope).",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "maxLength": 200,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReceiptIngestRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReceiptIngestResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Wrong scope, or unknown actor_discord_id"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict (e.g. invalid cycle transition, stale job attempt)"
+          }
+        },
+        "security": [
+          {
+            "agent": []
+          }
+        ],
+        "summary": "Digital/manual receipt → resolve, apply, EMA (deduped)",
+        "x-scopes": [
+          "agent"
+        ]
+      }
+    },
+    "/api/telemetry": {
+      "post": {
+        "operationId": "postTelemetry",
+        "parameters": [
+          {
+            "description": "Replays the stored response for 24h (same key + route + scope).",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "maxLength": 200,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TelemetryRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TelemetryResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Wrong scope, or unknown actor_discord_id"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict (e.g. invalid cycle transition, stale job attempt)"
+          }
+        },
+        "security": [
+          {
+            "agent": []
+          },
+          {
+            "worker": []
+          }
+        ],
+        "summary": "Telemetry events (batched)",
+        "x-scopes": [
+          "agent",
+          "worker"
+        ]
+      }
+    }
+  }
+}

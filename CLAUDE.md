@@ -56,10 +56,13 @@ pnpm db:rebuild-state        # recompute inventory_state from inventory_event (�
 pnpm drizzle-kit check       # migration consistency (any drizzle-kit command works this way)
 pnpm --filter @pandabase/db test   # schema smoke + seed tests (in-memory libSQL)
 pnpm --filter web test -- lib/domain   # domain tests + coverage (≥ 95% lines on lib/domain enforced)
+pnpm --filter web test -- app/api lib/repo lib/diagnostics   # API integration tests (in-memory libSQL)
+pnpm contracts:gen           # Zod → contracts/openapi.json → worker/agent Pydantic models (commit them)
+make contracts-check         # regenerate + fail if the generated contracts differ from git
 make check                   # everything CI runs
 ```
 
-Not yet implemented (stubs): `pnpm contracts:gen` / `make contracts` (M4), `make smoke` (M8).
+Not yet implemented (stubs): `make smoke` (M8).
 
 ## Playbook: "review diagnostics"
 

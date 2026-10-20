@@ -32,6 +32,28 @@ export const DEFAULT_CONFIG = {
   cartCoverDays: 7,
   /** §4.3 Static items: purchase units added when at/below the reorder threshold. */
   staticCartUnits: 1,
+  /** §4.4 Vendors the weekly cart is filled from (not overridable by a `setting` row). */
+  cartVendors: ["wholefoods", "amazon"] as string[],
+
+  /** PRD §4.1 Friday check-in lists (`GET /api/grocery/checkin`). */
+  checkin: {
+    /** Please-check: velocity items running out within `lowWithinDays + this` (not yet planned). */
+    pleaseCheckMarginDays: 4,
+    /** Please-check: items with an audit hint not counted for this many days. */
+    staleVerifiedDays: 21,
+    pleaseCheckMax: 6,
+    /** Freezer: the N oldest freezer items. */
+    freezerOldest: 3,
+  },
+
+  /** "Do we have X?" (`GET /api/items/lookup`). */
+  lookup: {
+    /** Token-set score a canonical name needs to be returned. */
+    minScore: 0.6,
+    maxResults: 5,
+    /** A count this recent makes the answer high-confidence. */
+    freshVerifiedDays: 7,
+  },
 
   /** §4.4 Product choice & learning. */
   product: {
@@ -62,6 +84,24 @@ export const DEFAULT_CONFIG = {
     failed_job: 14,
     trash_cam: 7,
   },
+  /** §5 Media jobs (`/api/jobs/*`). */
+  jobs: {
+    leaseMinutes: 5,
+    /** After this many failed attempts the job is `failed` and a `failed_job` review is created. */
+    maxAttempts: 3,
+    /** Presigned keyframe PUT URLs handed out per claim. */
+    maxKeyframes: 8,
+    /** Presigned R2 URL lifetime. */
+    presignSeconds: 900,
+  },
+  /** §5 step 5 Trash Cam: a resolved detection at or above this confidence is applied. */
+  trashCam: { applyConfidence: 0.8 },
+
+  /** §2.7 retention, purged by the daily cron. */
+  retention: { telemetryDays: 180, idempotencyHours: 24 },
+  /** §7 diagnostics: requests slower than this count as slow routes. */
+  diagnostics: { slowRouteMs: 1000 },
+
   /** §4.6 `impact_score` weights. */
   impact: { inCartPlan: 10, inPleaseCheck: 3, otherwise: 1 },
 

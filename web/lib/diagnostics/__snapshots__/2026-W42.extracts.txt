@@ -1,0 +1,40 @@
+## velocity.jsonl
+{"at":"2026-10-16T16:00:00.000Z","metric":"estimate_vs_observed","item":"Eggs","estimated":5.2,"observed":4}
+{"at":"2026-10-17T16:00:00.000Z","metric":"overbuy","item":"Spaghetti","days_of_stock":21}
+
+## receipt_lines.jsonl
+{"receipt_id":"01M4T1WF5VZGPS3JRZ85B76FGX","source":"digital","vendor":"amazon","raw_text":"Old Mill Rolled Oats 32oz","item":"Rolled Oats","match_method":"asin","match_score":1,"trust":"confirmed","class":"auto"}
+{"receipt_id":"01M55NE96NY2H4TJMQSZ51EYFF","source":"paper","vendor":"wholefoods","raw_text":"GRASSFED GROUND BEEF 8515 1L","item":"Ground Beef","match_method":"alias_exact","match_score":1,"trust":"confirmed","class":"auto"}
+{"receipt_id":"01M55NE96NY2H4TJMQSZ51EYFF","source":"paper","vendor":"wholefoods","raw_text":"365 ORGANIC WILD BLUEBERRIES","item":"Frozen Blueberries","match_method":"alias_exact","match_score":1,"trust":"confirmed","class":"auto"}
+{"receipt_id":"01M55NE96NY2H4TJMQSZ51EYFF","source":"paper","vendor":"wholefoods","raw_text":"ORGANIC STRAWBERRIES 16OZ","item":"Strawberries","match_method":"alias_exact","match_score":1,"trust":"confirmed","class":"auto"}
+{"receipt_id":"01M55NE96NY2H4TJMQSZ51EYFF","source":"paper","vendor":"wholefoods","raw_text":"ORGANIC BANANAS BUNCH","item":"Bananas","match_method":"alias_exact","match_score":1,"trust":"confirmed","class":"auto"}
+{"receipt_id":"01M55NE96NY2H4TJMQSZ51EYFF","source":"paper","vendor":"wholefoods","raw_text":"365 ORGANIC BLACK BEANS 15OZ","item":"Black Beans","match_method":"alias_exact","match_score":1,"trust":"confirmed","class":"auto"}
+{"receipt_id":"01M55NE96NY2H4TJMQSZ51EYFF","source":"paper","vendor":"wholefoods","raw_text":"BRGHTBRW GNGR KMBCHA 16","item":"Kombucha","match_method":"fuzzy","match_score":0.62,"trust":"unverified","class":"provisional"}
+{"receipt_id":"01M55NE96NY2H4TJMQSZ51EYFF","source":"paper","vendor":"wholefoods","raw_text":"MEADOW OAT MILK BARISTA 64OZ","item":"Oat Milk","match_method":"alias_exact","match_score":1,"trust":"confirmed","class":"auto"}
+{"receipt_id":"01M55NE96NY2H4TJMQSZ51EYFF","source":"paper","vendor":"wholefoods","raw_text":"FLOUR TORTILLAS 10CT","item":"Tortillas","match_method":"alias_exact","match_score":1,"trust":"confirmed","class":"auto"}
+{"receipt_id":"01M55NE96NY2H4TJMQSZ51EYFF","source":"paper","vendor":"wholefoods","raw_text":"BAG FEE","item":null,"match_method":"alias_exact","match_score":1,"trust":"confirmed","class":"ignored"}
+{"receipt_id":"01M55NE96NY2H4TJMQSZ51EYFF","source":"paper","vendor":"wholefoods","raw_text":"365 UNSALTED BUTTER 4 STICKS","item":"Butter","match_method":"alias_exact","match_score":1,"trust":"confirmed","class":"auto"}
+{"receipt_id":"01M55NE96NY2H4TJMQSZ51EYFF","source":"paper","vendor":"wholefoods","raw_text":"365 GREEK YOGURT PLAIN 32OZ","item":"Greek Yogurt","match_method":"alias_exact","match_score":1,"trust":"confirmed","class":"auto"}
+{"receipt_id":"01M55NE96NY2H4TJMQSZ51EYFF","source":"paper","vendor":"wholefoods","raw_text":"MOO CREAMERY VANILLA BEAN PI","item":"Ice Cream","match_method":"alias_exact","match_score":1,"trust":"confirmed","class":"auto"}
+{"receipt_id":"01M55NE96NY2H4TJMQSZ51EYFF","source":"paper","vendor":"wholefoods","raw_text":"365 EXTRA VIRGIN OLIVE OIL 1","item":"Olive Oil","match_method":"alias_exact","match_score":1,"trust":"confirmed","class":"auto"}
+{"receipt_id":"01M55NE96NY2H4TJMQSZ51EYFF","source":"paper","vendor":"wholefoods","raw_text":"WILD SOCKEYE SALMON FILLET F","item":"Salmon Fillet","match_method":"alias_exact","match_score":1,"trust":"confirmed","class":"auto"}
+{"receipt_id":"01M55NE96NY2H4TJMQSZ51EYFF","source":"paper","vendor":"wholefoods","raw_text":"ORGANIC HONEYCRISP APPLE","item":"Apples","match_method":"alias_exact","match_score":1,"trust":"confirmed","class":"auto"}
+{"receipt_id":"01M55NE96NY2H4TJMQSZ51EYFF","source":"paper","vendor":"wholefoods","raw_text":"PASTURE HEN LARGE EGGS 12CT","item":"Eggs","match_method":"alias_exact","match_score":1,"trust":"confirmed","class":"auto"}
+{"receipt_id":"01M55NE96NY2H4TJMQSZ51EYFF","source":"paper","vendor":"wholefoods","raw_text":"VALLEY CREAMERY WHOLE MILK 6","item":"Whole Milk","match_method":"alias_exact","match_score":1,"trust":"confirmed","class":"auto"}
+{"receipt_id":"01M55NE96NY2H4TJMQSZ51EYFF","source":"paper","vendor":"wholefoods","raw_text":"365 ORGANIC SPAGHETTI 1LB","item":"Spaghetti","match_method":"alias_exact","match_score":1,"trust":"confirmed","class":"auto"}
+{"receipt_id":"01M55NE96NY2H4TJMQSZ51EYFF","source":"paper","vendor":"wholefoods","raw_text":"HARBOR BAKERY SOURDOUGH BATA","item":"Sourdough Bread","match_method":"alias_exact","match_score":1,"trust":"confirmed","class":"auto"}
+{"receipt_id":"01M55NE96NY2H4TJMQSZ51EYFF","source":"paper","vendor":"wholefoods","raw_text":"ORGANIC CARROTS 2LB BAG","item":"Carrots","match_method":"alias_exact","match_score":1,"trust":"confirmed","class":"auto"}
+{"receipt_id":"01M55NE96NY2H4TJMQSZ51EYFF","source":"paper","vendor":"wholefoods","raw_text":"365 ORGANIC SWEET PEAS 16OZ","item":"Frozen Peas","match_method":"alias_exact","match_score":1,"trust":"confirmed","class":"auto"}
+{"receipt_id":"01M55NE96NY2H4TJMQSZ51EYFF","source":"paper","vendor":"wholefoods","raw_text":"365 ORGANIC BABY SPINACH 5OZ","item":"Baby Spinach","match_method":"alias_exact","match_score":1,"trust":"confirmed","class":"auto"}
+{"receipt_id":"01M55NE96NY2H4TJMQSZ51EYFF","source":"paper","vendor":"wholefoods","raw_text":"ORGANIC LEMON","item":"Lemons","match_method":"alias_exact","match_score":1,"trust":"confirmed","class":"auto"}
+
+## vlm.jsonl
+{"job_id":"01M559EV00BCMSC163Y8N78ZHC","job_type":"paper_receipt","status":"failed","model":"seed-vlm","prompt_version":"paper_receipt.v1","attempts":2,"error":"could not read totals (image too blurry)","keyframe_r2_keys":[]}
+{"job_id":"01M55NG3SNCQNQTMGYF9C0VVAQ","job_type":"paper_receipt","status":"completed","model":"seed-vlm","prompt_version":"paper_receipt.v1","attempts":1,"error":null,"keyframe_r2_keys":[]}
+{"job_id":"01M57VVJ00CK8MKJXP0DW80XEM","job_type":"trash_cam","status":"completed","model":"seed-vlm","prompt_version":"trash_cam.v1","attempts":1,"error":null,"keyframe_r2_keys":["seed/trash-cam/1-k0.jpg","seed/trash-cam/1-k1.jpg"]}
+
+## product_choice.jsonl
+
+## cart_injection.jsonl
+
+## ux.jsonl

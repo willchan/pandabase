@@ -24,6 +24,51 @@ export function restockReason(
     : null;
 }
 
+export type PleaseCheckReason = "near_runout" | "audit_hint";
+
+/**
+ * PRD §4.1 Friday nudge "please check": an item not already in the plan that runs out soon after
+ * the plan's horizon, or has an audit hint ("count the eggs") and hasn't been counted lately.
+ */
+export function pleaseCheckReason(input: {
+  item: InventoryItem & { auditHint: string | null };
+  estimate: Pick<Estimate, "runoutAt" | "status">;
+  lastVerifiedAt: string | null;
+  inPlan: boolean;
+  now: string;
+  config: Config;
+}): PleaseCheckReason | null {
+  const { item, estimate, lastVerifiedAt, inPlan, now, config } = input;
+  if (inPlan) return null;
+  const tz = config.householdTz;
+  if (item.trackingType === "velocity" && estimate.runoutAt !== null) {
+    const horizon = addDays(
+      localDate(now, tz),
+      config.lowWithinDays + config.checkin.pleaseCheckMarginDays,
+    );
+    if (localDate(estimate.runoutAt, tz) <= horizon) return "near_runout";
+  }
+  if (item.auditHint) {
+    const stale =
+      lastVerifiedAt === null ||
+      localDate(lastVerifiedAt, tz) <
+        addDays(localDate(now, tz), -config.checkin.staleVerifiedDays);
+    if (stale) return "audit_hint";
+  }
+  return null;
+}
+
+/** Near-runout first (soonest first), then audit hints; capped at `checkin.pleaseCheckMax`. */
+export function pleaseCheckList<T extends { reason: PleaseCheckReason; runoutAt: string | null }>(
+  candidates: readonly T[],
+  config: Config,
+): T[] {
+  const rank = (c: T) => (c.reason === "near_runout" ? 0 : 1);
+  return [...candidates]
+    .sort((a, b) => rank(a) - rank(b) || (a.runoutAt ?? "9999").localeCompare(b.runoutAt ?? "9999"))
+    .slice(0, config.checkin.pleaseCheckMax);
+}
+
 /**
  * Purchase units to add. Velocity: enough to cover `cartCoverDays` of EMA-based need beyond what's
  * on hand (min 1). Static, or velocity without an EMA yet: `staticCartUnits`.

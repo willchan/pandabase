@@ -1,5 +1,5 @@
 # Thin wrappers over pnpm/uv. Targets marked "stub" are filled in by the milestone named.
-.PHONY: install dev lint typecheck test check py-check smoke db-reset db-seed db-check contracts
+.PHONY: install dev lint typecheck test check py-check smoke db-reset db-seed db-check contracts contracts-check
 
 PY_PROJECTS := worker agent/tools
 
@@ -25,7 +25,7 @@ py-check:
 	done
 
 # Everything CI runs.
-check: lint typecheck test py-check db-check
+check: lint typecheck test py-check db-check contracts-check
 	pnpm --filter web build
 
 db-reset:
@@ -42,8 +42,14 @@ db-check:
 	  (git status --porcelain -- db/migrations; echo "db/migrations differs from HEAD: commit the generated migration"; exit 1)
 	pnpm db:reset && pnpm db:seed
 
-contracts: # stub
-	@echo "contracts: not implemented yet (M4)"; exit 1
+# Zod → contracts/openapi.json → worker/agent Pydantic models (commit the output).
+contracts:
+	pnpm contracts:gen
+
+# Generated contracts are up to date with web/lib/contracts.
+contracts-check: contracts
+	@git diff --exit-code --stat -- contracts worker/src/pandabase_worker/contracts.py agent/tools/src/pandabase_tools/contracts.py || \
+	  (echo "generated contracts are stale: run pnpm contracts:gen and commit"; exit 1)
 
 smoke: # stub
 	@echo "smoke: not implemented yet (M8)"; exit 1

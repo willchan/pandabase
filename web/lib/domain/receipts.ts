@@ -55,6 +55,12 @@ export interface ReceiptLineInput {
   asin: string | null;
   /** Product title (digital receipts) — names auto-created items. */
   title?: string | null;
+  /**
+   * The item, when the caller already knows it (a text purchase like "bought milk" resolved by
+   * the agent): matched as `manual` and confirmed. `productId` must be a product of that item.
+   */
+  itemId?: string | null;
+  productId?: string | null;
   /** Purchase units. */
   qty: number;
   unitPriceCents: number | null;
@@ -298,6 +304,17 @@ export async function applyReceipt(
       baseQty: 0,
       normalized: null,
     };
+    if (line.itemId) {
+      fx.lines.push({
+        ...base,
+        itemId: line.itemId,
+        productId: line.productId ?? null,
+        matchMethod: "manual",
+        matchScore: 1,
+        trust: "confirmed",
+      });
+      continue;
+    }
     if (line.asin) {
       const m = matchDigitalLine({
         asin: line.asin,

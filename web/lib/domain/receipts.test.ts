@@ -542,6 +542,47 @@ describe("applyReceipt — paper (DESIGN §4.5 table)", () => {
   });
 });
 
+describe("applyReceipt — lines with a known item", () => {
+  it("a text purchase with item_id is a confirmed manual match (no fuzzy matching)", async () => {
+    const fx = await apply(
+      receipt({
+        source: "manual",
+        vendor: "wholefoods",
+        externalOrderId: null,
+        idempotencyKey: "k2",
+        lines: [line("eggs", { itemId: "eggs", productId: "365-18", qty: 1 })],
+      }),
+    );
+    expect(fx.lines[0]).toMatchObject({
+      itemId: "eggs",
+      productId: "365-18",
+      matchMethod: "manual",
+      trust: "confirmed",
+      baseQty: 18,
+    });
+    expect(fx.inventoryEvents).toEqual([
+      expect.objectContaining({
+        itemId: "eggs",
+        quantity: 18,
+        source: "manual",
+        trust: "confirmed",
+      }),
+    ]);
+  });
+
+  it("without a product the item's preferred pack size applies", async () => {
+    const fx = await apply(
+      receipt({
+        source: "manual",
+        externalOrderId: null,
+        idempotencyKey: "k3",
+        lines: [line("eggs", { itemId: "eggs", qty: 2 })],
+      }),
+    );
+    expect(fx.lines[0]).toMatchObject({ productId: null, baseQty: 24 });
+  });
+});
+
 describe("dedupe key and totals", () => {
   it.each([
     ["digital", receipt({}), "digital:m1:o1"],

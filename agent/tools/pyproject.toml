@@ -4,7 +4,9 @@ version = "0.0.0"
 description = "PandaBase agent tools: deterministic Python invoked by OpenClaw (cart injection, receipt parsing, API client)."
 readme = "README.md"
 requires-python = ">=3.14"
-dependencies = []
+dependencies = [
+    "pydantic>=2.14.1",
+]
 
 [dependency-groups]
 dev = [
