@@ -11,7 +11,14 @@
     "lint": "pnpm -r --if-present lint && prettier --check .",
     "format": "prettier --write .",
     "typecheck": "pnpm -r --if-present typecheck",
-    "test": "pnpm -r --if-present test"
+    "test": "pnpm -r --if-present test",
+    "db:generate": "pnpm --filter @pandabase/db generate",
+    "db:migrate": "pnpm --filter @pandabase/db migrate",
+    "db:migrate:prod": "pnpm --filter @pandabase/db migrate:prod",
+    "db:seed": "pnpm --filter @pandabase/db seed",
+    "db:reset": "pnpm --filter @pandabase/db reset",
+    "db:rebuild-state": "pnpm --filter @pandabase/db rebuild-state",
+    "drizzle-kit": "pnpm --filter @pandabase/db exec drizzle-kit"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.5",

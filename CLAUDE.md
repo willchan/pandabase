@@ -49,11 +49,16 @@ pnpm format                  # Prettier --write
 pnpm --filter web build      # next build
 (cd worker && uv run ruff check && uv run ruff format --check && uv run mypy . && uv run pytest)
 (cd agent/tools && uv run ruff check && uv run ruff format --check && uv run mypy . && uv run pytest)
+pnpm db:reset && pnpm db:seed   # fresh db/dev.db (or TURSO_DATABASE_URL), migrated + seeded
+pnpm db:generate             # after editing db/src/schema/*: new migration in db/migrations (commit it)
+pnpm db:migrate              # apply migrations; db:migrate:prod for Turso (needs TURSO_AUTH_TOKEN)
+pnpm db:rebuild-state        # recompute inventory_state from inventory_event
+pnpm drizzle-kit check       # migration consistency (any drizzle-kit command works this way)
+pnpm --filter @pandabase/db test   # schema smoke + seed tests (in-memory libSQL)
 make check                   # everything CI runs
 ```
 
-Not yet implemented (stubs): `pnpm db:reset && pnpm db:seed` / `make db-reset db-seed` (M2),
-`pnpm contracts:gen` / `make contracts` (M4), `make smoke` (M8).
+Not yet implemented (stubs): `pnpm contracts:gen` / `make contracts` (M4), `make smoke` (M8).
 
 ## Playbook: "review diagnostics"
 

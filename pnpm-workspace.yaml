@@ -3,7 +3,9 @@ packages:
   - db
 
 # Dependency build scripts are opt-in (pnpm 10+). Next's image optimiser uses
-# sharp's prebuilt binaries, so no install scripts need to run.
+# sharp's prebuilt binaries, so no install scripts need to run. esbuild (via drizzle-kit/tsx)
+# ships its platform binary as an optional dependency, so its postinstall isn't needed either.
 allowBuilds:
+  esbuild: false
   sharp: false
   unrs-resolver: false

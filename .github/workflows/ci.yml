@@ -26,6 +26,17 @@ jobs:
       - run: pnpm lint
       - run: pnpm typecheck
       - run: pnpm test
+      - name: Migrations are consistent and match the schema
+        run: |
+          pnpm drizzle-kit check
+          pnpm db:generate
+          if [ -n "$(git status --porcelain -- db/migrations)" ]; then
+            git status --porcelain -- db/migrations
+            echo "::error::Schema changed without a migration — run pnpm db:generate and commit it."
+            exit 1
+          fi
+      - name: Reset and seed a local database
+        run: pnpm db:reset && pnpm db:seed
       - run: pnpm --filter web build
 
   python:
