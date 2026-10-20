@@ -1,0 +1,9 @@
+# Docs are hand-wrapped Markdown; generated and build output is not ours to format.
+*.md
+pnpm-lock.yaml
+contracts/openapi.json
+.next/
+next-env.d.ts
+worker/
+agent/
+diagnostics/

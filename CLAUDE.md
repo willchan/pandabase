@@ -39,18 +39,21 @@ Read only the sections your task needs.
 
 ## Commands
 
-> Filled in by M1/M8 as they land; keep this list accurate.
+> Keep this list accurate as milestones land. Node 24 (`.nvmrc`), pnpm 12, Python 3.14 + uv.
 
 ```
-pnpm install                 # JS deps
-pnpm dev                     # web on localhost:3000 (DEV_AUTH_BYPASS=1, file:./dev.db)
-pnpm lint && pnpm typecheck && pnpm test
-pnpm db:reset && pnpm db:seed
-pnpm contracts:gen
-(cd worker && uv run pytest)
-(cd agent/tools && uv run pytest)
-make smoke                   # live checks on the Mac Mini
+pnpm install                 # JS deps (web, db)
+pnpm dev                     # web on localhost:3000
+pnpm lint && pnpm typecheck && pnpm test   # ESLint + Prettier check, tsc, vitest
+pnpm format                  # Prettier --write
+pnpm --filter web build      # next build
+(cd worker && uv run ruff check && uv run ruff format --check && uv run mypy . && uv run pytest)
+(cd agent/tools && uv run ruff check && uv run ruff format --check && uv run mypy . && uv run pytest)
+make check                   # everything CI runs
 ```
+
+Not yet implemented (stubs): `pnpm db:reset && pnpm db:seed` / `make db-reset db-seed` (M2),
+`pnpm contracts:gen` / `make contracts` (M4), `make smoke` (M8).
 
 ## Playbook: "review diagnostics"
 

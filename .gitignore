@@ -1,0 +1,41 @@
+# dependencies
+node_modules/
+.pnpm-store/
+
+# next.js / build output
+.next/
+out/
+dist/
+build/
+*.tsbuildinfo
+next-env.d.ts
+.vercel/
+
+# testing
+coverage/
+
+# python
+.venv/
+__pycache__/
+*.py[cod]
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+
+# local databases
+*.db
+*.db-journal
+*.db-shm
+*.db-wal
+
+# secrets — only the example is committed
+.env*
+!.env.example
+
+# private household data (see CLAUDE.md "Privacy")
+/diagnostics
+
+# misc
+.DS_Store
+*.pem
+*.log
