@@ -72,12 +72,15 @@ describe("weekly diagnostics", () => {
         ["agent", "selector_error", { selector: "#add-to-cart", error: "timeout" }],
         ["cron", "review_expired", { kind: "receipt", action: "drop_pending_lines" }],
         ["agent", "clarifying_question", { question: "Was that oat milk or whole milk?" }],
+        ["agent", "photo_classified", { job_type: "paper_receipt", basis: "default" }],
+        ["agent", "photo_reclassified", { to_job_type: "trash_cam" }],
         ["api", "api_request", { route: "GET /api/predictions", method: "GET", status: 200, latencyMs: 1800 }],
         ["api", "api_request", { route: "GET /api/predictions", method: "GET", status: 500, latencyMs: 20 }],
       ].map(([source, metric, payload], i) => t(source as string, metric as string, payload as Record<string, unknown>, i)),
     );
     const report = await renderWeekly(h.db, "2026-W43", { now: "2026-10-26T20:00:00.000Z", config: DEFAULT_CONFIG });
     const md = report.markdown;
+    expect(md).toContain("Photos classified: 1 (default 1); re-filed by a human: 1.");
     for (const s of SECTIONS) expect(md).toContain(s);
     expect(md).toContain("Tier-1 cart injection succeeded for 50% of lines (target ≥ 90%).");
     expect(md).toContain("1 cart line(s) failed to inject.");

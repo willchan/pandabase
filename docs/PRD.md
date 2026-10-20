@@ -81,7 +81,9 @@ A Discord **thread per cycle** in `#pandabase`, acting as a running grocery list
 ### 4.3 Trash Cam
 
 Photo of an empty/finished item in Discord → VLM identifies it → item marked consumed/critical →
-it lands in the next cart. Agent replies with what it understood.
+it lands in the next cart. Agent replies with what it understood. The agent tells a receipt from a finished
+item by the caption (or the local model's description); when it had to guess, its reply says so
+and one word (`trash` / `receipt`) re-files the photo — nobody has to answer.
 
 ### 4.4 "Do we have X?"
 
