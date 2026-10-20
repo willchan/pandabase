@@ -353,7 +353,12 @@ Static items: `on_hand = anchor_qty` (no decay); `out` at 0, `low` when `≤ reo
 **Shelf life:** if `shelf_life_days` is set, units acquired more than `shelf_life_days` ago are
 dropped from the estimate and a `presumed_discarded` event is logged (trust `provisional`; the
 daily cron writes them via `shelfLifeDiscards`). FIFO: what's on hand is assumed to be the newest
-units, so `expired = max(0, on_hand − units acquired at that location within the window)`.
+units, so `expired = max(0, on_hand − units in batches started at that location within the window)`.
+Each `acquired` event starts a batch; a count (`observed` with a quantity) replaces the location's
+earlier batches with one batch of the counted units, fresh as of the count — a count replaces the
+estimate, so it replaces the freshness clock too (`freshnessBatches`). A null-quantity `critical`
+flag counts nothing and leaves the clocks alone. Counted units still age out `shelf_life_days`
+after the count.
 
 **Overbuy:** on acquisition of a velocity item, if the stock already on hand would have lasted
 `on_hand_before × ema ≥ overbuyDaysOfStock` (default 14 days), log telemetry `overbuy`.

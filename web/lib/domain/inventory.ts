@@ -101,6 +101,14 @@ export function onHandAt(
   return Math.max(0, state.anchorQty - days / item.emaDays!);
 }
 
+/** Non-`expired` events sorted by `occurred_at` (stable). */
+const chronological = (events: readonly InventoryEvent[]): InventoryEvent[] =>
+  events
+    .filter((e) => e.trust !== "expired")
+    .map((e, i) => ({ e, i }))
+    .sort((a, b) => daysBetween(b.e.occurredAt, a.e.occurredAt) || a.i - b.i)
+    .map(({ e }) => e);
+
 /**
  * Fold an item's events (any order; sorted here by `occurred_at`, stable) into one state row per
  * location. `expired` events are ignored. Decay between events uses the item's *current* EMA.
@@ -122,13 +130,7 @@ export function projectInventory(
     row.anchorKind = kind;
   };
   const estimateVsObserved: EstimateVsObserved[] = [];
-  const sorted = events
-    .filter((e) => e.trust !== "expired")
-    .map((e, i) => ({ e, i }))
-    .sort((a, b) => daysBetween(b.e.occurredAt, a.e.occurredAt) || a.i - b.i)
-    .map(({ e }) => e);
-
-  for (const e of sorted) {
+  for (const e of chronological(events)) {
     const row = at(e.location);
     const t = e.occurredAt;
     const qty = e.quantity ?? 0;
@@ -186,8 +188,26 @@ export interface Estimate {
 }
 
 /**
+ * §4.2 shelf-life batches per location, from an item's events (any order): each `acquired` event
+ * starts a batch's clock, and a count (`observed` with a quantity) replaces the batches before it
+ * with one batch of the counted units, fresh as of the count. A null-quantity `critical` flag
+ * doesn't count anything, so it leaves the clocks alone. Feed the result to `estimate*` /
+ * `shelfLifeDiscards`.
+ */
+export function freshnessBatches(events: readonly InventoryEvent[]): Record<string, Acquisition[]> {
+  const out: Record<string, Acquisition[]> = {};
+  for (const e of chronological(events)) {
+    const batch = { at: e.occurredAt, qty: e.quantity ?? 0 };
+    if (e.kind === "acquired") (out[e.location] ??= []).push(batch);
+    else if (e.kind === "observed" && e.quantity !== null) out[e.location] = [batch];
+  }
+  return out;
+}
+
+/**
  * §4.2 shelf life, FIFO: the units still on hand are assumed to be the newest ones, so anything
- * beyond what was acquired at this location within the last `shelf_life_days` has expired.
+ * beyond the batches (`freshnessBatches`: acquisitions, or the last count and what came after it)
+ * started at this location within the last `shelf_life_days` has expired.
  */
 export function expiredQuantity(
   item: InventoryItem,
