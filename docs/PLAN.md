@@ -473,7 +473,7 @@ Lighthouse mobile accessibility ≥ 90 on This Week (documented in PR, not CI-ga
 4.0.1; dev: `@playwright/test` 1.64.1, `tw-animate-css` 1.4.0, `@testing-library/react` 16.3,
 `@testing-library/dom` 10.4, `jsdom`. All past pnpm's minimum release age.
 
-*Deviations / choices (DESIGN §3, §3.1, §4.5, §7, §9, §10 #30–31 and PRD §4.6 updated):*
+*Deviations / choices (DESIGN §3, §3.1, §4.5, §7, §9, §10 #33–34 and PRD §4.6 updated):*
 - **shadcn/ui components are hand-written** (`web/components/ui/*`, new-york style on Tailwind 4,
   `components.json` committed): the sandbox's proxy blocks `ui.shadcn.com`, so `shadcn add` can't
   run. They match upstream's source; future `shadcn add` calls will work alongside them. Native
