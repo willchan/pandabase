@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+# `make vercel-env`: add the generated secrets to the linked Vercel project without printing
+# them. Variables that already exist in an environment are left alone (to rotate one, remove it
+# with `vercel env rm NAME <env>` and re-run). Needs `vercel login` + `vercel link` in web/.
+#
+#   VERCEL_ENVS="production preview"   environments to fill (default: production)
+set -euo pipefail
+# shellcheck source=scripts/ops/lib.sh
+. "$(dirname "$0")/lib.sh"
+
+need vercel
+VERCEL_FILE="${VERCEL_FILE:-$ROOT/.env.vercel}"
+[ -f "$ENV_FILE" ] && [ -f "$VERCEL_FILE" ] || die "run 'make secrets' first"
+[ -d "$ROOT/web/.vercel" ] || die "web/ isn't linked to a Vercel project — run: (cd web && vercel link)"
+
+for target in ${VERCEL_ENVS:-production}; do
+  existing="$(cd "$ROOT/web" && vercel env ls "$target" 2>/dev/null || true)"
+  for key in AGENT_API_TOKEN WORKER_API_TOKEN AUTH_SECRET CRON_SECRET; do
+    if [ "$key" = AUTH_SECRET ] || [ "$key" = CRON_SECRET ]; then
+      value="$(env_get "$key" "$VERCEL_FILE")"
+    else
+      value="$(env_get "$key")"
+    fi
+    [ -n "$value" ] || die "$key is empty — run 'make secrets'"
+    if printf '%s\n' "$existing" | awk '{print $1}' | grep -qx "$key"; then
+      note "kept $key ($target: exists)"
+    elif [ "$DRY_RUN" = 1 ]; then
+      info "[dry-run] would add $key to $target"
+    else
+      printf '%s' "$value" | (cd "$ROOT/web" && vercel env add "$key" "$target" >/dev/null)
+      info "added $key to $target"
+    fi
+  done
+done

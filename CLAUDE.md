@@ -57,6 +57,8 @@ pnpm --filter web build      # next build
 (cd worker && uv run ruff check && uv run ruff format --check && uv run mypy . && uv run pytest)
 (cd agent/tools && uv run ruff check && uv run ruff format --check && uv run mypy . && uv run pytest)
 pnpm db:reset && pnpm db:seed   # fresh db/dev.db (or TURSO_DATABASE_URL), migrated + seeded
+pnpm db:add-member --email E --name N [--discord ID] [--profile P] [--sweep daily|weekly|off] [--cart]
+                             # upsert a member by email (first-run bootstrap; TURSO_* for prod)
 pnpm db:generate             # after editing db/src/schema/*: new migration in db/migrations (commit it)
 pnpm db:migrate              # apply migrations; db:migrate:prod for Turso (needs TURSO_AUTH_TOKEN)
 pnpm db:rebuild-state        # recompute inventory_state from inventory_event (§4.2 projection)
@@ -73,13 +75,29 @@ docker build -t pandabase-worker worker   # worker image (CI job worker-image)
 (cd agent/tools && uv run pandabase-tools --help)   # agent CLI used by the skills (JSON on stdout)
 (cd agent/tools && uv run pytest tests/test_skills.py)   # skill frontmatter + every command a skill names parses
 make check                   # everything CI runs
+make ops-check               # shellcheck scripts/, docker compose config, make dry runs, smoke helpers' ruff/mypy
 ```
 
-Not yet implemented (stubs): `make smoke` (M8).
+Mac Mini ops (README has the order; every script is idempotent and honours `DRY_RUN=1`):
+
+```
+make secrets                 # .env + .env.vercel: generate missing tokens (never prints values)
+make vercel-env              # add those secrets to the linked Vercel project
+make up / make logs / make down          # worker via docker compose
+make update                  # git pull --ff-only, uv sync (tools), docker compose up -d --build
+make install-agent-tools     # agent/tools venv, pandabase-tools on PATH, configs from examples
+make install-agent-skills    # skills.load.extraDirs += agent/skills (backs up openclaw.json)
+make install-agent-cron      # OpenClaw automations (list, then edit or add)
+make install-chromium        # per-member Chromium LaunchAgents (loopback-only CDP)
+make install-ollama-env      # OLLAMA_NUM_PARALLEL=1, OLLAMA_MAX_LOADED_MODELS=1 at login
+make backfill [MEMBER=m]     # 12-month receipt backfill, resumable
+make smoke                   # live checks; SMOKE_CART=1 / SMOKE_E2E=1 opt-ins, SMOKE_ONLY="api vlm"
+```
 
 ## Playbook: "review diagnostics"
 
-When asked to review diagnostics (normally run on the Mac Mini, where `/diagnostics` exists):
+When asked to review diagnostics (normally run on the Mac Mini, where the gitignored repo-root
+`diagnostics/` holds the agent's weekly output — "`/diagnostics`" below):
 
 1. Read the last 4 weekly reports in `/diagnostics/*.md` (newest first). Note the *Summary* findings
    and any metric trending the wrong way vs PRD §6 targets.

@@ -59,6 +59,8 @@ evening Claude Code sessions. Therefore:
 - Requests use `num_ctx` 8192 to keep the KV cache small. The worker only claims job types whose
   model is pulled (`GET /api/tags`), since every claim costs the job an attempt.
 - Only one Chromium profile is driven at a time (tools take a file lock).
+- Host Ollama settings `OLLAMA_NUM_PARALLEL=1` and `OLLAMA_MAX_LOADED_MODELS=1` (re-applied at
+  login by a LaunchAgent, §8 *Mac Mini operations*); the README has the full memory budget.
 
 ## 2. Data model
 
@@ -669,6 +671,10 @@ install-agent-skills`): OpenClaw rejects workspace-skill symlinks that resolve o
 workspace unless `skills.load.allowSymlinkTargets` trusts the target.
 OpenClaw's media understanding must use the local Ollama VLM (`tools.media.models` with an
 `ollama/…` image entry) so the agent's cloud model never needs the photo pixels (§10 #10).
+Residual risk: when that local description fails, OpenClaw delivers the image natively to an
+image-capable reply model. The recommended mitigation (§10 #42, owner's choice, README *Photo
+privacy*) is a dedicated `pandabase` agent bound to `#pandabase` whose model is catalogued
+text-only (`input: ["text"]`): OpenClaw injects images only into turns of image-capable models.
 
 Agent message style: short, Discord markdown, ✅ ⚠️ ❓ markers, one web link when needed, no
 components/embeds.
@@ -751,8 +757,8 @@ Timestamps stored UTC; `HOUSEHOLD_TZ=America/Los_Angeles` defines "today" and sc
 - **Migrations are backward-compatible** (expand → contract): the previous release must run on the
   new schema, so a failed deploy after a successful migration leaves production working.
 - **Mac Mini — pull, never push:** CI publishes the worker image to GHCR on green `main`. A `launchd`
-  timer runs `make update` every 15 min: newer green sha → `git pull` (skills are symlinked, so they
-  update too) → `uv sync` → `docker compose pull && up -d` → health check → automatic rollback to the
+  timer runs `make update` every 15 min: newer green sha → `git pull` (OpenClaw loads the skills
+  straight from the repo via `skills.load.extraDirs`, so they update too) → `uv sync` → `docker compose pull && up -d` → health check → automatic rollback to the
   previous sha/image on failure, with one `#pandabase` post. No inbound ports; no self-hosted runner.
 - **Quiet windows:** no Mac Mini updates Fri 17:30–19:00 or Sat 09:30–12:00 (household TZ), around
   the nudge and cart build.
@@ -767,6 +773,48 @@ Timestamps stored UTC; `HOUSEHOLD_TZ=America/Los_Angeles` defines "today" and sc
 (`qwen3.5:4b`), `POLL_INTERVAL_SECONDS` (10), `HOUSEHOLD_TZ`, `PROMPTS_DIR` (set by the image).
 Agent tools: `PANDABASE_API_URL`, `AGENT_API_TOKEN`, `PANDABASE_CONFIG`.
 
+### Mac Mini operations (M8)
+
+Setup is the README checklist; every step is a `make` target over an idempotent script in
+`scripts/ops/` (shellcheck-clean, `DRY_RUN=1` prints instead of acting):
+
+- **Secrets:** `make secrets` writes the repo-root `.env` (Mac Mini runtime, from
+  `ops/mac.env.example`: the two machine tokens + worker/agent settings) and `.env.vercel`
+  (`AUTH_SECRET`, `CRON_SECRET`), mode 600, filling only empty values and printing names only.
+  `make vercel-env` adds them to the linked Vercel project. The Mac Mini holds no DB credentials.
+- **Compose** (`docker-compose.yml`) runs only the worker: `env_file: .env` (optional, so
+  `docker compose config` works on a fresh checkout), `host.docker.internal:host-gateway`,
+  `stop_grace_period: 5m`, read-only root + `/tmp` tmpfs, no ports or volumes, all capabilities
+  dropped. The image is `${PANDABASE_WORKER_IMAGE:-pandabase-worker}:${PANDABASE_WORKER_TAG:-local}`
+  built from `./worker` (M9 points it at GHCR). OpenClaw stays native (it is the household's
+  existing agent, drives host Chromium over CDP and reads `~/.openclaw`), so there is no
+  `openclaw` compose service; `/diagnostics` is the repo's gitignored `diagnostics/`, written by
+  the native agent (macOS has no writable `/diagnostics`), so the worker needs no volume.
+- **Agent install:** `make install-agent-tools` (uv sync, `pandabase-tools` linked into
+  `~/.local/bin`, configs from the examples with `diagnostics_dir` = `<repo>/diagnostics`);
+  `make install-agent-skills` (backs up `openclaw.json`, appends `<repo>/agent/skills` to
+  `skills.load.extraDirs` with the gateway stopped, writes the agent env to `~/.openclaw/.env`);
+  `make install-agent-cron` (list, then `edit` by name or `add`; receipt sweeps generated per
+  member from `receipt_sweep`; the job-replies command payload runs `scripts/ops/agent-run.sh`,
+  which reads the token from `.env` so it isn't stored in OpenClaw's automation DB). Gateway
+  config (Discord channel policy, Ollama media model, browser profiles) is a reviewed
+  `openclaw config patch` from `agent/openclaw.pandabase.example.json5`.
+- **launchd:** one Chromium LaunchAgent per profile (`ops/launchd/com.pandabase.chromium.plist.template`,
+  loopback-only DevTools port, `KeepAlive`), and `com.pandabase.ollama-env` re-applying
+  `OLLAMA_NUM_PARALLEL=1` / `OLLAMA_MAX_LOADED_MODELS=1` at login.
+- **First run:** `pnpm db:add-member` upserts a member by email (the UI edits members but can't
+  create them, and sign-in requires a member row), keeping exactly one cart account.
+- **`make backfill`** repeats `receipts sweep --backfill` per member until `complete` (waits on a
+  busy profile lock). **`make update`** = `git pull --ff-only` → `uv sync` (tools) →
+  `docker compose up -d --build`, printing the before/after sha (M9 wraps it).
+- **`make smoke`** (`scripts/smoke/run.sh`): env, agent-token round trip, worker running, models
+  pulled, Ollama host settings, the worker image's VLM path on a synthetic receipt
+  (`scripts/smoke/vlm_check.py`, < 60s), `jobs replies` → `NO_REPLY` (skipped while replies are
+  pending), CDP attach per member + loopback-only listener, worker stop/start. Opt-in: tier-1
+  cart for one Amazon + one Whole Foods ASIN with the real `inject`, then deleting them
+  (`scripts/smoke/cart_check.py`; refuses ASINs already in the cart), and an end-to-end Trash Cam
+  job on a blank synthetic photo (marks it notified; leaves one Trash Cam review).
+
 ## 9. Repository layout
 
 ```
@@ -775,11 +823,12 @@ Agent tools: `PANDABASE_API_URL`, `AGENT_API_TOKEN`, `PANDABASE_CONFIG`.
                   components/ui), proxy.ts (sign-in gate), e2e/ (Playwright)
 /db             @pandabase/db: Drizzle schema, migrations, seed   pnpm workspace
 /contracts      openapi.json (generated by scripts/gen-contracts.ts)
-/scripts        repo-level scripts (contract generation)
+/scripts        repo-level scripts: contract generation; ops/ (Mac Mini make targets), smoke/
+/ops            Mac Mini templates: mac.env.example, launchd/ plists
 /worker         Python worker (uv) + Dockerfile + prompts/
 /agent/skills   OpenClaw SKILL.md folders
 /agent/tools    Python tools (uv)
-/diagnostics    gitignored; volume-mapped
+/diagnostics    gitignored; written by the agent on the Mac Mini
 /docs           PRD, DESIGN, ROADMAP, PLAN
 docker-compose.yml, Makefile, CLAUDE.md, README.md, .github/workflows/ci.yml
 ```
@@ -827,3 +876,6 @@ docker-compose.yml, Makefile, CLAUDE.md, README.md, .github/workflows/ci.yml
 | 37 | Whole Foods tier 1 off until smoke-verified | A silent mis-add to the Amazon cart is worse than an agent fallback |
 | 38 | Web UI: server components + server actions over the shared services, shadcn/ui on Tailwind 4, system light/dark, native selects, phone-first bottom tabs | One code path with the agent; a minute-at-a-time household tool should feel native on a phone and work without client state |
 | 39 | Dev sign-in is an Auth.js credentials provider registered only under `NODE_ENV=development` + `DEV_AUTH_BYPASS=1` | The real session/proxy path is exercised in dev and e2e (the gate is testable), and the bypass can't exist in a production build |
+| 40 | Compose runs only the worker; OpenClaw, Ollama and Chromium stay native | OpenClaw is the household's existing native agent (host Chromium over CDP, `~/.openclaw` state); Ollama needs Metal; a containerized OpenClaw would be a second agent to keep in sync |
+| 41 | Members are bootstrapped with `pnpm db:add-member`, not the UI | Sign-in requires a member row, so the first member can't be created from inside the app; two members don't justify an admin flow |
+| 42 | Inbound photos: local `tools.media.models` description always; a text-only PandaBase agent recommended against the native-delivery fallback (owner decides) | Keeps §10 #10 without forcing a model change on the family agent; the fallback is OpenClaw behavior we can't turn off by config |
