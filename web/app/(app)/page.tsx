@@ -1,3 +1,5 @@
+import { PageSkeleton } from "@/components/page-skeleton";
+import { Suspense } from "react";
 import { groceryCycleOverride, item, member } from "@pandabase/db";
 import { asc, eq, isNull } from "drizzle-orm";
 import {
@@ -47,7 +49,15 @@ const STATUS_LABEL = {
   other_store: "Other store",
 } as const;
 
-export default async function ThisWeekPage() {
+export default function ThisWeekPage() {
+  return (
+    <Suspense fallback={<PageSkeleton />}>
+      <ThisWeekPageContent />
+    </Suspense>
+  );
+}
+
+async function ThisWeekPageContent() {
   const { db, ctx } = await currentMember();
   const tz = ctx.config.householdTz;
   const cycle = await activeCycle(db);
@@ -103,7 +113,8 @@ export default async function ThisWeekPage() {
     .where(eq(groceryCycleOverride.cycleId, cycle.id))
     .orderBy(asc(groceryCycleOverride.createdAt));
   const cycleId = cycle.id;
-  const editable = cycle.status === "open" || cycle.status === "building" || cycle.status === "ready";
+  const editable =
+    cycle.status === "open" || cycle.status === "building" || cycle.status === "ready";
   const steps = [
     { label: "Opened", at: cycle.openedAt, done: true },
     {
@@ -129,10 +140,7 @@ export default async function ThisWeekPage() {
 
       <ol className="mb-2 grid grid-cols-3 gap-2 text-xs" aria-label="This week's schedule">
         {steps.map((s) => (
-          <li
-            key={s.label}
-            className="flex flex-col gap-0.5 rounded-lg border bg-card px-2.5 py-2"
-          >
+          <li key={s.label} className="flex flex-col gap-0.5 rounded-lg border bg-card px-2.5 py-2">
             <span className="flex items-center gap-1 font-medium">
               {s.done ? (
                 <CheckCircle2Icon className="size-3.5 text-ok" aria-label="done" />
@@ -276,7 +284,10 @@ export default async function ThisWeekPage() {
                     {l.item_id && editable ? (
                       <div className="flex flex-col gap-3 border-t bg-muted/40 px-4 py-3">
                         <div className="flex flex-wrap items-start gap-2">
-                          <ActionForm action={setQuantityAction} className="flex items-center gap-2">
+                          <ActionForm
+                            action={setQuantityAction}
+                            className="flex items-center gap-2"
+                          >
                             <input type="hidden" name="cycleId" value={cycleId} />
                             <input type="hidden" name="itemId" value={l.item_id} />
                             <label htmlFor={`qty-${key}`} className="text-sm">
@@ -413,7 +424,9 @@ export default async function ThisWeekPage() {
           <ul className="flex flex-col gap-1 text-sm">
             {overrides.map((o) => (
               <li key={o.id} className="flex gap-2">
-                <span className="w-20 shrink-0 text-muted-foreground">{monthDay(o.createdAt, tz)}</span>
+                <span className="w-20 shrink-0 text-muted-foreground">
+                  {monthDay(o.createdAt, tz)}
+                </span>
                 <span>
                   <span className="font-medium">{o.who ?? "Agent"}</span>{" "}
                   {o.kind === "skip"
@@ -424,7 +437,9 @@ export default async function ThisWeekPage() {
                         ? "picked a product for"
                         : "added"}{" "}
                   {o.freeText ?? (o.itemId ? names.get(o.itemId) : null) ?? "an item"}
-                  {o.kind === "add" && o.quantity && o.quantity !== 1 ? ` (${qty(o.quantity)})` : ""}
+                  {o.kind === "add" && o.quantity && o.quantity !== 1
+                    ? ` (${qty(o.quantity)})`
+                    : ""}
                 </span>
               </li>
             ))}
@@ -490,4 +505,3 @@ export default async function ThisWeekPage() {
     </>
   );
 }
-

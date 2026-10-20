@@ -1,6 +1,12 @@
 "use client";
 
-import { BarChart3Icon, CalendarCheckIcon, InboxIcon, PackageIcon, SettingsIcon } from "lucide-react";
+import {
+  BarChart3Icon,
+  CalendarCheckIcon,
+  InboxIcon,
+  PackageIcon,
+  SettingsIcon,
+} from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
@@ -15,7 +21,17 @@ const TABS = [
 
 /** Thumb-reach tab bar. `cleanupCount` marks Cleanup when reviews are waiting. */
 export function BottomNav({ cleanupCount }: { cleanupCount: number | null }) {
-  const path = usePathname();
+  return <NavBar path={usePathname()} cleanupCount={cleanupCount} />;
+}
+
+/** The bar without URL hooks (the layout's Suspense fallback; no tab highlighted). */
+export function NavBar({
+  path,
+  cleanupCount,
+}: {
+  path: string | null;
+  cleanupCount: number | null;
+}) {
   return (
     <nav
       aria-label="Main"
@@ -23,7 +39,7 @@ export function BottomNav({ cleanupCount }: { cleanupCount: number | null }) {
     >
       <ul className="mx-auto grid max-w-2xl grid-cols-5">
         {TABS.map(({ href, label, icon: Icon }) => {
-          const active = href === "/" ? path === "/" : path.startsWith(href);
+          const active = path !== null && (href === "/" ? path === "/" : path.startsWith(href));
           const count = href === "/cleanup" ? cleanupCount : null;
           return (
             <li key={href}>

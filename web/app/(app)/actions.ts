@@ -41,7 +41,10 @@ export async function addToListAction(_: ActionResult, f: FormData): Promise<Act
       .select({ id: item.id, name: item.canonicalName })
       .from(item)
       .where(
-        and(isNull(item.mergedIntoItemId), sql`lower(${item.canonicalName}) = ${text.toLowerCase()}`),
+        and(
+          isNull(item.mergedIntoItemId),
+          sql`lower(${item.canonicalName}) = ${text.toLowerCase()}`,
+        ),
       )
       .limit(1);
     await addOverride(
@@ -109,9 +112,11 @@ export async function cycleStatusAction(_: ActionResult, f: FormData): Promise<A
   return runAction(status ? CLOSES[status] : "cycle_status", async ({ db, ctx }) => {
     if (!status || !(status in CLOSES)) throw badRequest("Unknown status");
     const cycle = await requireCycle(db, str(f, "cycleId"));
-    const reason = { skipped: "skipped from the web", other_store: "shopping elsewhere", closed: "done" }[
-      status
-    ];
+    const reason = {
+      skipped: "skipped from the web",
+      other_store: "shopping elsewhere",
+      closed: "done",
+    }[status];
     await setCycleStatus(db, cycle.id, { status, reason }, ctx);
   });
 }

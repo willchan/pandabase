@@ -56,12 +56,21 @@ describe("updateItemSettings", () => {
       .select()
       .from(systemTelemetry)
       .where(eq(systemTelemetry.metricType, "item_settings_changed"));
-    expect(t!.payload).toMatchObject({ itemId: milk, fields: ["auditHint", "shelfLifeDays", "reorderThreshold"] });
+    expect(t!.payload).toMatchObject({
+      itemId: milk,
+      fields: ["auditHint", "shelfLifeDays", "reorderThreshold"],
+    });
     await updateItemSettings(h.db, milk, { auditHint: "" }, ctx);
     expect((await h.db.select().from(item).where(eq(item.id, milk)))[0]!.auditHint).toBeNull();
-    await expect(updateItemSettings(h.db, milk, { shelfLifeDays: 1.5 }, ctx)).rejects.toThrow(/whole/);
-    await expect(updateItemSettings(h.db, milk, { reorderThreshold: -1 }, ctx)).rejects.toThrow(/0 or more/);
-    await expect(updateItemSettings(h.db, milk, { auditHint: "x".repeat(201) }, ctx)).rejects.toThrow(/long/);
+    await expect(updateItemSettings(h.db, milk, { shelfLifeDays: 1.5 }, ctx)).rejects.toThrow(
+      /whole/,
+    );
+    await expect(updateItemSettings(h.db, milk, { reorderThreshold: -1 }, ctx)).rejects.toThrow(
+      /0 or more/,
+    );
+    await expect(
+      updateItemSettings(h.db, milk, { auditHint: "x".repeat(201) }, ctx),
+    ).rejects.toThrow(/long/);
     await updateItemSettings(h.db, milk, {}, ctx); // no-op
   });
 });
@@ -96,18 +105,32 @@ describe("settings", () => {
       ctx,
     );
     const [row] = await h.db.select().from(member).where(eq(member.id, sam));
-    expect(row).toMatchObject({ displayName: "Sam R", discordUserId: "123456789", amazonSweep: "weekly" });
+    expect(row).toMatchObject({
+      displayName: "Sam R",
+      discordUserId: "123456789",
+      amazonSweep: "weekly",
+    });
     await expect(
       updateMember(h.db, sam, { displayName: "Sam", discordUserId: ALEX, amazonSweep: "off" }, ctx),
     ).rejects.toThrow(/someone else/);
     await expect(
-      updateMember(h.db, sam, { displayName: "Sam", discordUserId: "abc", amazonSweep: "off" }, ctx),
+      updateMember(
+        h.db,
+        sam,
+        { displayName: "Sam", discordUserId: "abc", amazonSweep: "off" },
+        ctx,
+      ),
     ).rejects.toThrow(/digits/);
     await expect(
       updateMember(h.db, sam, { displayName: "", discordUserId: null, amazonSweep: "off" }, ctx),
     ).rejects.toThrow(/name/);
     await expect(
-      updateMember(h.db, "nope", { displayName: "x", discordUserId: null, amazonSweep: "off" }, ctx),
+      updateMember(
+        h.db,
+        "nope",
+        { displayName: "x", discordUserId: null, amazonSweep: "off" },
+        ctx,
+      ),
     ).rejects.toThrow(/not found/);
   });
 

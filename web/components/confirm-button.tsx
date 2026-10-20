@@ -24,13 +24,23 @@ export function ConfirmButton({
   const [asking, setAsking] = useState(false);
   if (!asking)
     return (
-      <Button type="button" variant={variant} size={size} className={className} onClick={() => setAsking(true)}>
+      <Button
+        type="button"
+        variant={variant}
+        size={size}
+        className={className}
+        onClick={() => setAsking(true)}
+      >
         {children}
       </Button>
     );
   return (
     <span className="inline-flex gap-2">
-      <SubmitButton variant={variant === "outline" ? "default" : variant} size={size} className={className}>
+      <SubmitButton
+        variant={variant === "outline" ? "default" : variant}
+        size={size}
+        className={className}
+      >
         {confirmLabel}
       </SubmitButton>
       <Button type="button" variant="ghost" size={size} onClick={() => setAsking(false)}>

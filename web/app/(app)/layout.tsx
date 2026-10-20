@@ -1,7 +1,7 @@
 import { reviewItem } from "@pandabase/db";
 import { count, eq } from "drizzle-orm";
 import { Suspense } from "react";
-import { BottomNav } from "@/components/bottom-nav";
+import { BottomNav, NavBar } from "@/components/bottom-nav";
 import { currentMember } from "@/lib/auth/current";
 
 export default function AppLayout({ children }: LayoutProps<"/">) {
@@ -16,7 +16,7 @@ export default function AppLayout({ children }: LayoutProps<"/">) {
       <main id="main" className="flex-1 px-4 pt-5 pb-28">
         {children}
       </main>
-      <Suspense fallback={<BottomNav cleanupCount={null} />}>
+      <Suspense fallback={<NavBar path={null} cleanupCount={null} />}>
         <NavWithCount />
       </Suspense>
     </div>

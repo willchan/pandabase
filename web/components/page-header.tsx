@@ -19,10 +19,18 @@ export function PageHeader({
 }
 
 /** A quiet section heading inside a page. */
-export function SectionTitle({ children, aside }: { children: React.ReactNode; aside?: React.ReactNode }) {
+export function SectionTitle({
+  children,
+  aside,
+}: {
+  children: React.ReactNode;
+  aside?: React.ReactNode;
+}) {
   return (
     <div className="mt-6 mb-2 flex items-baseline justify-between gap-2">
-      <h2 className="text-sm font-semibold tracking-wide text-muted-foreground uppercase">{children}</h2>
+      <h2 className="text-sm font-semibold tracking-wide text-muted-foreground uppercase">
+        {children}
+      </h2>
       {aside}
     </div>
   );

@@ -25,7 +25,8 @@ export async function updateMember(
     if (!m) throw notFound(`member ${memberId}`);
     if (discord) {
       const [other] = await tx.select().from(member).where(eq(member.discordUserId, discord));
-      if (other && other.id !== memberId) throw badRequest("that Discord id belongs to someone else");
+      if (other && other.id !== memberId)
+        throw badRequest("that Discord id belongs to someone else");
     }
     await tx
       .update(member)

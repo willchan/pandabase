@@ -1,3 +1,5 @@
+import { PageSkeleton } from "@/components/page-skeleton";
+import { Suspense } from "react";
 import { item } from "@pandabase/db";
 import { asc, isNull } from "drizzle-orm";
 import { ChevronRightIcon, ReceiptTextIcon } from "lucide-react";
@@ -16,12 +18,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { currentMember } from "@/lib/auth/current";
 import { monthDay, shortDate, vendorName } from "@/lib/format";
 import { pendingReviews, type ReviewSummary } from "@/lib/services/reviews";
-import {
-  answerTrashCamAction,
-  confirmItemAction,
-  dismissAction,
-  mergeAction,
-} from "./actions";
+import { answerTrashCamAction, confirmItemAction, dismissAction, mergeAction } from "./actions";
 
 export const metadata: Metadata = { title: "Cleanup" };
 
@@ -34,7 +31,15 @@ const TABS = [
 
 type ItemOption = { id: string; name: string };
 
-export default async function CleanupPage(props: PageProps<"/cleanup">) {
+export default function CleanupPage(props: PageProps<"/cleanup">) {
+  return (
+    <Suspense fallback={<PageSkeleton />}>
+      <CleanupPageContent {...props} />
+    </Suspense>
+  );
+}
+
+async function CleanupPageContent(props: PageProps<"/cleanup">) {
   const { db, ctx } = await currentMember();
   const tz = ctx.config.householdTz;
   const params = await props.searchParams;
@@ -134,7 +139,13 @@ function ItemSelect({
       <label htmlFor={id} className="sr-only">
         {label}
       </label>
-      <NativeSelect id={id} name={name} defaultValue={defaultValue ?? ""} required className="flex-1">
+      <NativeSelect
+        id={id}
+        name={name}
+        defaultValue={defaultValue ?? ""}
+        required
+        className="flex-1"
+      >
         <option value="" disabled>
           {label}…
         </option>

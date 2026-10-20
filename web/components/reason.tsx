@@ -1,7 +1,8 @@
 import { Badge } from "@/components/ui/badge";
 import { amount, relativeDay } from "@/lib/format";
 
-type Reason = "runout" | "critical" | "consumed" | "static_threshold" | "near_runout" | "audit_hint";
+type Reason =
+  "runout" | "critical" | "consumed" | "static_threshold" | "near_runout" | "audit_hint";
 
 /** Why a line is on the list (DESIGN §4.3 restock reasons), in household words. */
 export function ReasonBadge({

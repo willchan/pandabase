@@ -124,14 +124,16 @@ export async function pendingReviews(q: Q): Promise<ReviewSummary[]> {
     if (r.receiptId && r.kind === "receipt") {
       const [x] = await q.select().from(receipt).where(eq(receipt.id, r.receiptId));
       const lines = (await receiptLines(q, r.receiptId)).filter(isOpenLine);
-      if (x) rec = { vendor: x.vendor, source: x.source, acquiredAt: x.acquiredAt, lines: lines.length };
+      if (x)
+        rec = { vendor: x.vendor, source: x.source, acquiredAt: x.acquiredAt, lines: lines.length };
     }
     let job: ReviewSummary["job"] = null;
     if (r.jobId && r.kind === "failed_job") {
       const [j] = await q.select().from(auditJob).where(eq(auditJob.id, r.jobId));
       if (j) job = { type: j.jobType, error: j.error, attempts: j.attempts };
     }
-    const intoId = typeof payload.merge_into_item_id === "string" ? payload.merge_into_item_id : null;
+    const intoId =
+      typeof payload.merge_into_item_id === "string" ? payload.merge_into_item_id : null;
     out.push({
       id: r.id,
       kind: r.kind,
@@ -190,9 +192,7 @@ export async function receiptReviewDetail(q: Q, reviewId: string): Promise<Recei
   if (!r || r.kind !== "receipt" || !r.receiptId) throw notFound(`receipt review ${reviewId}`);
   const [rec] = await q.select().from(receipt).where(eq(receipt.id, r.receiptId));
   if (!rec) throw notFound(`receipt ${r.receiptId}`);
-  const [job] = rec.jobId
-    ? await q.select().from(auditJob).where(eq(auditJob.id, rec.jobId))
-    : [];
+  const [job] = rec.jobId ? await q.select().from(auditJob).where(eq(auditJob.id, rec.jobId)) : [];
   const names = new Map(
     (await q.select({ id: item.id, name: item.canonicalName }).from(item)).map((i) => [
       i.id,
@@ -399,10 +399,7 @@ export async function answerReceiptReview(
       .set({ status: receiptStatus, updatedAt: ctx.now })
       .where(eq(receipt.id, rec.id));
 
-    const touched = [
-      ...events.map((e) => e.itemId),
-      ...plan.insert.map((e) => e.itemId),
-    ];
+    const touched = [...events.map((e) => e.itemId), ...plan.insert.map((e) => e.itemId)];
     await refreshInventoryState(tx, touched, ctx.now, ctx.config);
     const count = (k: LineDecision["kind"]) => decided.filter((d) => d.decision.kind === k).length;
     await closeReview(tx, r, status, ctx, {
@@ -425,12 +422,21 @@ export async function answerReceiptReview(
  */
 export async function mergeItems(
   db: Db,
-  input: { reviewId: string | null; itemId: string; intoItemId: string; unitQuantity: number | null },
+  input: {
+    reviewId: string | null;
+    itemId: string;
+    intoItemId: string;
+    unitQuantity: number | null;
+  },
   ctx: ServiceCtx,
 ): Promise<{ itemId: string; intoItemId: string }> {
   return db.transaction(async (tx) => {
     const r = input.reviewId
-      ? await pendingReview(tx, input.reviewId, ["merge_suggestion", "new_product", "unverified_item"])
+      ? await pendingReview(tx, input.reviewId, [
+          "merge_suggestion",
+          "new_product",
+          "unverified_item",
+        ])
       : null;
     if (r && r.itemId !== input.itemId) throw badRequest(`review ${r.id} is about another item`);
     const source = await getItem(tx, input.itemId);

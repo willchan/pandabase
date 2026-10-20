@@ -5,7 +5,12 @@ import { replayVelocity } from "../domain/velocity";
 import { badRequest, notFound } from "../http";
 import { getItem, productsByItem, type ProductRow } from "../repo/catalog";
 import type { Q } from "../repo/db";
-import { awayPeriods, loadEstimates, refreshInventoryState, type ItemEstimate } from "../repo/inventory";
+import {
+  awayPeriods,
+  loadEstimates,
+  refreshInventoryState,
+  type ItemEstimate,
+} from "../repo/inventory";
 import { emitTelemetry } from "../telemetry";
 import type { ServiceCtx } from "./types";
 

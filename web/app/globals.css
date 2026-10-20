@@ -31,9 +31,10 @@
   --bad-soft: oklch(0.95 0.03 27);
   --info: oklch(0.5 0.1 250);
   --info-soft: oklch(0.95 0.025 250);
-  --chart-1: oklch(0.55 0.11 158);
-  --chart-2: oklch(0.62 0.13 70);
-  --chart-3: oklch(0.56 0.16 27);
+  /* Categorical chart slots (validated with the dataviz palette checks, light + dark). */
+  --chart-1: oklch(0.52 0.11 158);
+  --chart-2: oklch(0.6 0.14 255);
+  --chart-3: oklch(0.72 0.14 72);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -64,9 +65,9 @@
     --bad-soft: oklch(0.32 0.06 25);
     --info: oklch(0.8 0.09 250);
     --info-soft: oklch(0.3 0.04 250);
-    --chart-1: oklch(0.76 0.12 158);
-    --chart-2: oklch(0.8 0.12 75);
-    --chart-3: oklch(0.74 0.14 27);
+    --chart-1: oklch(0.66 0.12 158);
+    --chart-2: oklch(0.62 0.13 255);
+    --chart-3: oklch(0.67 0.13 72);
   }
 }
 
@@ -116,6 +117,11 @@
   }
   body {
     @apply bg-background text-foreground;
-    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    font-family:
+      ui-sans-serif,
+      system-ui,
+      -apple-system,
+      "Segoe UI",
+      sans-serif;
   }
 }

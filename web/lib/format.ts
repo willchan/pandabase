@@ -1,5 +1,5 @@
 // Display formatting for the UI (household time zone; plain, calm wording).
-import { daysBetween, localDate } from "./domain/time";
+import { addDays, daysBetween, localDate } from "./domain/time";
 
 const fmt = (tz: string, opts: Intl.DateTimeFormatOptions) =>
   new Intl.DateTimeFormat("en-US", { timeZone: tz, ...opts });
@@ -44,7 +44,8 @@ export const qty = (x: number): string =>
 /** "2 eggs", "1 count" → "1", units pluralized naively. */
 export function amount(x: number, unit: string): string {
   if (unit === "count") return qty(x);
-  const plural = x === 1 || unit.endsWith("s") || /^(oz|lb|ml|l|g|kg)$/.test(unit) ? unit : `${unit}s`;
+  const plural =
+    x === 1 || unit.endsWith("s") || /^(oz|lb|ml|l|g|kg)$/.test(unit) ? unit : `${unit}s`;
   return `${qty(x)} ${plural}`;
 }
 
@@ -64,3 +65,7 @@ export const LOCATION_LABELS: Record<string, string> = {
   garden: "Garden",
   garage: "Garage",
 };
+
+/** Household date a perishable bought at `acquiredAt` should be used by (`YYYY-MM-DD`). */
+export const bestBeforeDate = (acquiredAt: string, shelfLifeDays: number, tz: string): string =>
+  addDays(localDate(acquiredAt, tz), shelfLifeDays);

@@ -96,7 +96,10 @@ describe("answerReceiptReview", () => {
       .select()
       .from(inventoryEvent)
       .where(
-        and(eq(inventoryEvent.sourceRef, detail.receipt.id), eq(inventoryEvent.itemId, line.itemId!)),
+        and(
+          eq(inventoryEvent.sourceRef, detail.receipt.id),
+          eq(inventoryEvent.itemId, line.itemId!),
+        ),
       );
     expect(events.map((e) => e.trust)).toEqual(["confirmed"]);
     const [alias] = await h.db
@@ -179,7 +182,13 @@ describe("answerReceiptReview", () => {
         subtotalCents: null,
         totalCents: 999,
         lines: [
-          { rawText: "ZZQ MYSTERY THING", asin: null, qty: 1, unitPriceCents: 1, lineTotalCents: 1 },
+          {
+            rawText: "ZZQ MYSTERY THING",
+            asin: null,
+            qty: 1,
+            unitPriceCents: 1,
+            lineTotalCents: 1,
+          },
           { rawText: "QQX OTHER THING", asin: null, qty: 2, unitPriceCents: 1, lineTotalCents: 2 },
         ],
       },
@@ -263,7 +272,11 @@ describe("mergeItems", () => {
       reviewKind: "new_product",
     });
     await expect(
-      mergeItems(h.db, { reviewId: null, itemId: kombucha, intoItemId: target, unitQuantity: null }, ctx),
+      mergeItems(
+        h.db,
+        { reviewId: null, itemId: kombucha, intoItemId: target, unitQuantity: null },
+        ctx,
+      ),
     ).rejects.toThrow(/already merged/);
   });
 
@@ -300,10 +313,18 @@ describe("mergeItems", () => {
     const [p] = await h.db.select().from(product).where(eq(product.itemId, kombucha));
     await mergeItems(
       h.db,
-      { reviewId: "rv-merge", itemId: kombucha, intoItemId: target, unitQuantity: 3 * p!.unitQuantity },
+      {
+        reviewId: "rv-merge",
+        itemId: kombucha,
+        intoItemId: target,
+        unitQuantity: 3 * p!.unitQuantity,
+      },
       ctx,
     );
-    const [ev] = await h.db.select().from(inventoryEvent).where(eq(inventoryEvent.id, "ev-kombucha"));
+    const [ev] = await h.db
+      .select()
+      .from(inventoryEvent)
+      .where(eq(inventoryEvent.id, "ev-kombucha"));
     expect(ev).toMatchObject({ itemId: target, quantity: 6 });
     const [rv] = await h.db.select().from(reviewItem).where(eq(reviewItem.id, "rv-merge"));
     expect(rv!.status).toBe("confirmed");
@@ -320,11 +341,19 @@ describe("mergeItems", () => {
   it("validates the target and the review", async () => {
     const r = await reviewOf("new_product");
     await expect(
-      mergeItems(h.db, { reviewId: r.id, itemId: r.itemId!, intoItemId: r.itemId!, unitQuantity: null }, ctx),
+      mergeItems(
+        h.db,
+        { reviewId: r.id, itemId: r.itemId!, intoItemId: r.itemId!, unitQuantity: null },
+        ctx,
+      ),
     ).rejects.toThrow(/itself/);
     const eggs = await h.itemId("Eggs");
     await expect(
-      mergeItems(h.db, { reviewId: r.id, itemId: eggs, intoItemId: r.itemId!, unitQuantity: null }, ctx),
+      mergeItems(
+        h.db,
+        { reviewId: r.id, itemId: eggs, intoItemId: r.itemId!, unitQuantity: null },
+        ctx,
+      ),
     ).rejects.toThrow(/another item/);
   });
 });
@@ -358,7 +387,10 @@ describe("confirmItem / answerTrashCam / dismissReview", () => {
       .select()
       .from(labeledObservation)
       .where(eq(labeledObservation.sourceKind, "trash_cam"));
-    expect(label).toMatchObject({ humanLabel: { item_id: yogurt }, keyframeR2Key: expect.any(String) });
+    expect(label).toMatchObject({
+      humanLabel: { item_id: yogurt },
+      keyframeR2Key: expect.any(String),
+    });
     const est = (await loadEstimates(h.db, ctx.now, ctx.config, [yogurt])).get(yogurt)!;
     expect(est.estimate.status).toBe("consumed");
     const [after] = await h.db.select().from(reviewItem).where(eq(reviewItem.id, r.id));

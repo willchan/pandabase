@@ -18,7 +18,9 @@ export function authConfig(env: NodeJS.ProcessEnv = process.env): NextAuthConfig
         credentials: { email: { label: "Email", type: "email" } },
         authorize: (c) => {
           const email = typeof c?.email === "string" ? c.email.trim().toLowerCase() : "";
-          return isAllowedEmail(email, env) ? { id: email, email, name: email.split("@")[0] } : null;
+          return isAllowedEmail(email, env)
+            ? { id: email, email, name: email.split("@")[0] }
+            : null;
         },
       }),
     );

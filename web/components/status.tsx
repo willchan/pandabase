@@ -2,7 +2,10 @@ import { Badge } from "@/components/ui/badge";
 
 export type InventoryStatus = "out" | "low" | "stocked" | "unknown" | "critical" | "consumed";
 
-const STATUS: Record<InventoryStatus, { label: string; variant: "ok" | "warn" | "bad" | "secondary" }> = {
+const STATUS: Record<
+  InventoryStatus,
+  { label: string; variant: "ok" | "warn" | "bad" | "secondary" }
+> = {
   stocked: { label: "Stocked", variant: "ok" },
   low: { label: "Low", variant: "warn" },
   critical: { label: "Running low", variant: "warn" },
@@ -26,7 +29,10 @@ export function TrustBadge({
 }) {
   if (trust === "provisional")
     return (
-      <Badge variant="unverified" title={title ?? "Applied from a likely match — not yet confirmed"}>
+      <Badge
+        variant="unverified"
+        title={title ?? "Applied from a likely match — not yet confirmed"}
+      >
         provisional
       </Badge>
     );

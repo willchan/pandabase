@@ -6,7 +6,9 @@ export default defineConfig({
     alias: { "@": fileURLToPath(new URL(".", import.meta.url)) },
   },
   test: {
-    include: ["**/*.test.ts"],
+    include: ["**/*.test.ts", "**/*.test.tsx"],
+    // next-auth imports `next/server` without an extension; let Vite resolve it.
+    server: { deps: { inline: ["next-auth", "@auth/core"] } },
     exclude: ["node_modules/**", ".next/**"],
     coverage: {
       // Always on: the domain logic must stay ≥ 95% line-covered (PLAN M3).

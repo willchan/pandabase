@@ -25,7 +25,8 @@ export async function answerReceiptAction(_: ActionResult, f: FormData): Promise
       if (!key.startsWith("line:") || typeof value !== "string") continue;
       const lineId = key.slice(5);
       if (value === "keep" || value === "ignore") answers.push({ lineId, answer: value });
-      else if (value.startsWith("item:")) answers.push({ lineId, answer: "item", itemId: value.slice(5) });
+      else if (value.startsWith("item:"))
+        answers.push({ lineId, answer: "item", itemId: value.slice(5) });
       // "leave": no answer — the line stays unmatched.
     }
     await answerReceiptReview(db, need(str(f, "reviewId"), "Review"), answers, ctx);
@@ -53,7 +54,11 @@ export async function mergeAction(_: ActionResult, f: FormData): Promise<ActionR
 
 export async function confirmItemAction(_: ActionResult, f: FormData): Promise<ActionResult> {
   return runAction("confirm_item", async ({ db, ctx }) => {
-    await confirmItem(db, { reviewId: need(str(f, "reviewId"), "Review"), name: str(f, "name") }, ctx);
+    await confirmItem(
+      db,
+      { reviewId: need(str(f, "reviewId"), "Review"), name: str(f, "name") },
+      ctx,
+    );
     return "Saved.";
   });
 }
