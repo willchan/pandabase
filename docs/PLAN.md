@@ -33,7 +33,7 @@ contracts.
 | Milestone | Status | PR |
 |---|---|---|
 | M1 Skeleton & CI | done | #2 |
-| M2 Schema & seed | in review | |
+| M2 Schema & seed | in review | #3 |
 | M3 Domain logic | todo | |
 | M4 API & contracts | todo | |
 | M5 Web UI & auth | todo | |
