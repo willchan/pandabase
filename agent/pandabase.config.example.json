@@ -1,0 +1,44 @@
+{
+  "api_base_url": "https://pandabase.example.vercel.app",
+  "web_url": "https://pandabase.example.vercel.app",
+  "household_tz": "America/Los_Angeles",
+  "discord": {
+    "guild_id": "100000000000000001",
+    "cycle_channel": "100000000000000010",
+    "intake_channel": "100000000000000010",
+    "ops_channel": "100000000000000010"
+  },
+  "members": [
+    {
+      "name": "will",
+      "discord_id": "100000000000000101",
+      "profile": "will",
+      "cart_member": true,
+      "receipt_sweep": "daily"
+    },
+    {
+      "name": "partner",
+      "discord_id": "100000000000000102",
+      "profile": "partner",
+      "cart_member": false,
+      "receipt_sweep": "weekly"
+    }
+  ],
+  "profiles_file": "profiles.json",
+  "state_dir": "~/.pandabase/state",
+  "diagnostics_dir": "/diagnostics",
+  "cart": {
+    "batch_size": 10,
+    "wholefoods_tier1": false,
+    "tier1_vendors": ["amazon"],
+    "max_price_checks": 20,
+    "page_delay_seconds": 1.5
+  },
+  "receipts": {
+    "throttle_seconds": 3,
+    "sweep_lookback_days": 14,
+    "initial_sweep_days": 30,
+    "backfill_months": 12,
+    "max_pages": 60
+  }
+}

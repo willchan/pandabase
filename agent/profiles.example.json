@@ -1,0 +1,14 @@
+{
+  "profiles": {
+    "will": {
+      "cdp_url": "http://127.0.0.1:9222",
+      "user_data_dir": "~/Library/Application Support/PandaBase/chromium-will",
+      "openclaw_browser_profile": "pandabase-will"
+    },
+    "partner": {
+      "cdp_url": "http://127.0.0.1:9223",
+      "user_data_dir": "~/Library/Application Support/PandaBase/chromium-partner",
+      "openclaw_browser_profile": "pandabase-partner"
+    }
+  }
+}
