@@ -9,6 +9,7 @@ import logging
 import signal
 import sys
 import threading
+import time
 from collections.abc import Callable
 from types import FrameType
 from typing import Any
@@ -18,7 +19,7 @@ from pydantic import ValidationError
 
 from pandabase_worker import __version__
 from pandabase_worker.api import ApiClient, ApiError, JobType, LeaseLost
-from pandabase_worker.config import Settings
+from pandabase_worker.config import HEARTBEAT_SECONDS, Settings
 from pandabase_worker.contracts import ClaimedJob, JobCompleteRequest
 from pandabase_worker.jobs import JobFailure, Outcome, merge_suggest, paper_receipt, trash_cam
 from pandabase_worker.jobs.context import JobContext
@@ -49,6 +50,7 @@ class Worker:
         ollama: OllamaClient,
         media: MediaClient,
         stop: threading.Event | None = None,
+        clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self.settings = settings
         self.api = api
@@ -56,6 +58,9 @@ class Worker:
         self.media = media
         self.stop = stop or threading.Event()
         self._ollama_health: tuple[str, tuple[str, ...]] | None = None
+        self._clock = clock
+        self._last_heartbeat: float | None = None
+        self._ollama_checked = False
 
     # -- loop ---------------------------------------------------------------------------------
 
@@ -69,6 +74,7 @@ class Worker:
         )
         while not self.stop.is_set():
             try:
+                self.heartbeat()
                 worked = self.run_once()
             except Exception:
                 log.exception("poll failed")
@@ -76,6 +82,20 @@ class Worker:
             if not worked:
                 self.stop.wait(self.settings.poll_interval_seconds)
         log.info("worker stopped")
+
+    def heartbeat(self) -> None:
+        """`worker_heartbeat` at startup and every `HEARTBEAT_SECONDS` (liveness for deploys)."""
+        now = self._clock()
+        if self._last_heartbeat is not None and now - self._last_heartbeat < HEARTBEAT_SECONDS:
+            return
+        self._last_heartbeat = now
+        self._emit_now(
+            "worker_heartbeat",
+            version=__version__,
+            vlm_model=self.settings.vlm_model,
+            text_model=self.settings.text_model,
+            ollama_ok=(self._ollama_health is None) if self._ollama_checked else None,
+        )
 
     def run_once(self) -> bool:
         """Claim and finish at most one job. True if a job was processed."""
@@ -102,6 +122,7 @@ class Worker:
         missing = sorted({m for t, m in need.items() if t not in types})
         reason = "unreachable" if models is None else "models missing"
         health = (reason, tuple(missing)) if missing else None
+        self._ollama_checked = True
         if health != self._ollama_health:  # report each change, not every poll
             self._ollama_health = health
             if health:

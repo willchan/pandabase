@@ -358,7 +358,12 @@ Static items: `on_hand = anchor_qty` (no decay); `out` at 0, `low` when `≤ reo
 **Shelf life:** if `shelf_life_days` is set, units acquired more than `shelf_life_days` ago are
 dropped from the estimate and a `presumed_discarded` event is logged (trust `provisional`; the
 daily cron writes them via `shelfLifeDiscards`). FIFO: what's on hand is assumed to be the newest
-units, so `expired = max(0, on_hand − units acquired at that location within the window)`.
+units, so `expired = max(0, on_hand − units in batches started at that location within the window)`.
+Each `acquired` event starts a batch; a count (`observed` with a quantity) replaces the location's
+earlier batches with one batch of the counted units, fresh as of the count — a count replaces the
+estimate, so it replaces the freshness clock too (`freshnessBatches`). A null-quantity `critical`
+flag counts nothing and leaves the clocks alone. Counted units still age out `shelf_life_days`
+after the count.
 
 **Overbuy:** on acquisition of a velocity item, if the stock already on hand would have lasted
 `on_hand_before × ema ≥ overbuyDaysOfStock` (default 14 days), log telemetry `overbuy`.
@@ -621,7 +626,9 @@ productId, vendor, outcome, error}`, `cycle_opened`, `cycle_transition`, `job_cr
 `vlm_parse_failure` also carry `job_id`, `job_type`, `attempt`, `repaired` and per-type fields
 (receipts `lines`, `discount_lines`, `date_fallback`, `store_missing`; Trash Cam `detections`,
 `top_confidence`; merges `items`, `suggestions`, `dropped`), all copied into the `vlm` extract.
-Worker health metrics (stored, not yet in the report): `worker_ollama_unavailable {reason,
+Worker health metrics (stored, not yet in the report): `worker_heartbeat {version, vlm_model,
+text_model, ollama_ok}` (at startup and every 10 min; `ollama_ok` null until first checked),
+`worker_ollama_unavailable {reason,
 missing_models}`, `worker_job_failed {job_id, job_type, attempt, error}`, `worker_lease_lost`,
 `worker_complete_error {error}`.
 
@@ -653,9 +660,25 @@ then expired reviews and slow routes over `diagnostics.slowRouteMs`) and keeps t
 |---|---|---|---|
 | local | `db/dev.db` (libSQL file; the default when `TURSO_DATABASE_URL` is unset), seeded fake household | `DEV_AUTH_BYPASS` | `pnpm db:reset && pnpm db:seed`, `pnpm dev` |
 | preview | Turso `pandabase-preview` | Google | Vercel previews |
-| production | Turso `pandabase` | Google | Vercel; migrations run manually: `pnpm db:migrate:prod` |
+| production | Turso `pandabase` | Google | Vercel; deployed by `deploy.yml` after migrations (see *Continuous deployment*) |
 
 Timestamps stored UTC; `HOUSEHOLD_TZ=America/Los_Angeles` defines "today" and schedules.
+
+### Continuous deployment (M9)
+
+- **Web:** GitHub Actions `deploy.yml`, after CI passes on `main`: migrate Turso production →
+  `vercel deploy --prod`. Vercel's own production auto-deploy is off so code never ships before its
+  migration. Previews stay on Vercel's Git integration against `pandabase-preview`.
+- **Migrations are backward-compatible** (expand → contract): the previous release must run on the
+  new schema, so a failed deploy after a successful migration leaves production working.
+- **Mac Mini — pull, never push:** CI publishes the worker image to GHCR on green `main`. A `launchd`
+  timer runs `make update` every 15 min: newer green sha → `git pull` (skills are symlinked, so they
+  update too) → `uv sync` → `docker compose pull && up -d` → health check → automatic rollback to the
+  previous sha/image on failure, with one `#pandabase` post. No inbound ports; no self-hosted runner.
+- **Quiet windows:** no Mac Mini updates Fri 17:30–19:00 or Sat 09:30–12:00 (household TZ), around
+  the nudge and cart build.
+- Every deploy emits `deploy {component, sha, outcome}` telemetry; the weekly report has a *Deploys*
+  section.
 
 **Env vars** — web: `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN`, `AUTH_SECRET`, `AUTH_GOOGLE_ID`,
 `AUTH_GOOGLE_SECRET`, `ALLOWED_EMAILS`, `AGENT_API_TOKEN`, `WORKER_API_TOKEN`, `CRON_SECRET`,
@@ -713,4 +736,6 @@ docker-compose.yml, Makefile, CLAUDE.md, README.md, .github/workflows/ci.yml
 | 27 | One route table (`web/lib/contracts/routes.ts`) drives handlers and the OpenAPI document; orchestration in `web/lib/services` | Scopes, idempotency and contracts can't drift between code and docs; server actions (M5) reuse the same services |
 | 28 | Snake_case wire format; Pydantic models generated from OpenAPI 3.1 with nullable unions flattened | Python clients read naturally; generated models stay plain (`str \| None`, no wrapper root models) |
 | 29 | Text purchases become manual receipts | One `applyReceipt` path, so velocity, overbuy and product stats learn from "bought milk" too |
-| 30 | Worker VLM `qwen3.5:9b` (Q4), text `qwen3.5:4b`, Ollama JSON-schema output + one repair turn | Best OCR-capable vision model that fits ~8GB next to OpenClaw's model; one family keeps prompts portable; schema-constrained output makes repair rare and bounded |
+| 30 | CD: one workflow migrates Turso then deploys Vercel; migrations backward-compatible | Code never ships ahead of its schema; a half-failed deploy can't break production |
+| 31 | Mac Mini updates are pulled by a `launchd` timer with health check, rollback and quiet windows | No inbound ports or self-hosted runner on a home machine; never disrupt the Friday nudge or Saturday build |
+| 32 | Worker VLM `qwen3.5:9b` (Q4), text `qwen3.5:4b`, Ollama JSON-schema output + one repair turn | Best OCR-capable vision model that fits ~8GB next to OpenClaw's model; one family keeps prompts portable; schema-constrained output makes repair rare and bounded |

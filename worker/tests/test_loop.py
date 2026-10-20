@@ -275,3 +275,27 @@ def test_sigterm_finishes_the_current_job_then_stops(rig: Rig) -> None:
     finally:
         signal.signal(signal.SIGTERM, previous[0])
         signal.signal(signal.SIGINT, previous[1])
+
+
+def test_heartbeat_at_startup_and_every_ten_minutes(rig: Rig) -> None:
+    now = [1000.0]
+    rig.worker._clock = lambda: now[0]
+    rig.worker.heartbeat()
+    rig.worker.heartbeat()  # too soon
+    now[0] += 599
+    rig.worker.heartbeat()
+    now[0] += 1
+    rig.worker.heartbeat()
+    beats = rig.engine.metrics("worker_heartbeat")
+    assert len(beats) == 2
+    assert beats[0] == {
+        "version": "0.0.0",
+        "vlm_model": "qwen3.5:9b",
+        "text_model": "qwen3.5:4b",
+        "ollama_ok": None,  # not checked yet
+    }
+    rig.ollama.tags = None
+    rig.worker.claimable_types()
+    now[0] += 600
+    rig.worker.heartbeat()
+    assert rig.engine.metrics("worker_heartbeat")[-1]["ollama_ok"] is False

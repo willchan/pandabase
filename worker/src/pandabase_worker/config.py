@@ -23,6 +23,8 @@ HTTP_BACKOFF_SECONDS = 1.0
 # Per-request timeouts: API/R2 calls are quick; a cold VLM load + inference is not.
 API_TIMEOUT_SECONDS = 30.0
 OLLAMA_TIMEOUT_SECONDS = 240.0
+# Liveness: `worker_heartbeat` at startup and this often (deploy health checks look for it).
+HEARTBEAT_SECONDS = 600
 # Merge suggestions: most items one job sends to the text model.
 MERGE_MAX_ITEMS = 150
 
