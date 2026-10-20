@@ -361,3 +361,31 @@ export async function rejectProductById(
     };
   });
 }
+
+/** What a member can say about an item from the UI. */
+export type ItemMark =
+  | { kind: "out" } // "we're out" → consumed
+  | { kind: "low" } // "running low" → critical flag
+  | { kind: "count"; quantity: number; location?: Location }; // a fresh count
+
+/**
+ * "We're out", "running low" and counts from the web UI — the same events the agent records
+ * (`recordInventoryEvents`), attributed to the signed-in member.
+ */
+export async function markItem(
+  db: Db,
+  itemId: string,
+  mark: ItemMark,
+  ctx: ServiceCtx,
+): Promise<z.input<typeof InventoryEventsResponse>> {
+  const event: InventoryEventInputT =
+    mark.kind === "out"
+      ? { item_id: itemId, kind: "consumed" }
+      : mark.kind === "low"
+        ? { item_id: itemId, kind: "critical" }
+        : { item_id: itemId, kind: "observed", quantity: mark.quantity, location: mark.location };
+  return recordInventoryEvents(db, [{ ...event, source: "manual" }], {
+    ...ctx,
+    idempotencyKey: null,
+  });
+}

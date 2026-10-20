@@ -4,6 +4,9 @@ import type { InventoryState } from "./inventory";
 import type { Alias } from "./matching";
 import {
   applyReceipt,
+  lineBaseUnits,
+  reconcileReceiptEvents,
+  type FinalLine,
   receiptDedupeKey,
   resolveReceiptReview,
   totalsCheck,
@@ -744,5 +747,70 @@ describe("resolveReceiptReview", () => {
       "DRAGONFRUIT",
       "PLASTIC BAG",
     ]);
+  });
+});
+
+describe("lineBaseUnits", () => {
+  const eggs12 = product("eggs12", "eggs", { unitQuantity: 12, stance: "preferred" });
+  const eggs18 = product("eggs18", "eggs", { unitQuantity: 18, vendor: "amazon" });
+  it("uses the line's product, else the preferred product at the vendor, else 1", () => {
+    expect(lineBaseUnits({ qty: 2, productId: "eggs18" }, [eggs12, eggs18], "wholefoods")).toBe(36);
+    expect(lineBaseUnits({ qty: 2, productId: null }, [eggs12, eggs18], "wholefoods")).toBe(24);
+    expect(lineBaseUnits({ qty: 2, productId: null }, [eggs18], "wholefoods")).toBe(36);
+    expect(lineBaseUnits({ qty: 2, productId: null }, [], "wholefoods")).toBe(2);
+  });
+});
+
+describe("reconcileReceiptEvents", () => {
+  const line = (itemId: string | null, baseQty: number, o: Partial<FinalLine> = {}): FinalLine => ({
+    itemId,
+    qty: 1,
+    baseQty,
+    trust: "confirmed",
+    ignored: false,
+    ...o,
+  });
+  it("confirms a kept event, reverses a wrong one, applies the correction", () => {
+    expect(
+      reconcileReceiptEvents(
+        [line("eggs", 12), line("kombucha", 2), line(null, 0), line("bag", 1, { ignored: true })],
+        [
+          { id: "e1", itemId: "eggs", quantity: 12, trust: "provisional" },
+          { id: "e2", itemId: "ginger", quantity: 2, trust: "provisional" },
+        ],
+      ),
+    ).toEqual({
+      trust: [{ eventId: "e1", trust: "confirmed" }],
+      expire: ["e2"],
+      insert: [{ itemId: "kombucha", quantity: 2, trust: "confirmed" }],
+    });
+  });
+
+  it("re-applies the remaining units when one of two summed lines moves", () => {
+    expect(
+      reconcileReceiptEvents(
+        [line("milk", 2), line("oat milk", 1)],
+        [{ id: "e1", itemId: "milk", quantity: 3, trust: "provisional" }],
+      ),
+    ).toEqual({
+      trust: [],
+      expire: ["e1"],
+      insert: [
+        { itemId: "milk", quantity: 2, trust: "confirmed" },
+        { itemId: "oat milk", quantity: 1, trust: "confirmed" },
+      ],
+    });
+  });
+
+  it("keeps an unverified line provisional and leaves matching events alone", () => {
+    expect(
+      reconcileReceiptEvents(
+        [line("eggs", 12), line("eggs", 12, { trust: "unverified" })],
+        [
+          { id: "e1", itemId: "eggs", quantity: 24, trust: "provisional" },
+          { id: "e2", itemId: "eggs", quantity: 24, trust: "provisional" },
+        ],
+      ),
+    ).toEqual({ trust: [], expire: ["e2"], insert: [] });
   });
 });

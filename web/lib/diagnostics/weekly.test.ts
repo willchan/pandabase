@@ -71,6 +71,7 @@ describe("weekly diagnostics", () => {
         ["state_engine", "cart_line_result", { itemId: eggs, outcome: "failed", vendor: "wholefoods", error: "button not found" }],
         ["agent", "selector_error", { selector: "#add-to-cart", error: "timeout" }],
         ["cron", "review_expired", { kind: "receipt", action: "drop_pending_lines" }],
+        ["state_engine", "review_resolved", { kind: "receipt", outcome: "corrected", ageHours: 30 }],
         ["agent", "clarifying_question", { question: "Was that oat milk or whole milk?" }],
         ["api", "api_request", { route: "GET /api/predictions", method: "GET", status: 200, latencyMs: 1800 }],
         ["api", "api_request", { route: "GET /api/predictions", method: "GET", status: 500, latencyMs: 20 }],
@@ -87,6 +88,7 @@ describe("weekly diagnostics", () => {
     expect(md).toContain("Failed: Eggs — button not found");
     expect(md).toContain("Asked: “Was that oat milk or whole milk?”");
     expect(md).toContain("| GET /api/predictions | 2 | 20 | 1800 | 1 |");
+    expect(md).toContain("| receipt | 0 | 1 | 0 | 30 |");
     expect(md).toMatch(/## 1\. Summary\n\n1\. Tier-1 cart injection/);
     const extract = (name: string) => report.extracts.find((e) => e.name === name)!.jsonl.trim().split("\n");
     expect(extract("cart_injection.jsonl")).toHaveLength(3);

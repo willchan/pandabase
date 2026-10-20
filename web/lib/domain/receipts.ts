@@ -251,7 +251,23 @@ const NEW_ITEM_DEFAULTS = {
   baseUnit: "count",
 } as const;
 
-const eventSource = (s: ReceiptInput["source"]): AcquiredEvent["source"] =>
+/**
+ * Base units a line adds: `qty × unit_quantity` of the line's product, else of the item's
+ * preferred product for this vendor (12- vs 18-packs normalize to eggs), else `qty`.
+ */
+export function lineBaseUnits(
+  line: { qty: number; productId: string | null },
+  products: readonly ProductCandidate[],
+  vendor: string,
+): number {
+  const fallback =
+    pickPreferred(products.filter((p) => p.vendor === vendor)) ?? pickPreferred(products);
+  const unit =
+    products.find((p) => p.id === line.productId)?.unitQuantity ?? fallback?.unitQuantity ?? 1;
+  return toBaseUnits(line.qty, unit);
+}
+
+export const eventSource = (s: ReceiptInput["source"]): AcquiredEvent["source"] =>
   s === "digital" ? "digital_receipt" : s === "paper" ? "paper_receipt" : "manual";
 
 // --- applyReceipt -------------------------------------------------------------------------------
@@ -433,14 +449,9 @@ export async function applyReceipt(
       ? fx.newProducts.filter((p) => p.itemId === itemId).map(newProductRecord)
       : await repo.products(itemId);
 
-    // Base units: the line's product, else the item's preferred product for this vendor.
-    const fallback =
-      pickPreferred(products.filter((p) => p.vendor === input.vendor)) ?? pickPreferred(products);
     for (const l of lines) {
       if (l.baseQty > 0) continue;
-      const unit =
-        products.find((p) => p.id === l.productId)?.unitQuantity ?? fallback?.unitQuantity ?? 1;
-      l.baseQty = toBaseUnits(l.qty, unit);
+      l.baseQty = lineBaseUnits(l, products, input.vendor);
     }
     const qty = lines.reduce((s, l) => s + l.baseQty, 0);
     const provisional = lines.some((l) => l.trust !== "confirmed");
@@ -788,6 +799,70 @@ export function resolveReceiptReview(input: {
       }
       out.labels.push({ lineId: l.lineId, modelOutput, humanLabel: { ignored: true } });
     }
+  }
+  return out;
+}
+
+/** A receipt line after its review was answered. */
+export interface FinalLine {
+  itemId: string | null;
+  qty: number;
+  /** Base units (see `lineBaseUnits`). */
+  baseQty: number;
+  trust: "confirmed" | "unverified";
+  ignored: boolean;
+}
+
+/** The receipt's current (non-expired) `acquired` events. */
+export interface ReceiptEvent {
+  id: string;
+  itemId: string;
+  quantity: number;
+  trust: "confirmed" | "provisional";
+}
+
+export interface EventReconciliation {
+  /** Same item and quantity: only the trust changes. */
+  trust: { eventId: string; trust: "confirmed" | "provisional" }[];
+  /** Reversed (wrong item, changed quantity, or every line of the item ignored). */
+  expire: string[];
+  /** New `acquired` events (corrected or newly matched lines). */
+  insert: { itemId: string; quantity: number; trust: "confirmed" | "provisional" }[];
+}
+
+/**
+ * After a receipt review (§4.5), make the receipt's `acquired` events match its final lines: one
+ * event per item (lines of one item sum), `confirmed` unless a line is still unverified. An
+ * existing event with the right item and quantity is kept (trust upgraded); anything else is
+ * reversed (`expired`) and re-applied, so correcting one of two lines that summed into one event
+ * keeps the other line's units.
+ */
+export function reconcileReceiptEvents(
+  lines: readonly FinalLine[],
+  events: readonly ReceiptEvent[],
+): EventReconciliation {
+  const out: EventReconciliation = { trust: [], expire: [], insert: [] };
+  const wanted = new Map<string, { quantity: number; trust: "confirmed" | "provisional" }>();
+  for (const l of lines) {
+    if (l.itemId === null || l.ignored) continue;
+    const w = wanted.get(l.itemId) ?? { quantity: 0, trust: "confirmed" as const };
+    wanted.set(l.itemId, {
+      quantity: w.quantity + l.baseQty,
+      trust: w.trust === "provisional" || l.trust !== "confirmed" ? "provisional" : "confirmed",
+    });
+  }
+  const kept = new Set<string>();
+  for (const e of events) {
+    const w = wanted.get(e.itemId);
+    if (w && !kept.has(e.itemId) && Math.abs(w.quantity - e.quantity) < 1e-9) {
+      kept.add(e.itemId);
+      if (w.trust !== e.trust) out.trust.push({ eventId: e.id, trust: w.trust });
+    } else {
+      out.expire.push(e.id);
+    }
+  }
+  for (const [itemId, w] of wanted) {
+    if (!kept.has(itemId) && w.quantity > 0) out.insert.push({ itemId, ...w });
   }
   return out;
 }

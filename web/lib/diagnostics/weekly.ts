@@ -443,8 +443,21 @@ export async function renderWeekly(
     };
   });
   const slow = routeStats.filter((r) => r.p95 > config.diagnostics.slowRouteMs);
+  const answered = metric("review_resolved");
+  const answeredRows = countBy(answered, (t) => s(t.p.kind) ?? "?").map(([kind]) => {
+    const mine = answered.filter((t) => (s(t.p.kind) ?? "?") === kind);
+    const outcome = (o: string) => mine.filter((t) => t.p.outcome === o).length;
+    return [
+      kind,
+      outcome("confirmed"),
+      outcome("corrected"),
+      outcome("dismissed"),
+      num(percentile(mine.map((t) => n(t.p.ageHours)).filter(Number.isFinite), 50), 1),
+    ];
+  });
   extracts["ux.jsonl"] = [
     ...expiredReviews.map((t) => ({ at: t.at, metric: t.metric, ...t.p })),
+    ...answered.map((t) => ({ at: t.at, metric: t.metric, ...t.p })),
     ...questions.map((t) => ({ at: t.at, metric: t.metric, ...t.p })),
     ...routeStats.map((r) => ({ metric: "route_latency", ...r })),
   ];
@@ -456,6 +469,8 @@ export async function renderWeekly(
     "7. UX friction",
     [
       table(["Expired review kind", "Count"], countBy(expiredReviews, (t) => s(t.p.kind) ?? "?")),
+      "",
+      table(["Answered review kind", "Confirmed", "Corrected", "Dismissed", "Median age h"], answeredRows),
       "",
       `Clarifying questions asked: ${questions.length}.`,
       "",
