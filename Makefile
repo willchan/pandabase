@@ -1,5 +1,5 @@
 # Thin wrappers over pnpm/uv. Targets marked "stub" are filled in by the milestone named.
-.PHONY: install dev lint typecheck test check py-check smoke db-reset db-seed contracts
+.PHONY: install dev lint typecheck test check py-check smoke db-reset db-seed db-check contracts
 
 PY_PROJECTS := worker agent/tools
 
@@ -25,14 +25,22 @@ py-check:
 	done
 
 # Everything CI runs.
-check: lint typecheck test py-check
+check: lint typecheck test py-check db-check
 	pnpm --filter web build
 
-db-reset: # stub
-	@echo "db-reset: not implemented yet (M2)"; exit 1
+db-reset:
+	pnpm db:reset
 
-db-seed: # stub
-	@echo "db-seed: not implemented yet (M2)"; exit 1
+db-seed:
+	pnpm db:seed
+
+# Migrations consistent and up to date with the schema, and the seed loads.
+db-check:
+	pnpm drizzle-kit check
+	pnpm db:generate
+	@test -z "$$(git status --porcelain -- db/migrations)" || \
+	  (git status --porcelain -- db/migrations; echo "db/migrations differs from HEAD: commit the generated migration"; exit 1)
+	pnpm db:reset && pnpm db:seed
 
 contracts: # stub
 	@echo "contracts: not implemented yet (M4)"; exit 1

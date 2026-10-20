@@ -2,6 +2,7 @@
 *.md
 pnpm-lock.yaml
 contracts/openapi.json
+db/migrations/
 .next/
 next-env.d.ts
 worker/

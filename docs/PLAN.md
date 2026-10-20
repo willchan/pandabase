@@ -32,8 +32,8 @@ contracts.
 
 | Milestone | Status | PR |
 |---|---|---|
-| M1 Skeleton & CI | in review | #2 |
-| M2 Schema & seed | todo | |
+| M1 Skeleton & CI | done | #2 |
+| M2 Schema & seed | in review | #3 |
 | M3 Domain logic | todo | |
 | M4 API & contracts | todo | |
 | M5 Web UI & auth | todo | |
@@ -138,7 +138,64 @@ pnpm drizzle-kit check
 **Out of scope:** domain logic (seed writes events directly; `inventory_state` can be filled by a
 naive projection to be replaced in M3).
 
-**Notes:** —
+**Notes:**
+
+*Versions chosen (checked 2026-10-20):* drizzle-orm **0.45.4**, drizzle-kit **0.31.11** (latest
+stable; 1.0 is still `rc`), `@libsql/client` **0.18.0**, `ulid` **3.0.2**, `tsx` **4.23.15** (runs
+the scripts), Vitest **5.0** (same as `/web`). All past pnpm's minimum-release-age; no exclusions
+added. `esbuild` (via drizzle-kit/tsx) is denied its install script in `allowBuilds` — it ships its
+binary as an optional dependency.
+
+*Deviations / choices (DESIGN §2 updated to match):*
+- Default local DB is **`db/dev.db` resolved absolutely** (not a cwd-relative `file:./dev.db`), so
+  root scripts, `/db` scripts and later `/web` all hit the same file. `TURSO_DATABASE_URL` overrides;
+  `.env.example` now leaves it blank (M1-owned file, small edit).
+- Scripts don't load `.env` files; export `TURSO_*` in the shell when targeting Turso.
+  `db:seed` and `db:reset` refuse non-`file:` URLs (`seed --force` overrides); `db:migrate:prod`
+  refuses `file:` URLs and needs `TURSO_AUTH_TOKEN`.
+- `pnpm drizzle-kit <cmd>` is a root script forwarding to `/db`'s drizzle-kit (config in
+  `db/drizzle.config.ts`, dialect `turso`).
+- Ambiguities resolved: "at most one non-closed cycle" → at most one **active** (`open|building|
+  ready`) since `skipped`/`other_store` are terminal in §4.7, plus `week_label` unique; "exactly one
+  cart account" → partial unique enforces at most one; `review_item.expires_at` nullable only for
+  `unverified_item` (§4.6 "never expires"), `default_action` required; `vendor_alias.item_id`
+  nullable only when `ignored`; `inventory_event.to_location` set iff `moved`; `inventory_state`
+  anchor columns nullable; catalog/receipt-line trust = `confirmed|unverified`;
+  `storage_audit` already allowed in the `job_type` CHECK.
+- CHECK and partial-index expressions use **unqualified** column names (`col()` helper in
+  `schema/common.ts`): Drizzle's default `"table"."col"` would break when drizzle-kit rebuilds a
+  SQLite table under a temp name in a future migration.
+- Added indexes beyond §2 for obvious access paths (events by item/location/time, jobs by status,
+  reviews by status/expiry, telemetry by time and metric).
+- CI (web job) now also runs `pnpm drizzle-kit check`, fails if `pnpm db:generate` produces an
+  uncommitted migration (schema drift), and runs `pnpm db:reset && pnpm db:seed`. `make db-check`
+  does the same locally (part of `make check`; needs a clean `db/migrations`).
+
+*For M3+:*
+- Entry points (`@pandabase/db`, TS source, no build): `createDb({ url?, authToken? })` → Drizzle
+  `Db` (with `db.$client` = libSQL client), `migrateDb(db)`, `createTestDb()` → fresh migrated
+  **in-memory** DB per call (transactions work; close with `db.$client.close()`), all tables and
+  enum value arrays (e.g. `INVENTORY_EVENT_KINDS`, `LOCATIONS`, `ACTIVE_CYCLE_STATUSES`), `nowIso()`.
+  Subpaths `@pandabase/db/seed` (`seed(db, { seed?, now? })`, `buildSeed`) and
+  `@pandabase/db/rebuild-state` (`rebuildInventoryState(db, now?)`, `projectNaive`). No
+  repository layer — M3/M4 query with Drizzle directly.
+- Imports inside `/db` are extensionless (bundler resolution); `/web` will need `@pandabase/db` as a
+  workspace dependency (and likely `transpilePackages` in `next.config.ts`).
+- **M3 replaces** `projectNaive` (no decay/shelf life/away days) with the §4.2 projection —
+  ideally keep `rebuildInventoryState`'s signature and have it call the domain function.
+  Open question for M3: which event `kind` carries `status_override = critical` (the seed writes
+  none; it uses `consumed` + `status_override = consumed`).
+- Seed (`db/src/seed.ts`, catalog in `seed-data.ts`): fixed "now" `2026-10-20T16:00Z` and RNG seed
+  so the DB contents are reproducible; 2 members (`@example.com`), 42 items (incl. one
+  unverified "Kombucha" auto-created from the newest paper receipt), 9 items with brand switches
+  (+ `preference_event`s, one rejected product), 26 weekly cycles (one `skipped` for the away
+  period, one `other_store`) + 1 open cycle with overrides and price quotes, ~40 receipts (Whole
+  Foods pickup/in-store paper/delivery + Amazon), 5 pending reviews (receipt, new_product,
+  unverified_item, failed_job, trash_cam) and 2 corrected ones with `labeled_observation`s.
+  `current_ema_days` is seeded from the simulation's truth (not derived) — M3's rebuild may
+  recompute it. Because "now" is fixed, read-time estimates drift as real time passes; pass
+  `now` to `seed()` if a test needs it relative to today.
+
 
 ---
 

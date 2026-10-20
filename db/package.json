@@ -4,14 +4,33 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./seed": "./src/seed.ts",
+    "./rebuild-state": "./src/rebuild-state.ts"
   },
   "scripts": {
     "lint": "eslint .",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "generate": "drizzle-kit generate",
+    "check": "drizzle-kit check",
+    "migrate": "tsx src/migrate.ts",
+    "migrate:prod": "tsx src/migrate.ts --prod",
+    "seed": "tsx src/seed.ts",
+    "reset": "tsx src/reset.ts",
+    "rebuild-state": "tsx src/rebuild-state.ts"
   },
   "devDependencies": {
+    "@types/node": "^24.19.2",
+    "drizzle-kit": "0.31.11",
     "eslint": "^9.39.5",
-    "typescript": "~6.0.3"
+    "tsx": "4.23.15",
+    "typescript": "~6.0.3",
+    "vitest": "^5.0.5"
+  },
+  "dependencies": {
+    "@libsql/client": "0.18.0",
+    "drizzle-orm": "0.45.4",
+    "ulid": "3.0.2"
   }
 }

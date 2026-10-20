@@ -61,10 +61,22 @@ All tables have `id` (text, ULID), `created_at`, `updated_at` (UTC ISO-8601 text
 Quantities of items are in the item's **base unit** (e.g. eggs, not cartons). Money is integer
 cents. Enums are text with CHECK constraints.
 
+Conventions (schema in `db/src/schema/`, one file per subsection below):
+- ULIDs are generated app-side. Timestamps are `YYYY-MM-DDTHH:MM:SS.sssZ` (what
+  `Date.toISOString()` emits); the column also has an SQL default in the same format, and Drizzle
+  bumps `updated_at` on update. Dates without time (`away_period`) are household-TZ `YYYY-MM-DD`.
+- Booleans are integer 0/1 with a CHECK; JSON columns are text with `CHECK (json_valid(...))`.
+- Exceptions to the `id`/`created_at`/`updated_at` trio: `setting` and `inventory_state` (natural
+  primary keys), `system_telemetry` (append-only: no `updated_at`), `idempotency_key` (natural
+  key, `created_at` only).
+- "Trust" for catalog and receipt rows (`item`, `product.unit_quantity_trust`, `vendor_alias`,
+  `receipt_line`) is `confirmed`|`unverified`; inventory events use their own set (§2.3).
+
 ### 2.1 People & settings
 
 **member** — `email` (unique), `display_name`, `discord_user_id` (unique), `chromium_profile`,
-`amazon_sweep` (`daily`|`weekly`|`off`), `is_cart_account` (bool; exactly one true).
+`amazon_sweep` (`daily`|`weekly`|`off`), `is_cart_account` (bool; exactly one true — the schema
+enforces *at most one* with a partial unique index; the app keeps one set).
 
 **setting** — `key` (pk), `value` (json). Household-tunable defaults (thresholds, windows) that the
 UI can edit. Code defaults live in `web/lib/config.ts`; a row overrides.
@@ -92,7 +104,8 @@ UI can edit. Code defaults live in `web/lib/config.ts`; a row overrides.
 
 **vendor_alias** — maps external strings to products/items.
 - `vendor`, `kind` (`receipt_text`|`asin`), `vendor_string` (normalized), unique (vendor, kind, vendor_string)
-- `item_id`, `product_id` (nullable), `confidence_score` (0–1; 1.0 when human-confirmed)
+- `item_id` (nullable only when `ignored`), `product_id` (nullable), `confidence_score` (0–1; 1.0
+  when human-confirmed)
 - `trust`, `ignored` (bool — the ignore list for ASINs and store fee lines)
 
 ### 2.3 Inventory
@@ -100,26 +113,30 @@ UI can edit. Code defaults live in `web/lib/config.ts`; a row overrides.
 **inventory_event** — append-only log; the source of truth.
 - `item_id`, `location`, `kind` (`acquired`|`observed`|`consumed`|`discarded`|`presumed_discarded`|`moved`)
 - `quantity` (base units; for `observed` it's the absolute amount; for `moved` the moved amount),
-  `to_location` (for `moved`), `status_override` (`critical`|`consumed`|null)
+  `to_location` (set iff `kind = moved`), `status_override` (`critical`|`consumed`|null);
+  `quantity ≥ 0`
 - `occurred_at`, `source` (`digital_receipt`|`paper_receipt`|`manual`|`trash_cam`|`checkin`|`backfill`|`task`|`system`),
   `source_ref` (receipt/job/cycle id)
 - `actor_member_id` (nullable), `actor_system` (`agent`|`worker`|`cron`|null)
 - `trust` (`confirmed`|`provisional`|`expired`)
 
 **inventory_state** — cached projection, pk (`item_id`, `location`).
-- `anchor_qty`, `anchor_at`, `anchor_kind` (`acquired`|`observed`)
+- `anchor_qty`, `anchor_at`, `anchor_kind` (`acquired`|`observed`) — nullable (a row may carry
+  only an override)
 - `status_override`, `frozen_at`, `last_verified_at`
 
-Rebuildable from events at any time (`pnpm db:rebuild-state`). Estimates are computed at read time
+Rebuildable from events at any time (`pnpm db:rebuild-state`; ignores `expired` events. M2 ships a
+naive fold without decay; M3 replaces it with §4.2). Estimates are computed at read time
 (§4.2) and never stored.
 
 ### 2.4 Receipts
 
-**receipt** — `source` (`digital`|`paper`|`manual`), `vendor`, `account_member_id`,
+**receipt** — `source` (`digital`|`paper`|`manual`), `vendor`, `account_member_id` (nullable),
 `external_order_id` (nullable), `dedupe_key` (unique: `digital:{account}:{order_id}` /
 `paper:{vendor}:{date}:{total}` / `manual:{idempotency key}`), `fulfillment`
 (`delivery`|`pickup`|`in_store`|`unknown`), `ordered_at`, `acquired_at`, `subtotal_cents`,
 `total_cents`, `totals_check` (`pass`|`fail`|`n/a`), `job_id`, `status` (`applied`|`pending_review`|`partial`).
+`acquired_at` is required (it feeds the paper dedupe key and the EMA); `ordered_at` is nullable.
 
 **receipt_line** — `receipt_id`, `raw_text`, `asin`, `product_id`, `item_id`, `qty` (purchase
 units), `unit_price_cents`, `line_total_cents`, `match_method`
@@ -128,7 +145,7 @@ units), `unit_price_cents`, `line_total_cents`, `match_method`
 ### 2.5 Jobs, review, labels
 
 **audit_job** — `job_type` (`paper_receipt`|`trash_cam`|`merge_suggest`; `storage_audit` reserved
-for v1.1), `status` (`queued`|`claimed`|`completed`|`failed`), `media_r2_key`,
+for v1.1 and already allowed by the CHECK), `status` (`queued`|`claimed`|`completed`|`failed`), `media_r2_key`,
 `keyframe_r2_keys` (json), `expected_state_snapshot` (json, nullable), `input` (json),
 `raw_model_response` (json), `result` (json), `model`, `prompt_version`, `attempts`,
 `claimed_at`, `lease_expires_at`, `error`, `actor_member_id`, `cycle_id`,
@@ -139,7 +156,8 @@ for v1.1), `status` (`queued`|`claimed`|`completed`|`failed`), `media_r2_key`,
 - `job_id`, `receipt_id`, `item_id`, `payload` (json: detected name, suggestions, delta)
 - `urgency` (`this_week`|`cleanup`), `impact_score` (real; higher = affects this week's cart)
 - `status` (`pending`|`confirmed`|`corrected`|`dismissed`|`expired`)
-- `default_action` (json — what happens on expiry), `expires_at`
+- `default_action` (json — what happens on expiry; required), `expires_at` (required except for
+  `unverified_item`, which never expires — §4.6)
 - `reviewed_by_member_id`, `reviewed_at`
 
 **labeled_observation** — created only from human confirmation/correction.
@@ -150,10 +168,13 @@ for v1.1), `status` (`queued`|`claimed`|`completed`|`failed`), `media_r2_key`,
 
 **grocery_cycle** — `week_label` (e.g. `2026-W43`), `discord_thread_id`, `status`
 (`open`|`building`|`ready`|`closed`|`skipped`|`other_store`), `opened_at`, `nudge_sent_at`,
-`built_at`, `closed_at`, `close_reason`, `cart_result` (json). At most one non-closed cycle.
+`built_at`, `closed_at`, `close_reason`, `cart_result` (json). `week_label` is unique (opening is
+idempotent per week). At most one *active* cycle (`open`|`building`|`ready`; `closed`, `skipped`
+and `other_store` are terminal per §4.7), enforced by a partial unique index.
 
 **grocery_cycle_override** — `cycle_id`, `kind` (`add`|`skip`|`qty`|`product`), `item_id`
 (nullable), `free_text` (nullable, one-off adds), `quantity`, `product_id`, `actor_member_id`.
+Needs `item_id`, or `kind = add` with `free_text`.
 
 **price_quote** — `cycle_id`, `product_id`, `price_cents`, `observed_at`, `source` (`agent`).
 
@@ -458,7 +479,7 @@ estimate_vs_observed, preference events, review expiries, clarifying questions a
 
 | Env | DB | Auth | Notes |
 |---|---|---|---|
-| local | `file:./dev.db` (libSQL), seeded fake household | `DEV_AUTH_BYPASS` | `pnpm dev` |
+| local | `db/dev.db` (libSQL file; the default when `TURSO_DATABASE_URL` is unset), seeded fake household | `DEV_AUTH_BYPASS` | `pnpm db:reset && pnpm db:seed`, `pnpm dev` |
 | preview | Turso `pandabase-preview` | Google | Vercel previews |
 | production | Turso `pandabase` | Google | Vercel; migrations run manually: `pnpm db:migrate:prod` |
 
@@ -512,3 +533,4 @@ docker-compose.yml, Makefile, CLAUDE.md, README.md, .github/workflows/ci.yml
 | 21 | Zod → OpenAPI → Pydantic codegen, drift checked in CI | One contract source across TS and Python |
 | 22 | Chores, video audits deferred | Groceries first as MVP |
 | 23 | Daily Vercel Cron for maintenance | App stays healthy even if the Mac Mini is off |
+| 24 | Invariants as DB constraints (enum/bool/JSON CHECKs, partial uniques); drizzle-kit migrations, schema drift checked in CI | A backstop under domain code; one active cycle / one cart account can't be violated by a buggy caller |
