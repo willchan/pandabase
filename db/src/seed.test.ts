@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createTestDb } from "./client";
-import { projectNaive } from "./rebuild-state";
+import { projectRows } from "./rebuild-state";
 import * as schema from "./schema/index";
 import { buildSeed, isoWeekLabel, seed } from "./seed";
 
@@ -71,7 +71,7 @@ describe("isoWeekLabel", () => {
   });
 });
 
-describe("projectNaive (M2 stub)", () => {
+describe("projectRows (§4.2 projection)", () => {
   const base = {
     id: "",
     createdAt: "",
@@ -86,7 +86,7 @@ describe("projectNaive (M2 stub)", () => {
   } as const;
   const e = (
     kind: (typeof schema.INVENTORY_EVENT_KINDS)[number],
-    quantity: number,
+    quantity: number | null,
     t: string,
     extra = {},
   ) => ({
@@ -95,28 +95,45 @@ describe("projectNaive (M2 stub)", () => {
     location: "fridge" as const,
     kind,
     quantity,
-    occurredAt: t,
+    occurredAt: `2026-10-${t}T12:00:00.000Z`,
     ...extra,
   });
+  const items = [
+    {
+      id: "i",
+      trackingType: "velocity" as const,
+      currentEmaDays: 1,
+      defaultLocation: "fridge" as const,
+      reorderThreshold: null,
+      shelfLifeDays: null,
+    },
+  ];
 
-  it("adds, anchors, overrides and moves", () => {
-    const rows = projectNaive(
+  it("decays, anchors, overrides and moves; ignores expired events and unknown items", () => {
+    const rows = projectRows(
+      items,
       [
-        e("acquired", 6, "t1"),
-        e("acquired", 6, "t2"),
-        e("observed", 5, "t3"),
-        e("moved", 2, "t4", { toLocation: "freezer" }),
-        e("consumed", 0, "t5", { statusOverride: "consumed" }),
+        e("acquired", 6, "01"),
+        e("acquired", 6, "03"), // 6 − 2 days decay + 6 = 10
+        e("acquired", 99, "04", { trust: "expired" }),
+        e("observed", 5, "05"),
+        e("moved", 2, "06", { toLocation: "freezer" }), // 5 − 1 = 4 → 2 left, 2 frozen
+        e("observed", null, "07", { statusOverride: "critical" }),
+        { ...e("acquired", 1, "07"), itemId: "unknown" },
       ],
+      [],
       "now",
     );
+    expect(rows).toHaveLength(2);
     const fridge = rows.find((r) => r.location === "fridge")!;
     const freezer = rows.find((r) => r.location === "freezer")!;
     expect(fridge).toMatchObject({
-      anchorQty: 0,
-      statusOverride: "consumed",
-      lastVerifiedAt: "t3",
+      anchorQty: 2,
+      anchorAt: "2026-10-06T12:00:00.000Z",
+      statusOverride: "critical",
+      lastVerifiedAt: "2026-10-05T12:00:00.000Z",
+      createdAt: "now",
     });
-    expect(freezer).toMatchObject({ anchorQty: 2, anchorAt: "t4", frozenAt: "t4" });
+    expect(freezer).toMatchObject({ anchorQty: 2, frozenAt: "2026-10-06T12:00:00.000Z" });
   });
 });

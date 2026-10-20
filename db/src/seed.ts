@@ -2,7 +2,7 @@
 // period, an open cycle and a few pending reviews. Same `seed` + `now` → identical database.
 //
 // The seed writes rows and events directly — no domain logic. `inventory_state` is filled by the
-// naive projection in `rebuild-state.ts` (replaced in M3).
+// §4.2 projection in `rebuild-state.ts`.
 import { pathToFileURL } from "node:url";
 import { ulid } from "ulid";
 import { createDb, type Db } from "./client";
@@ -843,7 +843,7 @@ export async function seed(db: Db, opts: SeedOptions = {}): Promise<Rows> {
       }
     }
   });
-  await rebuildInventoryState(db, opts.now ?? DEFAULT_SEED_NOW);
+  await rebuildInventoryState(db, opts.now ?? DEFAULT_SEED_NOW, { tz: opts.tz });
   return rows;
 }
 

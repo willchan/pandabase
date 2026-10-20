@@ -8,5 +8,14 @@ export default defineConfig({
   test: {
     include: ["**/*.test.ts"],
     exclude: ["node_modules/**", ".next/**"],
+    coverage: {
+      // Always on: the domain logic must stay ≥ 95% line-covered (PLAN M3).
+      enabled: true,
+      provider: "v8",
+      include: ["lib/domain/**/*.ts", "lib/config.ts"],
+      exclude: ["**/*.test.ts"],
+      reporter: ["text-summary", "text"],
+      thresholds: { "lib/domain/**": { lines: 95 } },
+    },
   },
 });

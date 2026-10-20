@@ -114,7 +114,9 @@ UI can edit. Code defaults live in `web/lib/config.ts`; a row overrides.
 - `item_id`, `location`, `kind` (`acquired`|`observed`|`consumed`|`discarded`|`presumed_discarded`|`moved`)
 - `quantity` (base units; for `observed` it's the absolute amount; for `moved` the moved amount),
   `to_location` (set iff `kind = moved`), `status_override` (`critical`|`consumed`|null);
-  `quantity ≥ 0`
+  `quantity ≥ 0`. `quantity` is null only for the **critical flag**: an `observed` event with
+  `status_override = critical` that sets the override without moving the anchor (CHECK-enforced).
+  "We're out" is a `consumed` event with `status_override = consumed`.
 - `occurred_at`, `source` (`digital_receipt`|`paper_receipt`|`manual`|`trash_cam`|`checkin`|`backfill`|`task`|`system`),
   `source_ref` (receipt/job/cycle id)
 - `actor_member_id` (nullable), `actor_system` (`agent`|`worker`|`cron`|null)
@@ -126,7 +128,7 @@ UI can edit. Code defaults live in `web/lib/config.ts`; a row overrides.
 - `status_override`, `frozen_at`, `last_verified_at`
 
 Rebuildable from events at any time (`pnpm db:rebuild-state`; ignores `expired` events. M2 ships a
-naive fold without decay; M3 replaces it with §4.2). Estimates are computed at read time
+naive fold; since M3 it calls `projectInventory` from `web/lib/domain/inventory.ts`). Estimates are computed at read time
 (§4.2) and never stored.
 
 ### 2.4 Receipts
@@ -243,8 +245,10 @@ The outline's chore routes (`/api/tasks/*`) are deferred to v2 ([ROADMAP.md](ROA
 
 ## 4. Algorithms
 
-All tunables live in `web/lib/config.ts` (overridable via `setting`). Pure functions in
-`web/lib/domain/`, fully unit-tested.
+All tunables live in `web/lib/config.ts` (`DEFAULT_CONFIG`; a `setting` row whose key is a dotted
+path, e.g. `ema.alpha`, overrides it via `withSettings`, which rejects unknown keys and wrong
+types). Pure functions in `web/lib/domain/` take plain data and a `Config`, and are table-tested
+(≥ 95% line coverage). Learning steps return their telemetry payloads; callers (M4) emit them.
 
 ### 4.1 Velocity (EMA)
 
@@ -266,22 +270,39 @@ streak = 0
 ema = 0.7 × ema + 0.3 × observed
 ```
 
-- Same-day merge: acquisitions of the same item on the same household-TZ date sum into one.
-- Backfill replays receipts chronologically through the same function.
+- Same-day merge: acquisitions of the same item on the same household-TZ date sum into one (at =
+  the earliest). Applied one receipt at a time (`placeAcquisition`), a second acquisition on the
+  latest date skips the EMA step (that date's step already ran; the merge only changes the next
+  step's `prev_acquired_base_units`, which is recomputed from the event history). A late receipt
+  dated before the latest acquisition also skips the EMA (telemetry `ema_skipped`).
+- `prev_acquired_*` come from the item's non-expired `acquired` events (no extra item columns).
+- Thresholds are strict: `observed` exactly 3× or 0.25× the EMA is not an outlier. A streak in the
+  other direction restarts at 1. Telemetry: `ema_updated`, `ema_outlier_rejected`,
+  `ema_outlier_accepted` (the third-in-a-row habit change).
+- Backfill replays receipts chronologically through the same function (`replayVelocity`).
 - Static items never use EMA.
 - A one-off product (bought once in the 12-month backfill) creates a `static` item; a second
-  purchase within 6 months promotes it to `velocity`.
+  purchase within 6 months (`promoteToVelocityWithinDays` = 183) promotes it to `velocity` and
+  starts its EMA. Static items with a `reorder_threshold` are static by design and never promoted.
 
 ### 4.2 Inventory estimate
 
 Projection per (item, location) from the event log:
 
 - `acquired` → `anchor_qty = estimate_at(t) + qty`, `anchor_at = t`
-- `observed` → `anchor_qty = qty` (absolute), `anchor_at = t`, `last_verified_at = t`
-- `consumed` → `anchor_qty = 0` and `status_override = consumed`;
-  `status_override = critical` events set the override without changing quantity
-- `moved` → subtract from source, add to destination; destination freezer stamps `frozen_at`
+- `observed` → `anchor_qty = qty` (absolute), `anchor_at = t`, `last_verified_at = t`; a fresh
+  count also replaces any earlier override (with its own, usually null)
+- `observed` with null quantity + `status_override = critical` → sets the override only
+- `consumed` → `anchor_qty = 0` (anchor kind `observed`) and `status_override = consumed`
+- `discarded` / `presumed_discarded` → `anchor_qty = estimate_at(t) − qty` (floored at 0)
+- `moved` → subtract from source, add to destination; destination freezer stamps `frozen_at`;
+  emptying a location clears its `frozen_at`
 - the next `acquired` clears `status_override`
+- `expired` events are ignored; decay between events uses the item's *current* EMA.
+
+**Frozen reserve:** stock in the freezer of an item whose `default_location` isn't the freezer
+doesn't decay and has no shelf life — otherwise splitting stock across locations would double the
+consumption rate. Items that live in the freezer decay there normally.
 
 Read-time estimate for velocity items:
 
@@ -291,14 +312,21 @@ runout(t)  = anchor_at + anchor_qty × ema (+ away days)
 status     = override ?? (on_hand == 0 → out | runout ≤ today+3 → low | stocked)
 ```
 
-Static items: `on_hand = anchor_qty` (no decay); `low` when `≤ reorder_threshold`.
+`runout ≤ today+3` compares household-local dates (`lowWithinDays` = 3). A row with no anchor is
+`unknown`. Velocity items without an EMA yet don't decay (no runout). Item-level estimates sum
+locations; an override anywhere wins (`critical` over `consumed`); runout is when the combined
+stock runs out.
+
+Static items: `on_hand = anchor_qty` (no decay); `out` at 0, `low` when `≤ reorder_threshold`.
 
 **Shelf life:** if `shelf_life_days` is set, units acquired more than `shelf_life_days` ago are
-dropped from the estimate and a `presumed_discarded` event is logged (trust `provisional`).
+dropped from the estimate and a `presumed_discarded` event is logged (trust `provisional`; the
+daily cron writes them via `shelfLifeDiscards`). FIFO: what's on hand is assumed to be the newest
+units, so `expired = max(0, on_hand − units acquired at that location within the window)`.
 
 **Overbuy:** on acquisition of a velocity item, if the stock already on hand would have lasted
-`on_hand_before × ema ≥ OVERBUY_DAYS_OF_STOCK` (default 14 days), log telemetry `overbuy`.
-Static items: overbuy if `on_hand_before > reorder_threshold × 2`.
+`on_hand_before × ema ≥ overbuyDaysOfStock` (default 14 days), log telemetry `overbuy`.
+Static items: overbuy if `on_hand_before > reorder_threshold × 2`. No EMA / no threshold → no check.
 
 **Estimate error:** every `observed` event logs `estimate_vs_observed {estimated, observed, item}`.
 In v1 this does **not** modify the EMA; it's a diagnostic.
@@ -314,7 +342,10 @@ or (static and on_hand ≤ reorder_threshold)
 
 then apply cycle overrides (skip removes, qty replaces, add inserts including free text).
 Quantity: velocity → enough purchase units of the chosen product to cover `ema`-based need until
-the next cycle (min 1); static → 1 purchase unit unless overridden.
+the next cycle (min 1): `ceil((cartCoverDays / ema − on_hand) / unit_quantity)`, `cartCoverDays` =
+7; static (or no EMA yet) → 1 purchase unit unless overridden. A line with no candidate product is
+sized in base units. Overrides apply in order; a `product` override re-sizes the line for the new
+pack unless a human set the quantity; `add` / `qty` on an unflagged item inserts it.
 
 ### 4.4 Product choice
 
@@ -323,7 +354,8 @@ Candidates = products of the item with stance ≠ rejected and vendor in the car
 1. One candidate → choose it.
 2. Several → `needs_price_check = true`; the agent reads current prices (tier 2 browser) and posts
    `price_quotes`. Missing quotes fall back to `last_price_cents`.
-3. `preferred` = stance preferred, else highest `preference_score`, else most `times_bought`.
+3. `preferred` = stance preferred, else highest `preference_score`, else most `times_bought`
+   (ties by id). If the preferred or cheapest price is unknown, choose `preferred`.
 4. Choose `cheapest_per_unit` instead of `preferred` iff
    `unit_price(preferred) − unit_price(cheapest) > switch_threshold × unit_price(preferred)`.
 5. Emit a reason string ("28% cheaper per egg than your usual Vital Farms").
@@ -338,7 +370,10 @@ Learning (each writes a `preference_event`):
 | "Never buy X" | stance `rejected` |
 | Same product bought 3 consecutive times | stance `preferred` (previous preferred → acceptable) |
 
-New ASINs bought for an item are added as `acceptable`.
+New ASINs bought for an item are added as `acceptable`. Thresholds stay on a 0.01 grid. An implicit
+swap writes one `implicit_swap` event (not also `override_to_cheaper`). A `rejected` product is
+never auto-promoted. Product stats and preference learning only use **confirmed** receipt lines
+with a known product. A cart build that picks the cheaper product logs a `switch` event.
 
 ### 4.5 Receipt resolution
 
@@ -364,6 +399,30 @@ All receipts → one `applyReceipt()` path: inventory events, product stats, EMA
 detection against the last cycle's cart, overbuy check, cycle closure if it matches the cycle's
 order.
 
+Implementation notes (`web/lib/domain/receipts.ts`):
+- `applyReceipt(input, repo, ctx)` reads through a `ReceiptRepository` and **returns effects**
+  (rows to insert, patches, reviews, cycle patch, telemetry) without writing; M4 commits them in
+  one transaction.
+- Auto-created items: `static`, `unverified`, base unit `count`, location `pantry`, category
+  `Uncategorized`. Catalog trust has no "provisional", so the product's `unit_quantity_trust` is
+  `unverified` whether parsed or defaulted to 1.
+- Base units = `qty × unit_quantity` of the line's product, else of the item's preferred product
+  at that vendor (12- vs 18-packs normalize to eggs). Lines of one item on a receipt sum into one
+  `acquired` event, `provisional` if any of them is.
+- EMA and overbuy run on every non-expired acquisition, provisional included (§4.1's outlier guard
+  is the safety net; a corrected line's event is reversed but the EMA step isn't).
+- Ignored aliases match exactly only (a fuzzy "ignore" could silently drop an item). Fuzzy ties
+  (token-set scores subsets as 1.0) break on the plain ratio of the whole strings.
+- The receipt review item lists pending *and* provisional lines (impact from the cycle's cart /
+  please-check lists). Receipt status: `partial` if some lines pending, `pending_review` if nothing
+  applied.
+- A receipt is the cycle's order if its vendor is a cart vendor and its order id is in
+  `cart_result`'s order ids — or, when none were recorded, it's digital and acquired after the
+  build. Only a `ready` cycle closes; implicit swaps are checked for any matching order.
+- `resolveReceiptReview` turns a human's answers into effects: confirm → event confirmed + alias
+  1.0; correct → event `expired` + corrected line applied; ignore → ignored alias; each answer is a
+  `labeled_observation`.
+
 ### 4.6 Review expiry & trust
 
 Run daily by `/api/cron/maintenance`:
@@ -378,7 +437,8 @@ Run daily by `/api/cron/maintenance`:
 | trash_cam (low confidence) | do nothing | 7d |
 
 Only human actions create `labeled_observation`s. `impact_score` = 10 if the item is in the current
-cart plan, + 3 if in please_check, + 1 otherwise; Cleanup sorts by it.
+cart plan, + 3 if in please_check, 1 if neither; Cleanup sorts by it. Reviews scoring above 1 are
+`this_week`, the rest `cleanup`. Expired reviews get status `expired` and their default applied.
 
 ### 4.7 Grocery cycle state machine
 
@@ -392,6 +452,11 @@ closed/skipped/other_store ──▶ agent opens next cycle immediately, or at M
 
 Opening is idempotent per `week_label`. If an away period covers the build date, the build is a no-op
 and the cycle becomes `skipped`.
+
+Details (`web/lib/domain/cycle.ts`): `building ──(cart filled)──▶ ready` is an explicit `built`
+event. "skip" and "other store" are accepted from any active state (a built cart can be abandoned —
+nothing is checked out). A repeated nudge is a no-op. The cycle to open is the current ISO week's,
+unless its build time has passed or its label is taken, then the next free week.
 
 ## 5. Media pipeline
 
@@ -457,8 +522,11 @@ components/embeds.
 
 **Emitters** (`POST /api/telemetry`, batched): API middleware (route, status, latency), worker
 (model, prompt_version, latency, totals_check, parse failures), tools (tier-1 per-line results,
-selector errors, price-lookup failures), domain (ema_outlier_rejected, overbuy,
-estimate_vs_observed, preference events, review expiries, clarifying questions asked by agent).
+selector errors, price-lookup failures), domain (ema_updated, ema_outlier_rejected,
+ema_outlier_accepted, ema_skipped, promoted_to_velocity, overbuy, estimate_vs_observed,
+receipt_line_match, preference events, shelf-life presumed discards, review expiries, clarifying
+questions asked by agent). Domain functions return these payloads (`metric` + fields); the API
+layer emits them.
 
 **Weekly report** — rendered by the app (`web/lib/diagnostics/`), written by the agent to
 `/diagnostics/YYYY-Www.md` with extracts in `/diagnostics/YYYY-Www/*.jsonl`. Fixed sections, each
@@ -534,3 +602,5 @@ docker-compose.yml, Makefile, CLAUDE.md, README.md, .github/workflows/ci.yml
 | 22 | Chores, video audits deferred | Groceries first as MVP |
 | 23 | Daily Vercel Cron for maintenance | App stays healthy even if the Mac Mini is off |
 | 24 | Invariants as DB constraints (enum/bool/JSON CHECKs, partial uniques); drizzle-kit migrations, schema drift checked in CI | A backstop under domain code; one active cycle / one cart account can't be violated by a buggy caller |
+| 25 | Domain functions return effects; repositories only read | Business rules testable without a DB; M4 commits each operation in one transaction |
+| 26 | EMA learns from provisional acquisitions; product preference only from confirmed lines | Paper receipts are mostly provisional and EMA has an outlier guard; a wrong product match would teach the wrong brand |
