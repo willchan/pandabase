@@ -52,9 +52,10 @@ pnpm --filter web build      # next build
 pnpm db:reset && pnpm db:seed   # fresh db/dev.db (or TURSO_DATABASE_URL), migrated + seeded
 pnpm db:generate             # after editing db/src/schema/*: new migration in db/migrations (commit it)
 pnpm db:migrate              # apply migrations; db:migrate:prod for Turso (needs TURSO_AUTH_TOKEN)
-pnpm db:rebuild-state        # recompute inventory_state from inventory_event
+pnpm db:rebuild-state        # recompute inventory_state from inventory_event (§4.2 projection)
 pnpm drizzle-kit check       # migration consistency (any drizzle-kit command works this way)
 pnpm --filter @pandabase/db test   # schema smoke + seed tests (in-memory libSQL)
+pnpm --filter web test -- lib/domain   # domain tests + coverage (≥ 95% lines on lib/domain enforced)
 make check                   # everything CI runs
 ```
 

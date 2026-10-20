@@ -33,8 +33,8 @@ contracts.
 | Milestone | Status | PR |
 |---|---|---|
 | M1 Skeleton & CI | done | #2 |
-| M2 Schema & seed | in review | #3 |
-| M3 Domain logic | todo | |
+| M2 Schema & seed | done | #3 |
+| M3 Domain logic | in review | |
 | M4 API & contracts | todo | |
 | M5 Web UI & auth | todo | |
 | M6 Python worker | todo | |
@@ -227,7 +227,89 @@ every cycle transition.
 
 **Out of scope:** HTTP, UI, DB writes.
 
-**Notes:** —
+**Notes:**
+
+*Versions:* added `@vitest/coverage-v8` **5.0.5** (matches Vitest) to `/web`. Coverage is always on
+in `web/vitest.config.mts` over `lib/domain/**` + `lib/config.ts`, with a 95% line threshold on
+`lib/domain/**` (currently 100% lines, ~98% branches).
+
+*Resolved M2's open question — the critical flag:* an `observed` event with
+`status_override = 'critical'` and a **null quantity** sets the override without moving the
+anchor; the next `acquired` clears it. Migration `0001_critical_override_event` makes
+`inventory_event.quantity` nullable with a CHECK that allows null only for that shape (`IS
+'critical'`, since a plain `=` lets NULL through a CHECK). Schema tests cover both directions.
+
+*Deviations / choices (DESIGN §2.3, §4, §7, §10 updated to match):*
+- A **fresh count** (`observed` with a quantity) also replaces an earlier override — otherwise
+  "we're out" followed by a check-in of 4 eggs would keep eggs in the cart until the next purchase.
+- `discarded`/`presumed_discarded` (not in §4.2's list) subtract from the decayed estimate.
+  `consumed` anchors at 0 with kind `observed`.
+- **Frozen reserve:** freezer stock of an item that doesn't live in the freezer neither decays nor
+  expires, so splitting chicken between fridge and freezer doesn't double its consumption rate.
+- **Shelf life is FIFO:** `expired = on_hand − units acquired at that location within the window`.
+- Incremental EMA (one receipt at a time) skips the step for a second acquisition on the same
+  household day and for late receipts dated before the latest acquisition (`placeAcquisition`).
+  The previous acquisition comes from `inventory_event` history — no new item columns.
+- One-off promotion to `velocity` excludes static items that have a `reorder_threshold`.
+- EMA/overbuy learn from provisional acquisitions too; product stats and preference learning only
+  from confirmed lines with a known product (DESIGN §10 #26). PRD §3.3 "only confirmed data feeds
+  learning" is read as applying to labels and preferences; the EMA has its outlier guard.
+- `applyReceipt` returns **effects** instead of writing (DESIGN §10 #25).
+- §4.6 impact "+1 otherwise" read as *1 if neither* (so 10 / 3 / 13 / 1).
+- §4.7: explicit `built` event for building → ready; skip / other_store accepted from any active
+  state; repeated nudge is a no-op.
+- Product's `unit_quantity_trust` for auto-created products is `unverified` (catalog trust has no
+  `provisional`).
+- `rebuildInventoryState(db, now?, { tz? })` keeps its signature (new optional third arg; `seed()`
+  passes its `tz`). It imports the domain module by relative path (`../../web/lib/domain/…`):
+  `@pandabase/db` can't depend on `web`, which will depend on it from M4. So **domain modules must
+  stay free of `@/` imports and DOM/Next APIs** — `/db`'s `tsc` type-checks them too.
+- Seed EMAs: replaying the seed's acquisitions through `replayVelocity` (cold start, no seed EMA)
+  gives values within ±25% of the stored `current_ema_days` for all 32 velocity items (derived
+  runs ~0–20% higher: the simulation buys ahead of need). The seed's semantics are unchanged —
+  it still stores the simulation truth; nothing recomputes it.
+- `projectNaive` is gone; `projectRows(items, events, away, now, config?)` replaced it.
+
+*For M4:*
+- Entry points (all pure, `web/lib/domain/*`; config in `web/lib/config.ts`):
+  - `config.ts`: `DEFAULT_CONFIG`, `Config`, `withSettings(settingRows)` → `{ config, rejected }`
+    (log `rejected` keys).
+  - `time.ts`: `localDate`, `zonedToUtc`, `isoWeekLabel`, `awayDaysBetween`, `addEffectiveDays`, …
+  - `velocity.ts`: `updateVelocity`, `replayVelocity` (backfill), `placeAcquisition`,
+    `mergeSameDay`, `shouldPromoteToVelocity`, `trackingTypeForBackfill`.
+  - `inventory.ts`: `projectInventory` (+ `estimateVsObserved` diagnostics), `estimateItem` /
+    `estimateLocation`, `shelfLifeDiscards` (cron), `checkOverbuy`.
+  - `predictions.ts`: `planCart({ items, overrides, vendors, quotes, now, config })`,
+    `restockReason`, `cartQuantity`.
+  - `productChoice.ts`: `chooseProduct`, `learnFromOverride` (explicit overrides),
+    `rejectProduct`, `recordPurchase`, `switchEvent`.
+  - `matching.ts`: `normalizeReceiptText`, `tokenSetRatio`, `matchPaperLine`,
+    `matchDigitalLine`, `parseUnitQuantity`, `deriveItemName`, `confirmedAlias`.
+  - `receipts.ts`: `applyReceipt(input, repo, { config, newId, now })` → `ReceiptEffects`;
+    `resolveReceiptReview`; `receiptDedupeKey`; `totalsCheck`.
+  - `review.ts`: `newReview`, `dueExpiries` (cron), `impactScore`, `mayCreateLabel`,
+    `trustAfterReview`.
+  - `cycle.ts`: `transition(cycle, event, now, { away, config })`, `cycleSchedule`,
+    `isNudgeDue`, `isBuildDue`, `weekLabelToOpen`, `isOpenOverdue`, `receiptClosesCycle`.
+- **Repository M4 must implement:** `ReceiptRepository` (`receipts.ts`): `aliases(vendor)`,
+  `canonicalItems()` (unmerged items), `productsByAsin(vendor, asins)`, `item(id)` (maps
+  `current_ema_days`→`emaDays`, `ema_outlier_*`→`outlier*`), `products(itemId)`,
+  `inventory(itemId)`, `acquisitions(itemId)` (non-expired `acquired` events), `awayPeriods()`,
+  `lastBuiltCycle()` (cart lines, vendors, order ids from `cart_result`, please-check ids — the
+  `cart_result` shape is M4's to define). Then persist `ReceiptEffects` in one transaction: set
+  `source_ref` = receipt id on events, apply `itemPatches` (`emaDays`→`current_ema_days`, …) and
+  `productPatches`, insert reviews / preference events, apply `cycle.patch`.
+- **Telemetry hooks:** every `ReceiptEffects.telemetry` entry is a `{ metric, …payload }` ready
+  for `system_telemetry` (`ema_updated`, `ema_outlier_rejected`, `ema_outlier_accepted`,
+  `ema_skipped`, `promoted_to_velocity`, `overbuy`, `receipt_line_match`, `preference_event`).
+  Also emit: `projectInventory(...).estimateVsObserved` as `estimate_vs_observed` when an
+  observation is recorded; `shelfLifeDiscards` results (they become `presumed_discarded` events);
+  `dueExpiries` results as review expiries; `PreferenceEvent`s from `learnFromOverride` /
+  `rejectProduct` / `switchEvent`; `withSettings(...).rejected`.
+- Not covered by M3 (route-level orchestration for M4): writing the critical flag / "we're out"
+  events from the agent, merge suggestions, and turning a confirmed `new_product` merge into an
+  `acceptable` product on the target item (`NEW_PRODUCT_STANCE`).
+
 
 ---
 

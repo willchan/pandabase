@@ -37,8 +37,11 @@ export const inventoryEvent = sqliteTable(
       .references(() => item.id),
     location: enumText("location", LOCATIONS).notNull(),
     kind: enumText("kind", INVENTORY_EVENT_KINDS).notNull(),
-    /** Base units. Absolute amount for `observed`; moved amount for `moved`. */
-    quantity: real("quantity").notNull(),
+    /**
+     * Base units. Absolute amount for `observed`; moved amount for `moved`. Null only for an
+     * `observed` event that just sets `status_override = critical` (DESIGN §4.2).
+     */
+    quantity: real("quantity"),
     toLocation: enumText("to_location", LOCATIONS),
     statusOverride: enumText("status_override", STATUS_OVERRIDES),
     occurredAt: text("occurred_at").notNull(),
@@ -58,6 +61,10 @@ export const inventoryEvent = sqliteTable(
     enumCheck("inventory_event", t.actorSystem, ACTOR_SYSTEMS),
     enumCheck("inventory_event", t.trust, EVENT_TRUST),
     check("inventory_event_quantity_check", sql`${col(t.quantity)} >= 0`),
+    check(
+      "inventory_event_quantity_null_check",
+      sql`${col(t.quantity)} IS NOT NULL OR (${col(t.kind)} = 'observed' AND ${col(t.statusOverride)} IS 'critical')`,
+    ),
     check(
       "inventory_event_moved_check",
       sql`(${col(t.kind)} = 'moved') = (${col(t.toLocation)} IS NOT NULL)`,

@@ -97,6 +97,14 @@ describe("row CHECKs", () => {
       "negative quantity",
       `UPDATE inventory_event SET quantity = -1 WHERE ${firstRow("inventory_event")}`,
     ],
+    [
+      "null quantity on a non-critical event",
+      `UPDATE inventory_event SET quantity = NULL WHERE kind = 'acquired' AND id = (SELECT min(id) FROM inventory_event WHERE kind = 'acquired')`,
+    ],
+    [
+      "null quantity on observed without critical",
+      `UPDATE inventory_event SET kind = 'observed', to_location = NULL, status_override = NULL, quantity = NULL WHERE ${firstRow("inventory_event")}`,
+    ],
     ["away period ends before it starts", `UPDATE away_period SET ends_on = '2000-01-01'`],
     [
       "alias confidence > 1",
@@ -117,6 +125,15 @@ describe("row CHECKs", () => {
     ],
   ])("reject %s", async (_, sql) => {
     expect(await failure(sql)).toMatch(/CHECK constraint failed/);
+  });
+});
+
+describe("critical override event", () => {
+  it("allows an observed event with status_override critical and no quantity", async () => {
+    const msg = await failure(
+      "INSERT INTO inventory_event (id, item_id, location, kind, quantity, status_override, occurred_at, source) SELECT 'crit', item_id, location, 'observed', NULL, 'critical', '2026-01-01T00:00:00.000Z', 'manual' FROM inventory_event LIMIT 1",
+    );
+    expect(msg).toBe("");
   });
 });
 

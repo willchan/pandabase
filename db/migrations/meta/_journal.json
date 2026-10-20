@@ -8,6 +8,13 @@
       "when": 1792477033222,
       "tag": "0000_init",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1792477829295,
+      "tag": "0001_critical_override_event",
+      "breakpoints": true
     }
   ]
 }

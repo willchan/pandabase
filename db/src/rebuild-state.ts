@@ -1,76 +1,95 @@
-// Rebuild `inventory_state` from `inventory_event` (DESIGN §2.3).
-//
-// M2 STUB: a naive projection — no decay, no shelf life, no away days. Quantities simply add and
-// subtract. M3 replaces the fold with the real §4.2 projection from `web/lib/domain/`.
+// Rebuild `inventory_state` from `inventory_event` (DESIGN §2.3) with the §4.2 projection from
+// `web/lib/domain/inventory.ts` — the one implementation of the fold. Imported by relative path:
+// `@pandabase/db` can't depend on `web` (web depends on db from M4 on), and the domain module is
+// pure TS with relative imports only.
 import { asc, ne } from "drizzle-orm";
 import { pathToFileURL } from "node:url";
+import { DEFAULT_CONFIG, type Config } from "../../web/lib/config";
+import {
+  projectInventory,
+  type InventoryEvent,
+  type InventoryItem,
+} from "../../web/lib/domain/inventory";
+import type { AwayPeriod } from "../../web/lib/domain/time";
 import { createDb, type Db } from "./client";
 import { nowIso } from "./schema/common";
+import { item } from "./schema/catalog";
 import { inventoryEvent, inventoryState } from "./schema/inventory";
+import { awayPeriod } from "./schema/people";
 
 type EventRow = typeof inventoryEvent.$inferSelect;
+type ItemRow = Pick<
+  typeof item.$inferSelect,
+  | "id"
+  | "trackingType"
+  | "currentEmaDays"
+  | "defaultLocation"
+  | "reorderThreshold"
+  | "shelfLifeDays"
+>;
 type StateRow = typeof inventoryState.$inferInsert;
 
-/** Fold events (already sorted by `occurred_at`) into one state row per (item, location). */
-export function projectNaive(events: readonly EventRow[], now: string): StateRow[] {
-  const rows = new Map<string, StateRow>();
-  const at = (itemId: string, location: EventRow["location"]): StateRow => {
-    const key = `${itemId}\u0000${location}`;
-    let row = rows.get(key);
-    if (!row) {
-      row = { itemId, location, createdAt: now, updatedAt: now };
-      rows.set(key, row);
-    }
-    return row;
-  };
-  const anchor = (row: StateRow, qty: number, t: string, kind: "acquired" | "observed") => {
-    row.anchorQty = Math.max(0, qty);
-    row.anchorAt = t;
-    row.anchorKind = kind;
-  };
+export const toInventoryItem = (i: ItemRow): InventoryItem => ({
+  trackingType: i.trackingType,
+  emaDays: i.currentEmaDays,
+  defaultLocation: i.defaultLocation,
+  reorderThreshold: i.reorderThreshold,
+  shelfLifeDays: i.shelfLifeDays,
+});
 
+/** Project every item's events into `inventory_state` rows (pure; `now` stamps the rows). */
+export function projectRows(
+  items: readonly ItemRow[],
+  events: readonly EventRow[],
+  away: readonly AwayPeriod[],
+  now: string,
+  config: Config = DEFAULT_CONFIG,
+): StateRow[] {
+  const byItem = new Map<string, InventoryEvent[]>();
   for (const e of events) {
-    const row = at(e.itemId, e.location);
-    const qty = row.anchorQty ?? 0;
-    switch (e.kind) {
-      case "acquired":
-        anchor(row, qty + e.quantity, e.occurredAt, "acquired");
-        row.statusOverride = null;
-        break;
-      case "observed":
-        anchor(row, e.quantity, e.occurredAt, "observed");
-        row.lastVerifiedAt = e.occurredAt;
-        break;
-      case "consumed":
-        anchor(row, 0, e.occurredAt, row.anchorKind ?? "observed");
-        break;
-      case "discarded":
-      case "presumed_discarded":
-        anchor(row, qty - e.quantity, e.occurredAt, row.anchorKind ?? "observed");
-        break;
-      case "moved": {
-        anchor(row, qty - e.quantity, e.occurredAt, row.anchorKind ?? "observed");
-        if (e.toLocation) {
-          const dest = at(e.itemId, e.toLocation);
-          anchor(dest, (dest.anchorQty ?? 0) + e.quantity, e.occurredAt, "acquired");
-          if (e.toLocation === "freezer") dest.frozenAt = e.occurredAt;
-        }
-        break;
-      }
-    }
-    if (e.statusOverride) row.statusOverride = e.statusOverride;
+    let list = byItem.get(e.itemId);
+    if (!list) byItem.set(e.itemId, (list = []));
+    list.push(e);
   }
-  return [...rows.values()];
+  const rows: StateRow[] = [];
+  for (const i of items) {
+    const evs = byItem.get(i.id);
+    if (!evs) continue;
+    const { states } = projectInventory(toInventoryItem(i), evs, { away, config });
+    for (const s of states) {
+      rows.push({
+        ...s,
+        itemId: i.id,
+        location: s.location as StateRow["location"],
+        createdAt: now,
+        updatedAt: now,
+      });
+    }
+  }
+  return rows;
 }
 
-/** Replace `inventory_state` with a projection of all non-expired events. */
-export async function rebuildInventoryState(db: Db, now: string = nowIso()): Promise<number> {
+/**
+ * Replace `inventory_state` with a projection of all non-expired events. `tz` defaults to
+ * `HOUSEHOLD_TZ`, then the config default.
+ */
+export async function rebuildInventoryState(
+  db: Db,
+  now: string = nowIso(),
+  opts: { tz?: string } = {},
+): Promise<number> {
+  const config: Config = {
+    ...DEFAULT_CONFIG,
+    householdTz: opts.tz ?? process.env.HOUSEHOLD_TZ ?? DEFAULT_CONFIG.householdTz,
+  };
+  const items = await db.select().from(item);
+  const away = await db.select().from(awayPeriod);
   const events = await db
     .select()
     .from(inventoryEvent)
     .where(ne(inventoryEvent.trust, "expired"))
     .orderBy(asc(inventoryEvent.occurredAt), asc(inventoryEvent.id));
-  const rows = projectNaive(events, now);
+  const rows = projectRows(items, events, away, now, config);
   await db.transaction(async (tx) => {
     await tx.delete(inventoryState);
     for (let i = 0; i < rows.length; i += 200) {
