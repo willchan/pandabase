@@ -1,0 +1,9 @@
+packages:
+  - web
+  - db
+
+# Dependency build scripts are opt-in (pnpm 10+). Next's image optimiser uses
+# sharp's prebuilt binaries, so no install scripts need to run.
+allowBuilds:
+  sharp: false
+  unrs-resolver: false

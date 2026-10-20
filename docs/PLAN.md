@@ -32,7 +32,7 @@ contracts.
 
 | Milestone | Status | PR |
 |---|---|---|
-| M1 Skeleton & CI | todo | |
+| M1 Skeleton & CI | in review | #2 |
 | M2 Schema & seed | todo | |
 | M3 Domain logic | todo | |
 | M4 API & contracts | todo | |
@@ -69,7 +69,47 @@ pnpm install && pnpm lint && pnpm typecheck && pnpm test && pnpm --filter web bu
 
 **Out of scope:** any schema, routes, auth, Docker.
 
-**Notes:** —
+**Notes:**
+
+*Versions chosen (checked 2026-10-20):* Node **24.22.0** (Active LTS "Krypton"; `.nvmrc` = `24`,
+`engines.node` = `>=24 <25`), pnpm **12.14.0** (pinned via `packageManager`), Next.js **16.4.2**
+(App Router, Turbopack, scaffolded with `create-next-app@16.4.2`), React **19.3.0**, Tailwind
+**4.3**, TypeScript **6.0.3**, ESLint **9.39**, typescript-eslint **8.71**, Prettier **3.9**,
+Vitest **5.0**. Python **3.14** (3.14.6; 3.15 is still beta), uv **0.13.3** (pinned in CI),
+ruff **0.17**, mypy **2.4** (strict), pytest **9.1**.
+
+*Deviations / choices:*
+- **TypeScript 6, not 7.** TS 7 (native/Go) is out but typescript-eslint's peer range is
+  `<6.1.0` and Next's build type-check uses the JS compiler API; revisit when both support 7.
+- **ESLint 9, not 10.** eslint-config-next 16.4.2 pulls `eslint-plugin-react`/`-import`/
+  `-jsx-a11y`, which don't accept ESLint 10 yet.
+- **typescript-eslint 8.71.2, not 8.72.0.** pnpm 12 enforces a minimum release age; 8.72.0 was
+  under a day old and pnpm offered to add exclusions. Kept the guard and used the prior minor —
+  don't add `minimumReleaseAgeExclude` entries casually.
+- Placeholder page uses system fonts (dropped the template's `next/font/google`) so `next build`
+  needs no network.
+- `next-env.d.ts` is gitignored (Next 16 regenerates it); `web` `typecheck` runs
+  `next typegen && tsc --noEmit` so typed-route globals (`LayoutProps`, `PageProps`) exist before
+  a build.
+- `pnpm lint` = ESLint in every package + `prettier --check .`. Prettier ignores `*.md` (docs are
+  hand-wrapped) and the Python trees (ruff formats those).
+- `allowBuilds` in `pnpm-workspace.yaml` denies install scripts for `sharp`/`unrs-resolver`
+  (prebuilt binaries suffice). A new dep needing a build script must be added there.
+
+*For M2+:*
+- ESLint: root `eslint.config.mjs` (JS + typescript-eslint recommended + prettier) applies to
+  `/db` and any future TS package; `/web` has its own config (next core-web-vitals + typescript +
+  prettier). Shared compiler options live in `tsconfig.base.json` (strict,
+  `noUncheckedIndexedAccess`, `verbatimModuleSyntax` — use `import type`).
+- `@pandabase/db` is an empty TS-source package (`exports: ./src/index.ts`, no build step); add
+  `lint`/`typecheck`/`test` scripts and they're picked up by `pnpm -r`.
+- Vitest in `/web` matches `**/*.test.ts` and resolves the `@/` alias; colocate tests.
+- Python projects use a `src/` layout with the `uv_build` backend: packages `pandabase_worker` and
+  `pandabase_tools`, dev deps in the `dev` dependency group, `requires-python >=3.14`. CI runs
+  `uv sync --locked`, so commit `uv.lock` changes.
+- `Makefile` has working `install`/`lint`/`typecheck`/`test`/`py-check`/`check` targets;
+  `db-reset`, `db-seed`, `contracts` and `smoke` are stubs that exit 1 — replace them in M2/M4/M8.
+- `.env.example` lists every env var from DESIGN §8 with placeholder values.
 
 ---
 
