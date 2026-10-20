@@ -389,7 +389,7 @@ with uv ≥ 0.13 (an older uv rewrites them as revision 3).
 - Not built (no route needs them yet; for M5): receipt-review resolution
   (`resolveReceiptReview` → persist), merge confirmation (`NEW_PRODUCT_STANCE` product on the
   target item), "we're out"/critical from the UI (use `recordInventoryEvents`).
-- Shelf-life quirk (a fresh count read as expired) fixed in PR #PRNUM: a count restarts the window.
+- Shelf-life quirk (a fresh count read as expired) fixed in [#7](https://github.com/willchan/pandabase/pull/7): a count restarts the window.
 
 *For M5 (web UI):*
 - Server actions call the services, never the routes: `web/lib/services/*`
