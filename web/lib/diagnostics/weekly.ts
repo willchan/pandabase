@@ -430,6 +430,10 @@ export async function renderWeekly(
 
   // 7. UX friction -------------------------------------------------------------------------------
   const questions = metric("clarifying_question");
+  // Photo intake: how the agent classified photos (caption / local description / default) and
+  // how often a human re-filed one (the classifier's error signal).
+  const photos = metric("photo_classified");
+  const refiled = metric("photo_reclassified");
   const api = metric("api_request");
   const routeStats = countBy(api, (t) => s(t.p.route) ?? "?").map(([route]) => {
     const mine = api.filter((t) => t.p.route === route);
@@ -459,6 +463,7 @@ export async function renderWeekly(
     ...expiredReviews.map((t) => ({ at: t.at, metric: t.metric, ...t.p })),
     ...answered.map((t) => ({ at: t.at, metric: t.metric, ...t.p })),
     ...questions.map((t) => ({ at: t.at, metric: t.metric, ...t.p })),
+    ...[...photos, ...refiled].map((t) => ({ at: t.at, metric: t.metric, ...t.p })),
     ...routeStats.map((r) => ({ metric: "route_latency", ...r })),
   ];
   if (expiredReviews.length) findings.push({ score: 1, text: `${expiredReviews.length} review item(s) expired unanswered.` });
@@ -474,6 +479,12 @@ export async function renderWeekly(
       "",
       `Clarifying questions asked: ${questions.length}.`,
       "",
+      `Photos classified: ${photos.length} (${
+        countBy(photos, (t) => s(t.p.basis) ?? "?")
+          .map(([b, c]) => `${b} ${c}`)
+          .join(", ") || "none"
+      }); re-filed by a human: ${refiled.length}.`,
+      "",
       table(
         ["Route", "Requests", "p50 ms", "p95 ms", "5xx"],
         routeStats.map((r) => [r.route, r.count, num(r.p50, 0), num(r.p95, 0), r.errors]),
@@ -486,6 +497,7 @@ export async function renderWeekly(
     [
       ...(expiredReviews.length ? ["Expired reviews: are those questions worth asking? Consider better defaults."] : []),
       ...(slow.length ? ["Profile the slow routes above."] : []),
+      ...(refiled.length ? ["Re-filed photos: check the caption/description keywords in the agent's photo classifier."] : []),
     ],
   );
 

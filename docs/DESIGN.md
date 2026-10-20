@@ -597,36 +597,78 @@ indefinitely.
 
 ## 6. Agent (OpenClaw skill pack)
 
-Skills are folders with `SKILL.md` (YAML frontmatter + instructions). They call deterministic tools
-via the shell; tools talk to the API with `AGENT_API_TOKEN`.
+Skills are folders with `SKILL.md` (OpenClaw / AgentSkills format: YAML frontmatter with `name`,
+`description` and a `metadata.openclaw` JSON5 block gating on `requires.bins: ["pandabase-tools"]`
+and `requires.env: ["AGENT_API_TOKEN", "PANDABASE_CONFIG"]`; markdown instructions). They call
+one deterministic CLI, `pandabase-tools`, through OpenClaw's `exec` tool; the CLI talks to the API
+with `AGENT_API_TOKEN`. Discord I/O (thread creation, replies, ✅ reactions) uses OpenClaw's
+`message` tool (`thread-create`, `reply`, `react`, `read`).
 
 | Skill | Trigger | Does |
 |---|---|---|
-| `grocery-cycle` | cron: Fri 18:00, Sat 10:00, Mon 09:00; thread replies | Open cycles, record list edits/skips/away/other-store, Friday nudge (incl. freezer), Saturday build (price checks → `cart_injector.py` → tier-2 fallback → summary) |
-| `discord-intake` | photo posted in `#pandabase` | Classify, upload, create job, reply when done (polls notifications) |
-| `digital-receipt-scraper` | cron daily 21:00 (Will), Sun 21:00 (wife); `backfill` on request | `receipt_parser.py` per profile → `/api/receipts/ingest` |
-| `item-lookup` | "do we have X?" anywhere | `/api/items/lookup` → short answer |
-| `telemetry-aggregator` | cron Sun 23:00 | Fetch weekly diagnostics → write `/diagnostics` → 3-line summary |
+| `grocery-cycle` | automations Fri 18:00, Sat 10:00, Mon 09:00; replies in the cycle thread | Open cycles (thread per cycle), record list edits/skips/away/other-store, Friday nudge (incl. freezer), Saturday build (`cart build` → tier-2 fallback in the agent's browser → `cart finish` → summary) |
+| `discord-intake` | photo or inventory text in `#pandabase` | Photos: `photo submit` (classify, upload, create job); text purchases, "we're out", "froze X", "never buy X" → inventory events / product reject. Job results are posted by a **command automation** (`pandabase-tools jobs replies` every 5 min, no model call) |
+| `digital-receipt-scraper` | automations daily 21:00 (cart member), Sun 21:00 (other member); backfill on request | `receipts sweep` per member profile → `/api/receipts/ingest`; agent extracts zero-ASIN pages |
+| `item-lookup` | "do we have X?" anywhere the bot is addressed | `/api/items/lookup` → `matches[0].text` |
+| `telemetry-aggregator` | automation Sun 23:00 | `diagnostics write` → `/diagnostics` → 3-line summary |
 
-Tools (`/agent/tools`, Python, uv):
+Tools (`/agent/tools`, Python, uv, package `pandabase_tools`, console script `pandabase-tools`;
+JSON on stdout; exit 0 ok, 1 error, 2 usage, 3 profile locked, 4 refused URL):
 
-- `pandabase/` — API client package (generated contracts, auth, idempotency keys, retries).
-- `cart_injector.py` — attaches over **CDP** to the cart member's existing Chromium profile;
-  tier 1: navigate to `https://www.amazon.com/gp/aws/cart/add.html?ASIN.1=…&Quantity.1=…`
-  (batched), click the single confirm control, verify; outputs JSON
-  `{added:[], needs_agent:[], failed:[]}`. Never touches checkout. Whole Foods support via this URL
-  is **unverified** — `make smoke` checks it; if unsupported, WF lines go to `needs_agent`.
-- `receipt_parser.py` — attaches over CDP to a member's profile; walks order history newer than
-  the cursor (or 12 months in backfill mode, throttled ~3s/page, resumable); for orders in a final
-  state (Delivered / Picked up / in-store) extracts ASINs from `/dp/` and `/gp/product/` links and
-  nearby qty/price text; emits receipt JSON. Zero ASINs on a page → returns page text with
-  `needs_agent_extraction` for the skill to handle and logs telemetry.
-- A per-profile file lock prevents concurrent drives.
+- `api.py` — API client: generated contracts are the only wire types (bodies validated before
+  sending, responses parsed), bearer auth, `Idempotency-Key` on every POST (reused across
+  retries of 5xx/429/network errors), `actor_discord_id` filled from `--actor` and required on
+  human-attributed routes. Its route table is checked against `contracts/openapi.json` in tests.
+  `pandabase-tools api get|post <path>` exposes every agent route to the skills.
+- `cart_injector.py` (`cart build`, `cart finish`) — attaches over **CDP** to the cart member's
+  existing Chromium profile. Price checks for `needs_price_check` candidates (product page:
+  JSON-LD offer → `itemprop=price` → the price block's screen-reader text). Tier 1: navigate to
+  `https://www.amazon.com/gp/aws/cart/add.html?ASIN.1=…&Quantity.1=…` (batched per vendor, ≤ 10),
+  read which ASINs the confirm form offers (`ASIN.n` inputs; "unavailable" text excludes one),
+  click the single confirm control (submit of the form whose action contains `/cart/add`; button
+  name fallback) and verify ("added to cart" text, or a cart page without an add form).
+  Outputs `{added, needs_agent, failed}`; a page with no add form and no "added" signal is
+  "layout changed" → whole batch `needs_agent` + `selector_error`. Lines without an ASIN, free
+  text, and vendors not enabled for tier 1 go straight to `needs_agent`; the skill adds them via
+  OpenClaw's browser (tier 2), then `cart finish` posts `cart-result`. A build state file makes
+  re-runs resume without adding a line twice. Whole Foods via the add URL is **unverified**:
+  `cart.wholefoods_tier1` defaults to `false` (WF lines → `needs_agent`) until `make smoke`
+  proves it.
+- `receipt_parser.py` (`receipts sweep [--backfill]`) — attaches over CDP to a member's profile.
+  Collect phase: walk order history newest-first (`orderID=` links; card = widest ancestor
+  mentioning only that order) back to the cursor date minus a 14-day overlap (no cursor: 30
+  days; backfill: 12 months, throttled 3 s/page, resumable per page). Process phase, **oldest
+  first** (late receipts skip EMA updates): open each final-state order (Delivered / Picked up /
+  in-store), extract lines from `/dp/` and `/gp/product/` links (block = widest ancestor
+  mentioning only that ASIN; title, `Qty`/`N of`, `$` price; `<main>` only, recommendation
+  sections skipped), date at household-local noon, and ingest with
+  `external_order_id` dedupe. In-flight orders wait for the next sweep; cancelled ones are
+  skipped. Zero ASINs on a final order → `needs_agent_extraction` with page text, and
+  `selector_error`; the skill ingests its own extraction with `receipts ingest`.
+- `photos.py` (`photo submit`) — classify (caption keywords when unambiguous → the local image
+  description → default `paper_receipt`), presigned upload, `POST /api/jobs`;
+  `--media-key --job-type` re-files a photo a human corrected.
+- `guard.py` — every URL the tools open, and every page they land on, must be `https` on
+  `www.amazon.com`/`amazon.com` and not match checkout/payment/slot/sign-in patterns; the CDP
+  driver also installs it as a Playwright route that aborts such document requests. The tools
+  never launch a browser, sign in, or store credentials (signed out → `not_signed_in`).
+- `lock.py` — per-profile lease file in the state dir: commands hold it while driving a profile;
+  the agent takes it (`lock acquire`/`release`) around tier-2 browsing.
 
-Config: `agent/pandabase.config.example.json` — API base URL, channel IDs
-(`cycle_channel`, `intake_channel`, `ops_channel` — all `#pandabase` in v1), members ↔ Discord IDs ↔
-Chromium profiles + CDP ports, schedule. `agent/cron.example.json` documents the OpenClaw cron
-entries. `make install-agent-skills` symlinks skills into the OpenClaw workspace.
+Config: `agent/pandabase.config.example.json` — API base URL, web URL, household TZ, channel IDs
+(`cycle_channel`, `intake_channel`, `ops_channel` — all `#pandabase` in v1), members ↔ Discord
+IDs ↔ profile name (+ `cart_member`, `receipt_sweep`), tool tunables (`cart.*`, `receipts.*`),
+state and diagnostics dirs. `agent/profiles.example.json` maps profiles to CDP URLs
+(`http://127.0.0.1:<port>`), user-data dirs and the matching OpenClaw browser profile (an
+`attachOnly` remote-CDP profile on the same port, for tier 2). `agent/cron.example.json`
+documents the OpenClaw automations (`openclaw automations add --cron … --tz
+America/Los_Angeles --session isolated --message "Use $<skill>: …"`; one command payload).
+OpenClaw keeps automations in its own state DB, so M8 registers them with the CLI. Skills are
+installed by pointing OpenClaw's `skills.load.extraDirs` at the repo's `agent/skills` (`make
+install-agent-skills`): OpenClaw rejects workspace-skill symlinks that resolve outside the
+workspace unless `skills.load.allowSymlinkTargets` trusts the target.
+OpenClaw's media understanding must use the local Ollama VLM (`tools.media.models` with an
+`ollama/…` image entry) so the agent's cloud model never needs the photo pixels (§10 #10).
 
 Agent message style: short, Discord markdown, ✅ ⚠️ ❓ markers, one web link when needed, no
 components/embeds.
@@ -653,8 +695,12 @@ impactScore, ageHours, …line counts}`, `item_merged {itemId, intoItemId, revie
 `maintenance_run`, `settings_rejected {keys}`; source `session`: `ui_action {action, ok, latencyMs,
 error?}` from every server action. The report reads these client metrics (payload fields it uses):
 `vlm_inference {model, prompt_version, latency_ms, totals_check, parse_failure}`,
-`vlm_parse_failure`, `selector_error {selector, error}`, `price_lookup_failed`,
-`cart_tier1_line`, `clarifying_question {question}`. The worker's `vlm_inference` /
+`vlm_parse_failure`, `selector_error {selector, error, page}`, `price_lookup_failed {asin,
+product_id, error}`, `cart_tier1_line {asin, item_id, product_id, vendor, outcome, error}`,
+`clarifying_question {question}`, `photo_classified {job_type, basis}` and `photo_reclassified
+{to_job_type}` (UX section: photos by classification basis and human re-files). The agent
+tools also emit `receipt_sweep {member, mode, pages, ingested, duplicates, pending, needs_agent,
+errors, complete}` (stored for ad-hoc queries; no report section). The worker's `vlm_inference` /
 `vlm_parse_failure` also carry `job_id`, `job_type`, `attempt`, `repaired` and per-type fields
 (receipts `lines`, `discount_lines`, `date_fallback`, `store_missing`; Trash Cam `detections`,
 `top_confidence`; merges `items`, `suggestions`, `dropped`), all copied into the `vlm` extract.
@@ -774,5 +820,10 @@ docker-compose.yml, Makefile, CLAUDE.md, README.md, .github/workflows/ci.yml
 | 30 | CD: one workflow migrates Turso then deploys Vercel; migrations backward-compatible | Code never ships ahead of its schema; a half-failed deploy can't break production |
 | 31 | Mac Mini updates are pulled by a `launchd` timer with health check, rollback and quiet windows | No inbound ports or self-hosted runner on a home machine; never disrupt the Friday nudge or Saturday build |
 | 32 | Worker VLM `qwen3.5:9b` (Q4), text `qwen3.5:4b`, Ollama JSON-schema output + one repair turn | Best OCR-capable vision model that fits ~8GB next to OpenClaw's model; one family keeps prompts portable; schema-constrained output makes repair rare and bounded |
-| 33 | Web UI: server components + server actions over the shared services, shadcn/ui on Tailwind 4, system light/dark, native selects, phone-first bottom tabs | One code path with the agent; a minute-at-a-time household tool should feel native on a phone and work without client state |
-| 34 | Dev sign-in is an Auth.js credentials provider registered only under `NODE_ENV=development` + `DEV_AUTH_BYPASS=1` | The real session/proxy path is exercised in dev and e2e (the gate is testable), and the bypass can't exist in a production build |
+| 33 | One `pandabase-tools` CLI for every skill; generic `api get/post` plus composite browser commands | One binary to allowlist in OpenClaw's exec policy; skills can't drift from the contracts (tests parse every command a skill names) |
+| 34 | Photo classification is deterministic (caption → local VLM description → default receipt), correctable by one reply | Agent's cloud model never sees photos; a wrong guess costs a review item, not a blocked human |
+| 35 | Photo-job replies via an OpenClaw command automation, not an agent poll | No model call every few minutes; `NO_REPLY` keeps it silent |
+| 36 | Receipt sweeps re-walk a 14-day overlap and ingest oldest-first | Dedupe makes overlap free; in-flight orders aren't skipped by the cursor; EMA skips out-of-order receipts |
+| 37 | Whole Foods tier 1 off until smoke-verified | A silent mis-add to the Amazon cart is worse than an agent fallback |
+| 38 | Web UI: server components + server actions over the shared services, shadcn/ui on Tailwind 4, system light/dark, native selects, phone-first bottom tabs | One code path with the agent; a minute-at-a-time household tool should feel native on a phone and work without client state |
+| 39 | Dev sign-in is an Auth.js credentials provider registered only under `NODE_ENV=development` + `DEV_AUTH_BYPASS=1` | The real session/proxy path is exercised in dev and e2e (the gate is testable), and the bypass can't exist in a production build |

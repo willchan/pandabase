@@ -38,7 +38,7 @@ contracts.
 | M4 API & contracts | done | #5 |
 | M5 Web UI & auth | in review | #10 |
 | M6 Python worker | in review | #8 |
-| M7 Agent skill pack & tools | todo | |
+| M7 Agent skill pack & tools | in review | |
 | M8 Ops, compose, README | todo | |
 | M9 Continuous deployment | todo | |
 
@@ -473,7 +473,7 @@ Lighthouse mobile accessibility ≥ 90 on This Week (documented in PR, not CI-ga
 4.0.1; dev: `@playwright/test` 1.64.1, `tw-animate-css` 1.4.0, `@testing-library/react` 16.3,
 `@testing-library/dom` 10.4, `jsdom`. All past pnpm's minimum release age.
 
-*Deviations / choices (DESIGN §3, §3.1, §4.5, §7, §9, §10 #33–34 and PRD §4.6 updated):*
+*Deviations / choices (DESIGN §3, §3.1, §4.5, §7, §9, §10 #38–39 and PRD §4.6 updated):*
 - **shadcn/ui components are hand-written** (`web/components/ui/*`, new-york style on Tailwind 4,
   `components.json` committed): the sandbox's proxy blocks `ui.shadcn.com`, so `shadcn add` can't
   run. They match upstream's source; future `shadcn add` calls will work alongside them. Native
@@ -659,7 +659,129 @@ the "ask once / never nag" rules.
 
 **Out of scope:** live Amazon/Discord (covered by `make smoke` in M8).
 
-**Notes:** —
+**Notes:**
+
+*OpenClaw findings* (docs at `github.com/openclaw/openclaw/tree/main/docs`, read 2026-10-20 at
+commit `d1b8bcc`; npm `openclaw` 2026.10.5. `docs.openclaw.ai` itself was unreachable from the
+build sandbox, so the repo's `docs/` tree — the site's source — was used):
+- **Skill format** ([tools/skills.md](https://github.com/openclaw/openclaw/blob/main/docs/tools/skills.md),
+  [tools/creating-skills.md](https://github.com/openclaw/openclaw/blob/main/docs/tools/creating-skills.md)):
+  AgentSkills spec. Frontmatter needs `name` + `description`; optional `homepage`,
+  `user-invocable` (default true → slash command), `disable-model-invocation`,
+  `command-dispatch: tool`. Gating lives in `metadata.openclaw` (JSON5): `requires.bins`,
+  `requires.anyBins`, `requires.env`, `requires.config`, `os`, `primaryEnv`, `emoji`, `install`.
+  The skill's name comes from frontmatter `name`; skills are snapshotted at session start.
+  Per-skill env/secrets: `skills.entries.<name>.env` (injected for the run, host only).
+- **Skill locations** (precedence): `<workspace>/skills` > `<workspace>/.agents/skills` >
+  `~/.agents/skills` > `~/.openclaw/skills` > bundled > `skills.load.extraDirs`. Workspace roots
+  **reject symlinks resolving outside the root** unless `skills.load.allowSymlinkTargets`
+  trusts them → DESIGN §6 now installs via `skills.load.extraDirs` (not symlinks).
+- **Shell tools**: skills don't declare tools; the agent runs commands with the `exec` tool.
+  Default host exec is `mode=full` (no approvals); with `tools.exec.mode: "allowlist"`, chaining,
+  pipes and **redirections are rejected** unless every segment is allowlisted
+  ([tools/exec.md](https://github.com/openclaw/openclaw/blob/main/docs/tools/exec.md)) → the CLI
+  takes JSON via `--json`/`--input FILE` and writes its own files; allowlist only `pandabase-tools`.
+- **Cron** ([automation/cron-jobs](https://github.com/openclaw/openclaw/tree/main/docs/automation/cron-jobs)):
+  `openclaw automations` (alias `openclaw cron`) `add --cron "0 18 * * 5" --tz
+  America/Los_Angeles --session isolated --message "…"`; `--announce --channel discord --to
+  channel:<id>` or `--no-deliver`; `--tools exec,…` caps tools. Jobs live in OpenClaw's SQLite
+  state — edit via CLI, not JSON (so `cron.example.json` is documentation/input, not a file
+  OpenClaw reads). **Command payloads** (`--command`) run a shell command with no model turn and
+  announce stdout; printing `NO_REPLY` posts nothing → used for job-result replies. `$skill-name`
+  in a message references a skill explicitly.
+- **Discord** ([channels/discord/*](https://github.com/openclaw/openclaw/tree/main/docs/channels/discord)):
+  threads route as their own sessions inheriting the parent channel's config; `message` tool
+  actions `send`, `reply`, `react` (emoji; `""` clears), `thread-create` (`--thread-name`,
+  `--message`), `read`; reply tags `[[reply_to:<id>]]`. Adding any guild `channels` entry makes the
+  map an **allowlist** — keep a `"*"` entry. Needed config: `#pandabase` with `requireMention:
+  false` and `requireMentionInBotThreads: false` (cycle threads are bot-created), other channels
+  `requireMention: true` (so "do we have X?" works when mentioned).
+- **Inbound images** ([nodes/media-understanding.md](https://github.com/openclaw/openclaw/blob/main/docs/nodes/media-understanding.md)):
+  a vision-capable reply model gets photos **natively** unless an image-capable entry in
+  `tools.media.models[]` describes them first; `tools.media.image.enabled: false` does *not*
+  stop native delivery. → configure `tools.media.models: [{provider: "ollama", model:
+  "<OLLAMA_VLM_MODEL>", capabilities: ["image"]}]` (with the model under
+  `models.providers.ollama.models[]`, `input: ["text","image"]`) so photos are described locally;
+  the skill passes that description to `photo submit` and never inspects pixels. Residual risk
+  (documented by OpenClaw): an image whose local description fails may still be delivered
+  natively — M8 should consider a text-only model for the agent or scoping media understanding
+  to `#pandabase`.
+- **Browser** ([tools/browser/*](https://github.com/openclaw/openclaw/tree/main/docs/tools/browser)):
+  profiles are `openclaw`-managed, `existing-session` (Chrome DevTools MCP auto-connect, needs a
+  human to approve the attach prompt — unsuitable unattended), or remote CDP (`cdpUrl`, with
+  `attachOnly: true` for a loopback browser it must not launch). → each member's Chromium runs
+  with `--remote-debugging-port`; our tools attach with Playwright `connect_over_cdp`, and the
+  agent's tier-2 profile `pandabase-<member>` is `{cdpUrl: "http://127.0.0.1:<port>",
+  attachOnly: true}` on the same browser. OpenClaw has no URL denylist for the browser tool
+  (only an SSRF policy), so "never checkout" in tier 2 is a skill rule; our own tools enforce it
+  in code.
+
+*Deviations / choices (DESIGN §6, §7, §10 #33–37 added; PRD §4.3 one sentence):*
+- One CLI, `pandabase-tools` (console script), with subcommands instead of separate
+  `cart_injector.py`/`receipt_parser.py` entry points; those are modules of `pandabase_tools`.
+  Generic `api get|post <path>` covers every agent route (route table tested against
+  `contracts/openapi.json`); `--actor` required on human-attributed routes, `--key` for
+  idempotency (skills use `discord:<message id>`).
+- Dependencies: `playwright` ≥ 1.63 (sync API, `connect_over_cdp`; no browser download needed —
+  we attach), `httpx` 0.28. HTML parsing is stdlib `html.parser` (`dom.py`).
+- Cart build is resumable via `state_dir/cart-<cycle>.json` (a `building` cycle → 409 on a
+  second `building`, and re-adding would double quantities). `needs_agent` lines are finished by
+  the agent and reported with `cart finish` (one `cart-result` call; unreported lines = failed).
+- Price checks happen inside `cart build` (product page per candidate, ≤ 20, 1.5 s apart).
+- Receipts: collect-then-process, oldest first; 14-day overlap instead of a strict cursor;
+  in-flight orders retried next sweep; local `done` set only saves page loads.
+- Photo classification and the `photo_classified`/`photo_reclassified` metrics are new
+  (heuristic → diagnostics rule): rows added to the weekly report's UX section
+  (`web/lib/diagnostics/weekly.ts` + snapshot, an M4-owned file — called out in the PR).
+- Job-result replies: `pandabase-tools jobs replies` as a 5-minute command automation (no model
+  call), replying to the photo with `[[reply_to:<id>]]` (several at once: one message with jump
+  links). Marks jobs notified before printing, so a failed Discord delivery loses that reply
+  (the result is still in the web UI).
+- Example member names are `will` and `partner`; Discord ids in the examples are placeholders.
+- `GET /api/freezer/aging` isn't used by a skill (the check-in already includes the oldest
+  freezer items); it stays available via `api get`.
+- Tested: guard (checkout/payment/slot/sign-in/other-host URLs refused, CDP route aborts),
+  URL building/batching, classification incl. unavailable/not-offered, layout-changed and
+  unverified fallbacks, checkout redirect and signed-out handling, price extraction, cart-result
+  mapping, build resume, order list/detail parsing (delivery, WF pickup, WF in-store with
+  `/gp/product/`), final-state filtering, cursor window, backfill resume, zero-ASIN fallback,
+  idempotency keys and retries, lock, CLI, skill frontmatter and every command a skill names.
+
+*For M8:*
+- **Install**: `cd agent/tools && uv sync`; put `agent/tools/.venv/bin` on the OpenClaw
+  gateway's `PATH` (so `requires.bins: ["pandabase-tools"]` passes); copy the example configs to
+  `agent/pandabase.config.json` + `agent/profiles.json` (gitignore them); set `AGENT_API_TOKEN`
+  and `PANDABASE_CONFIG` in the gateway's environment (or `skills.entries.<name>.env` for each
+  of the five skills). `make install-agent-skills` = add the repo's absolute `agent/skills` path
+  to `skills.load.extraDirs` in `~/.openclaw/openclaw.json`, then `openclaw skills check`
+  (restart the gateway or start a new session to pick them up). Exec: either default `full`, or
+  `tools.exec.mode: "allowlist"` with `pandabase-tools` allowlisted.
+- **Cron**: for each `cron.example.json` job, `openclaw automations add --name <name> --cron
+  "<cron>" --tz America/Los_Angeles --session isolated --message "<message>" --no-deliver`;
+  for the `command` job: `--command "pandabase-tools jobs replies" --command-env
+  PANDABASE_CONFIG=… --command-env AGENT_API_TOKEN=… --announce --channel discord --to
+  channel:<intake_channel>`. Requires `operator.admin`. Idempotent re-registration: list first
+  and `edit` existing names.
+- **Discord**: guild config with `#pandabase` `{requireMention: false,
+  requireMentionInBotThreads: false, users: [both members]}` and `"*": {requireMention: true}`;
+  bot needs Create Public Threads, Send Messages in Threads, Add Reactions, Read Message History.
+- **Media**: `tools.media.models` image entry on local Ollama (see findings); verify with
+  `openclaw infer image describe --file <sample> --model ollama/<model>`.
+- **Chromium per profile**: one Chromium per member, each its own user-data dir (Chrome ≥ 136
+  ignores `--remote-debugging-port` on the default data dir), started at login by a LaunchAgent:
+  `Chromium --user-data-dir="$HOME/Library/Application Support/PandaBase/chromium-<member>"
+  --remote-debugging-port=<9222|9223> --remote-debugging-address=127.0.0.1 --no-first-run`.
+  Sign in to Amazon once by hand in each (the tools never sign in). OpenClaw browser profiles:
+  `browser.profiles.pandabase-<member> = {cdpUrl: "http://127.0.0.1:<port>", attachOnly: true}`.
+  Keep the port bound to loopback (CDP = full control of a signed-in browser).
+- **`make smoke`** checks: `pandabase-tools cdp check --member <m>` for each profile (attach +
+  open the cart page); `pandabase-tools cart url <ASIN>:1` for one Amazon ASIN and one Whole
+  Foods ASIN, opened in the cart member's profile and confirmed by hand or by a tiny script
+  using `pandabase_tools.cart_injector.inject` on a one-line cart — if the WF item lands in the
+  Whole Foods cart, set `cart.wholefoods_tier1: true`; then remove the test items. Also `api get
+  /api/grocery/cycle/current` (agent token round trip) and `jobs replies` (prints `NO_REPLY`).
+- **Backfill** (`make backfill`): `pandabase-tools receipts sweep --member <m> --backfill`
+  repeated until `complete` (it resumes); or ask the agent "backfill receipts for <m>".
 
 ---
 
