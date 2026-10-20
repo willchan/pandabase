@@ -389,10 +389,7 @@ with uv ≥ 0.13 (an older uv rewrites them as revision 3).
 - Not built (no route needs them yet; for M5): receipt-review resolution
   (`resolveReceiptReview` → persist), merge confirmation (`NEW_PRODUCT_STANCE` product on the
   target item), "we're out"/critical from the UI (use `recordInventoryEvents`).
-- Known domain quirk (M3, unchanged): shelf life is FIFO over *acquisitions*, so a fresh count of a
-  perishable with no acquisition in its window is presumed expired at read time (e.g. counting 2
-  chicken thighs bought 5 days ago shows 0 in the fridge). Worth revisiting with a count resetting
-  the freshness window.
+- Shelf-life quirk (a fresh count read as expired) fixed in PR #PRNUM: a count restarts the window.
 
 *For M5 (web UI):*
 - Server actions call the services, never the routes: `web/lib/services/*`

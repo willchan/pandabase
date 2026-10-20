@@ -34,6 +34,9 @@ Read only the sections your task needs.
   rows) in the weekly diagnostics report.
 - **Privacy:** never commit `/diagnostics`, `.env*`, real receipts, or real order HTML. Test fixtures
   must be synthetic or scrubbed.
+- **Bug fixes start with a regression test.** Write a test that reproduces the bug and fails before
+  the fix, then make it pass. Name or comment it so the bug is recognisable (what input, what was
+  wrong).
 - **Prompts are versioned files** in `worker/prompts/`; changing a prompt means a new version file,
   and jobs record `prompt_version`.
 
