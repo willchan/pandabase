@@ -513,7 +513,7 @@ Lighthouse mobile accessibility ≥ 90 on This Week (documented in PR, not CI-ga
   no product "make preferred" button (the agent's overrides and receipts teach preference); a
   receipt photo needs R2 configured (otherwise "Photo unavailable").
 
-*Acceptance (local):* `pnpm --filter web test` 640 tests ✓ (domain 100% lines);
+*Acceptance (local):* `pnpm --filter web test` 645 tests ✓ (domain 100% lines);
 `pnpm --filter web build` ✓; `pnpm --filter web test:e2e` 4 ✓ (sign-in gate, This Week add + skip,
 confirm a receipt review, add away period). Lighthouse 13.5 mobile, signed in, This Week:
 **accessibility 100**, best practices 100 (against `next dev`; not CI-gated). Screenshots of every
