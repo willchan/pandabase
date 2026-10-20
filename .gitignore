@@ -39,3 +39,7 @@ __pycache__/
 .DS_Store
 *.pem
 *.log
+
+# Agent pack: local config (Discord ids, CDP ports) — copy from the *.example.json files
+/agent/pandabase.config.json
+/agent/profiles.json

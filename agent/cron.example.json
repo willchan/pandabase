@@ -1,0 +1,52 @@
+{
+  "_comment": "OpenClaw automations for PandaBase. OpenClaw stores jobs in its SQLite state DB, so this file is documentation + input for `make install-agent-cron` (M8): each entry becomes `openclaw automations add --name <name> --cron <cron> --tz <tz> --session isolated --message <message> --tools exec,read,write,message,browser --no-deliver`. Skills post to Discord themselves with the message tool, so run output isn't announced. Entries with `command` are command payloads (no model call) announced to the named channel instead. Times are household-local (tz).",
+  "tz": "America/Los_Angeles",
+  "jobs": [
+    {
+      "name": "pandabase-friday-nudge",
+      "cron": "0 18 * * 5",
+      "skill": "grocery-cycle",
+      "message": "Use $grocery-cycle: run the Friday nudge."
+    },
+    {
+      "name": "pandabase-saturday-build",
+      "cron": "0 10 * * 6",
+      "skill": "grocery-cycle",
+      "message": "Use $grocery-cycle: run the Saturday cart build."
+    },
+    {
+      "name": "pandabase-monday-open",
+      "cron": "0 9 * * 1",
+      "skill": "grocery-cycle",
+      "message": "Use $grocery-cycle: ensure a cycle is open (Monday fallback)."
+    },
+    {
+      "name": "pandabase-receipts-will",
+      "cron": "0 21 * * *",
+      "skill": "digital-receipt-scraper",
+      "member": "will",
+      "message": "Use $digital-receipt-scraper: sweep receipts for member will."
+    },
+    {
+      "name": "pandabase-receipts-partner",
+      "cron": "0 21 * * 0",
+      "skill": "digital-receipt-scraper",
+      "member": "partner",
+      "message": "Use $digital-receipt-scraper: sweep receipts for member partner."
+    },
+    {
+      "name": "pandabase-diagnostics",
+      "cron": "0 23 * * 0",
+      "skill": "telemetry-aggregator",
+      "message": "Use $telemetry-aggregator: write last week's diagnostics."
+    },
+    {
+      "name": "pandabase-job-replies",
+      "cron": "*/5 * * * *",
+      "skill": "discord-intake",
+      "command": "pandabase-tools jobs replies",
+      "deliver_to": "intake_channel",
+      "_comment": "Command payload: no model turn. `openclaw automations add --name pandabase-job-replies --cron '*/5 * * * *' --tz America/Los_Angeles --command 'pandabase-tools jobs replies' --command-env PANDABASE_CONFIG=... --announce --channel discord --to channel:<intake_channel>`. Prints NO_REPLY when there is nothing to say."
+    }
+  ]
+}

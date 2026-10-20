@@ -68,6 +68,8 @@ pnpm contracts:gen           # Zod → contracts/openapi.json → worker/agent P
 make contracts-check         # regenerate + fail if the generated contracts differ from git
 docker build -t pandabase-worker worker   # worker image (CI job worker-image)
 (cd worker && uv run python -m pandabase_worker)   # run the worker (env: PANDABASE_API_URL, WORKER_API_TOKEN, OLLAMA_URL)
+(cd agent/tools && uv run pandabase-tools --help)   # agent CLI used by the skills (JSON on stdout)
+(cd agent/tools && uv run pytest tests/test_skills.py)   # skill frontmatter + every command a skill names parses
 make check                   # everything CI runs
 ```
 
