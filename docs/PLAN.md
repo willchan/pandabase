@@ -37,7 +37,7 @@ contracts.
 | M3 Domain logic | done | #4 |
 | M4 API & contracts | in review | #5 |
 | M5 Web UI & auth | todo | |
-| M6 Python worker | todo | |
+| M6 Python worker | in review | |
 | M7 Agent skill pack & tools | todo | |
 | M8 Ops, compose, README | todo | |
 
@@ -498,7 +498,75 @@ malformed VLM JSON → repair → failure, concurrency = 1, graceful shutdown on
 
 **Out of scope:** video/FFmpeg frame extraction (v1.1) beyond installing ffmpeg in the image.
 
-**Notes:** —
+**Notes:**
+
+*Models (checked 2026-10-20; ollama.com itself was unreachable from the build session, so the
+catalog was read through search results of its library/tag pages):* default
+`OLLAMA_VLM_MODEL` = **`qwen3.5:9b`** — Qwen3.5 9B is natively multimodal (text + image, 256K
+context); its `latest` tag is `q4_K_M`, 6.6GB on disk, roughly 7–8GB resident with the worker's
+`num_ctx` 8192, so it fits the ~8GB budget beside OpenClaw's model and Chromium on the 32GB M6.
+Alternatives considered: `qwen3-vl:8b` (6.1GB; the previous Qwen VL generation — a fine fallback),
+`gemma4:e4b` (6.6–9.5GB; good general multimodal, rated below Qwen on document OCR), `glm-ocr`
+(2.2GB, document-only — no use for Trash Cam), `qwen3.8:27b` / `nemotron-3.5-bolt` (18GB / 25GB —
+too big). Receipts are dense small print, so OCR quality decides. `merge_suggest` uses
+**`qwen3.5:4b`** (`OLLAMA_TEXT_MODEL`, 3.4GB): the task is short-text judgement over item
+names, a 4B instruct model handles it with schema-constrained JSON, and staying in the same
+family means the same prompt style and `think: false` behave the same. (Reusing the 9B VLM
+would also work — set `OLLAMA_TEXT_MODEL=qwen3.5:9b` to keep one model resident.)
+
+*Versions added:* `httpx` 0.28.1, `pillow` 13.0, `pillow-heif` 1.8.1 (iPhone HEIC uploads).
+Locked with uv 0.13.3 (revision 5). Image installs uv 0.13.3 from PyPI in a build stage (no
+`ghcr.io/astral-sh/uv` copy), runtime = `python:3.14-slim` + ffmpeg, uid 10001.
+
+*Deviations / choices (DESIGN §1.2, §5, §7, §8, §10 #30 updated):*
+- Layout: `src/pandabase_worker/{main,api,http,ollama,media,prompts,telemetry,config}.py`,
+  `jobs/{paper_receipt,trash_cam,merge_suggest,context}.py`; run with
+  `python -m pandabase_worker`. `http.py` holds the shared retry helper (network/429/5xx, 4
+  tries, 1s→2s→4s); `config.py` holds tunables (keep_alive, num_ctx, max px, timeouts).
+- Ollama: `/api/chat`, `format` = the job's output JSON schema, `stream: false`,
+  `think: false` (dropped and resent if a model rejects it), temperature 0, `keep_alive: "2m"`.
+  One repair turn on invalid output. The model's raw replies go in `raw_model_response`
+  (`{responses: [...]}`).
+- **merge_suggest input** was unspecified: chose `{items: [{item_id, name, aliases?}]}` (2–150
+  items) in the job's `input`; the worker can't read the catalog (no worker-scope route).
+  Follow-up: promote it to a Zod contract (`MergeSuggestInput`) when something creates these
+  jobs (nothing does yet — M5/M8 or a cron).
+- Paper receipt: negative lines (discounts) count in the totals check but are not posted;
+  unreadable date → today in `HOUSEHOLD_TZ`; unreadable store → `UNKNOWN`. Flagged in telemetry.
+- Health gate: before each claim the worker checks `GET /api/tags` and claims only job types
+  whose model is pulled (a claim costs an attempt; an Ollama outage would otherwise fail every
+  queued job). Reported once per state change as `worker_ollama_unavailable`.
+- `claim` is not retried (not idempotent; the next poll retries). `complete` is, with
+  `Idempotency-Key: complete:{job_id}:{attempt}`. 409 → drop (`worker_lease_lost`).
+- Telemetry beyond DESIGN §7's list: `worker_job_failed`, `worker_lease_lost`,
+  `worker_complete_error`, `worker_ollama_unavailable`, plus extra `vlm_inference` fields. They
+  reach the weekly `vlm` extract only where the report already reads them (`vlm_inference`
+  fields); a "worker health" row in the report is a follow-up (web/lib/diagnostics is M4's).
+- Tests: in-memory fake State Engine (leases, attempts, 409, idempotent replay), fake R2 and
+  Ollama via `httpx.MockTransport`; Ollama fixtures in `tests/fixtures/ollama/` are synthetic
+  responses in Ollama's wire shape (no live model was reachable); the receipt image is rendered
+  with Pillow at test time. An autouse fixture fails any real socket connect.
+- Local `docker build` in the build session could not reach Docker Hub (429) or
+  `deb.debian.org` (network policy), so the image was verified locally without the ffmpeg layer
+  (non-root, imports, prompts, SIGTERM → exit 0 in < 1s); the CI job `worker-image` builds the
+  real Dockerfile.
+
+*For M8 (ops):*
+- Env: `PANDABASE_API_URL`, `WORKER_API_TOKEN`, `OLLAMA_URL` (`http://host.docker.internal:11434`),
+  `OLLAMA_VLM_MODEL` (`qwen3.5:9b`), `OLLAMA_TEXT_MODEL` (`qwen3.5:4b`), `POLL_INTERVAL_SECONDS`
+  (10), `HOUSEHOLD_TZ`. `PROMPTS_DIR` is set by the image.
+- Compose service hints: `build: ./worker`, `restart: unless-stopped`, `env_file: .env`,
+  `extra_hosts: ["host.docker.internal:host-gateway"]` (needed on Linux; Docker Desktop has it),
+  `stop_grace_period: 5m` (SIGTERM waits for the in-flight job; the lease is 5 min), no ports,
+  no volumes, `read_only: true` + `tmpfs: /tmp` is fine (the worker writes nothing to disk).
+  Ollama runs natively: `ollama pull qwen3.5:9b qwen3.5:4b`; `OLLAMA_NUM_PARALLEL=1` and
+  `OLLAMA_MAX_LOADED_MODELS=1` on the host keep memory bounded.
+- `make smoke` VLM checks: (1) `curl $OLLAMA_URL/api/tags` lists both models; (2) a
+  `/api/chat` with `format` + `keep_alive: "2m"` + a small synthetic receipt image returns JSON
+  that validates as the paper-receipt schema (`pandabase_worker.jobs.paper_receipt.VlmReceipt`)
+  in < 60s; (3) end to end: upload a synthetic receipt, `POST /api/jobs`, wait for
+  `GET /api/jobs/notifications` to show it completed with `model`/`prompt_version` set;
+  (4) `docker compose stop worker` exits 0 within the grace period.
 
 ---
 

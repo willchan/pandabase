@@ -1,0 +1,16 @@
+{
+  "model": "qwen3.5:9b",
+  "created_at": "2026-10-20T16:00:00.000000Z",
+  "message": {
+    "role": "assistant",
+    "content": "```json\n{\"store\": \"SYNTHETIC FOODS MARKET\", \"date\": \"2026-10-18\", \"lines\": [{\"raw_text\": \"ORG BANANAS\", \"qty\": 1.32, \"unit_price\": 0.69, \"line_total\": 0.91}, {\"raw_text\": \"WHOLE MILK 1GAL\", \"qty\": null, \"unit_price\": null, \"line_total\": 4.29}, {\"raw_text\": \"GREEK YOGURT\", \"qty\": 2, \"unit_price\": 1.25, \"line_total\": 2.5}, {\"raw_text\": \"SOURDOUGH BREAD\", \"qty\": null, \"unit_price\": null, \"line_total\": 5.99}, {\"raw_text\": \"COUPON WHOLE MILK\", \"qty\": null, \"unit_price\": null, \"line_total\": -1.0}], \"subtotal\": 12.69, \"tax\": 0.0, \"total\": 12.69}\n```"
+  },
+  "done_reason": "stop",
+  "done": true,
+  "total_duration": 4200000000,
+  "load_duration": 1200000000,
+  "prompt_eval_count": 1312,
+  "prompt_eval_duration": 1100000000,
+  "eval_count": 310,
+  "eval_duration": 1900000000
+}
