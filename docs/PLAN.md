@@ -35,7 +35,7 @@ contracts.
 | M1 Skeleton & CI | done | #2 |
 | M2 Schema & seed | done | #3 |
 | M3 Domain logic | done | #4 |
-| M4 API & contracts | in review | |
+| M4 API & contracts | in review | #5 |
 | M5 Web UI & auth | todo | |
 | M6 Python worker | todo | |
 | M7 Agent skill pack & tools | todo | |
