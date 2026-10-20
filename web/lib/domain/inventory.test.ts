@@ -6,6 +6,7 @@ import {
   estimateItem,
   estimateLocation,
   expiredQuantity,
+  freshnessBatches,
   onHandAt,
   projectInventory,
   shelfLifeDiscards,
@@ -352,6 +353,112 @@ describe("shelf life", () => {
       },
     ]);
     expect(shelfLifeDiscards(milk, states, t(10), ctx)).toHaveLength(2); // no history → all expired
+  });
+});
+
+// Regression: shelf life used to run FIFO over *acquisitions* only, so a fresh count of a
+// perishable bought outside its shelf-life window read as expired — counting 2 chicken thighs
+// bought 5 days ago (shelf life 3 days) showed 0 in the fridge, and the cron discarded them.
+// A count with a quantity restarts the window for the units it counts (§4.2).
+describe("shelf life — a count restarts the freshness window", () => {
+  // One thigh every 2 days, keeps 3 days in the fridge.
+  const chicken: InventoryItem = { ...eggs, emaDays: 2, shelfLifeDays: 3 };
+  const fromLog = (events: InventoryEvent[], now: string) => {
+    const { states } = projectInventory(chicken, events, ctx);
+    const batches = freshnessBatches(events);
+    return {
+      estimate: estimateItem(chicken, states, now, ctx, batches),
+      discards: shelfLifeDiscards(chicken, states, now, ctx, batches),
+    };
+  };
+
+  it.each([
+    [
+      "counted 2 thighs bought 5 days ago (3-day shelf life): fresh, not 0",
+      [ev("acquired", 4, 1), ev("observed", 2, 6)],
+      t(6.5),
+      { fridge: [1.75, 0] },
+    ],
+    [
+      "counted after the earlier units were presumed discarded",
+      [ev("acquired", 4, 1), ev("presumed_discarded", 2, 5), ev("observed", 2, 6)],
+      t(7),
+      { fridge: [1.5, 0] },
+    ],
+    [
+      "count then a later acquisition, count still fresh: FIFO over both",
+      [ev("observed", 4, 1), ev("acquired", 1, 3)],
+      t(3.5),
+      { fridge: [3.75, 0] },
+    ],
+    [
+      "count then a later acquisition, count aged out: only the acquisition is fresh",
+      [ev("observed", 4, 1), ev("acquired", 1, 3)],
+      t(4.5),
+      { fridge: [1, 2.25] },
+    ],
+    [
+      "the count itself has aged past shelf life since it was counted",
+      [ev("acquired", 4, 1), ev("observed", 3, 2)],
+      t(6),
+      { fridge: [0, 1] },
+    ],
+    [
+      "a critical flag (null quantity) doesn't reset freshness",
+      [ev("acquired", 4, 1), ev("observed", null, 3.5, { statusOverride: "critical" })],
+      t(4.5),
+      { fridge: [0, 2.25] },
+    ],
+    [
+      "a count in the frozen reserve doesn't freshen the fridge",
+      [
+        ev("acquired", 4, 1),
+        ev("moved", 2, 1, { toLocation: "freezer" }),
+        ev("observed", 1, 4.5, { location: "freezer" }),
+      ],
+      t(4.5),
+      { fridge: [0, 0.25], freezer: [1, 0] },
+    ],
+    [
+      "a count at another non-default location restarts that location's window",
+      [
+        ev("acquired", 4, 1),
+        ev("moved", 2, 1, { toLocation: "pantry" }),
+        ev("observed", 2, 5, { location: "pantry" }),
+      ],
+      t(5.5),
+      { fridge: [0, 0], pantry: [1.75, 0] },
+    ],
+  ] as const)("%s", (_, events, now, expected) => {
+    const { estimate, discards } = fromLog([...events], now);
+    for (const [location, [onHand, expired]] of Object.entries(expected)) {
+      const at = estimate.byLocation.find((e) => e.location === location)!;
+      expect(at.onHand, `${location} onHand`).toBeCloseTo(onHand, 9);
+      expect(at.expiredQty, `${location} expiredQty`).toBeCloseTo(expired, 9);
+      // The daily cron (`shelfLifeDiscards`) drops exactly what the estimate drops.
+      const discarded = discards.find((d) => d.location === location)?.quantity ?? 0;
+      expect(discarded, `${location} discarded`).toBeCloseTo(expired, 9);
+    }
+  });
+
+  it("freshnessBatches: per location; a count replaces earlier batches; critical flags don't", () => {
+    expect(
+      freshnessBatches([
+        ev("acquired", 1, 3),
+        ev("observed", 2, 2),
+        ev("acquired", 5, 1),
+        ev("observed", null, 4, { statusOverride: "critical" }),
+        ev("acquired", 9, 4, { trust: "expired" }),
+        ev("acquired", 3, 1, { location: "pantry" }),
+        ev("consumed", 3, 5, { location: "pantry" }),
+      ]),
+    ).toEqual({
+      fridge: [
+        { at: t(2), qty: 2 },
+        { at: t(3), qty: 1 },
+      ],
+      pantry: [{ at: t(1), qty: 3 }],
+    });
   });
 });
 

@@ -5,6 +5,9 @@ description = "PandaBase media worker: claims jobs from the State Engine and run
 readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
+    "httpx>=0.28.1",
+    "pillow>=13.0.0",
+    "pillow-heif>=1.8.1",
     "pydantic>=2.14.1",
 ]
 
@@ -33,7 +36,7 @@ select = ["E", "W", "F", "I", "B", "UP", "SIM", "RUF"]
 [tool.mypy]
 strict = true
 python_version = "3.14"
-mypy_path = "src"
+mypy_path = "src:tests"
 explicit_package_bases = true
 exclude = ['^\.venv/']
 

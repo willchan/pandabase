@@ -57,6 +57,35 @@ describe("inventory events", () => {
     });
   });
 
+  // Regression: shelf life ran FIFO over acquisitions only, so counting chicken bought outside its
+  // 3-day shelf life read as 0 on hand and the daily cron presumed the counted units discarded.
+  it("a fresh count of a perishable bought long ago is on hand, and the cron keeps it", async () => {
+    const chicken = await h.itemId("Chicken Thighs"); // shelf life 3 days
+    h.advance(10 * 86_400_000); // every seeded acquisition is past its shelf life
+    const res = await post([
+      { item_id: chicken, kind: "observed", quantity: 2 }, // fridge
+      { item_id: chicken, kind: "observed", quantity: 0, location: "freezer" }, // no reserve
+    ]);
+    expect(res.body.estimates).toEqual([expect.objectContaining({ item_id: chicken, on_hand: 2 })]);
+    const cron = await h.call<{ presumed_discards: number }>(
+      HANDLERS.cronMaintenance.GET,
+      "/api/cron/maintenance",
+      { auth: "cron" },
+    );
+    expect(cron.status).toBe(200);
+    const discarded = await h.db
+      .select()
+      .from(inventoryEvent)
+      .where(
+        and(
+          eq(inventoryEvent.itemId, chicken),
+          eq(inventoryEvent.kind, "presumed_discarded"),
+          eq(inventoryEvent.occurredAt, h.now()),
+        ),
+      );
+    expect(discarded).toEqual([]);
+  });
+
   it("critical flag, we're out, discarded", async () => {
     const milk = await h.itemId("Whole Milk");
     const yogurt = await h.itemId("Greek Yogurt");

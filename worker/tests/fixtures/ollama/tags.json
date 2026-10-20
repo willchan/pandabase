@@ -1,0 +1,24 @@
+{
+  "models": [
+    {
+      "name": "qwen3.5:9b",
+      "model": "qwen3.5:9b",
+      "size": 6600000000,
+      "details": {
+        "family": "qwen35",
+        "parameter_size": "9.7B",
+        "quantization_level": "Q4_K_M"
+      }
+    },
+    {
+      "name": "qwen3.5:4b",
+      "model": "qwen3.5:4b",
+      "size": 3400000000,
+      "details": {
+        "family": "qwen35",
+        "parameter_size": "4.7B",
+        "quantization_level": "Q4_K_M"
+      }
+    }
+  ]
+}

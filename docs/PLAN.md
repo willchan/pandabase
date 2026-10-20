@@ -21,7 +21,7 @@
 
 ```
 M1 ─▶ M2 ─▶ M3 ─▶ M4 ─┬─▶ M5 (web UI)       ─┐
-                      ├─▶ M6 (worker)       ─┼─▶ M8 (ops & docs)
+                      ├─▶ M6 (worker)       ─┼─▶ M8 (ops & docs) ─▶ M9 (continuous deployment)
                       └─▶ M7 (agent pack)   ─┘
 ```
 
@@ -37,9 +37,10 @@ contracts.
 | M3 Domain logic | done | #4 |
 | M4 API & contracts | done | #5 |
 | M5 Web UI & auth | in review | |
-| M6 Python worker | todo | |
+| M6 Python worker | in review | #8 |
 | M7 Agent skill pack & tools | todo | |
 | M8 Ops, compose, README | todo | |
+| M9 Continuous deployment | todo | |
 
 ---
 
@@ -389,10 +390,7 @@ with uv ≥ 0.13 (an older uv rewrites them as revision 3).
 - Not built (no route needs them yet; for M5): receipt-review resolution
   (`resolveReceiptReview` → persist), merge confirmation (`NEW_PRODUCT_STANCE` product on the
   target item), "we're out"/critical from the UI (use `recordInventoryEvents`).
-- Known domain quirk (M3, unchanged): shelf life is FIFO over *acquisitions*, so a fresh count of a
-  perishable with no acquisition in its window is presumed expired at read time (e.g. counting 2
-  chicken thighs bought 5 days ago shows 0 in the fridge). Worth revisiting with a count resetting
-  the freshness window.
+- Shelf-life quirk (a fresh count read as expired) fixed in [#7](https://github.com/willchan/pandabase/pull/7): a count restarts the window.
 
 *For M5 (web UI):*
 - Server actions call the services, never the routes: `web/lib/services/*`
@@ -560,7 +558,78 @@ malformed VLM JSON → repair → failure, concurrency = 1, graceful shutdown on
 
 **Out of scope:** video/FFmpeg frame extraction (v1.1) beyond installing ffmpeg in the image.
 
-**Notes:** —
+**Notes:**
+
+*Models (checked 2026-10-20; ollama.com itself was unreachable from the build session, so the
+catalog was read through search results of its library/tag pages):* default
+`OLLAMA_VLM_MODEL` = **`qwen3.5:9b`** — Qwen3.5 9B is natively multimodal (text + image, 256K
+context); its `latest` tag is `q4_K_M`, 6.6GB on disk, roughly 7–8GB resident with the worker's
+`num_ctx` 8192, so it fits the ~8GB budget beside OpenClaw's model and Chromium on the 32GB M6.
+Alternatives considered: `qwen3-vl:8b` (6.1GB; the previous Qwen VL generation — a fine fallback),
+`gemma4:e4b` (6.6–9.5GB; good general multimodal, rated below Qwen on document OCR), `glm-ocr`
+(2.2GB, document-only — no use for Trash Cam), `qwen3.8:27b` / `nemotron-3.5-bolt` (18GB / 25GB —
+too big). Receipts are dense small print, so OCR quality decides. `merge_suggest` uses
+**`qwen3.5:4b`** (`OLLAMA_TEXT_MODEL`, 3.4GB): the task is short-text judgement over item
+names, a 4B instruct model handles it with schema-constrained JSON, and staying in the same
+family means the same prompt style and `think: false` behave the same. (Reusing the 9B VLM
+would also work — set `OLLAMA_TEXT_MODEL=qwen3.5:9b` to keep one model resident.)
+
+*Versions added:* `httpx` 0.28.1, `pillow` 13.0, `pillow-heif` 1.8.1 (iPhone HEIC uploads).
+Locked with uv 0.13.3 (revision 5). Image installs uv 0.13.3 from PyPI in a build stage (no
+`ghcr.io/astral-sh/uv` copy), runtime = `python:3.14-slim` + ffmpeg, uid 10001.
+
+*Deviations / choices (DESIGN §1.2, §5, §7, §8, §10 #32 updated):*
+- Layout: `src/pandabase_worker/{main,api,http,ollama,media,prompts,telemetry,config}.py`,
+  `jobs/{paper_receipt,trash_cam,merge_suggest,context}.py`; run with
+  `python -m pandabase_worker`. `http.py` holds the shared retry helper (network/429/5xx, 4
+  tries, 1s→2s→4s); `config.py` holds tunables (keep_alive, num_ctx, max px, timeouts).
+- Ollama: `/api/chat`, `format` = the job's output JSON schema, `stream: false`,
+  `think: false` (dropped and resent if a model rejects it), temperature 0, `keep_alive: "2m"`.
+  One repair turn on invalid output. The model's raw replies go in `raw_model_response`
+  (`{responses: [...]}`).
+- **merge_suggest input** was unspecified: chose `{items: [{item_id, name, aliases?}]}` (2–150
+  items) in the job's `input`; the worker can't read the catalog (no worker-scope route).
+  Follow-up: promote it to a Zod contract (`MergeSuggestInput`) when something creates these
+  jobs (nothing does yet — M5/M8 or a cron).
+- Paper receipt: negative lines (discounts) count in the totals check but are not posted;
+  unreadable date → today in `HOUSEHOLD_TZ`; unreadable store → `UNKNOWN`. Flagged in telemetry.
+- Health gate: before each claim the worker checks `GET /api/tags` and claims only job types
+  whose model is pulled (a claim costs an attempt; an Ollama outage would otherwise fail every
+  queued job). Reported once per state change as `worker_ollama_unavailable`.
+- `claim` is not retried (not idempotent; the next poll retries). `complete` is, with
+  `Idempotency-Key: complete:{job_id}:{attempt}`. 409 → drop (`worker_lease_lost`).
+- Telemetry beyond DESIGN §7's list: `worker_heartbeat` (added for M9's health check, which
+  names a heartbeat but didn't define it), `worker_job_failed`, `worker_lease_lost`,
+  `worker_complete_error`, `worker_ollama_unavailable`, plus extra `vlm_inference` fields. They
+  reach the weekly `vlm` extract only where the report already reads them (`vlm_inference`
+  fields); a "worker health" row in the report is a follow-up (web/lib/diagnostics is M4's).
+- Tests: in-memory fake State Engine (leases, attempts, 409, idempotent replay), fake R2 and
+  Ollama via `httpx.MockTransport`; Ollama fixtures in `tests/fixtures/ollama/` are synthetic
+  responses in Ollama's wire shape (no live model was reachable); the receipt image is rendered
+  with Pillow at test time. An autouse fixture fails any real socket connect.
+- Local `docker build` in the build session could not reach Docker Hub (429) or
+  `deb.debian.org` (network policy), so the image was verified locally without the ffmpeg layer
+  (non-root, imports, prompts, SIGTERM → exit 0 in < 1s); the CI job `worker-image` builds the
+  real Dockerfile.
+
+*For M8 (ops):*
+- Env: `PANDABASE_API_URL`, `WORKER_API_TOKEN`, `OLLAMA_URL` (`http://host.docker.internal:11434`),
+  `OLLAMA_VLM_MODEL` (`qwen3.5:9b`), `OLLAMA_TEXT_MODEL` (`qwen3.5:4b`), `POLL_INTERVAL_SECONDS`
+  (10), `HOUSEHOLD_TZ`. `PROMPTS_DIR` is set by the image.
+- Compose service hints: `build: ./worker`, `restart: unless-stopped`, `env_file: .env`,
+  `extra_hosts: ["host.docker.internal:host-gateway"]` (needed on Linux; Docker Desktop has it),
+  `stop_grace_period: 5m` (SIGTERM waits for the in-flight job; the lease is 5 min), no ports,
+  no volumes, `read_only: true` + `tmpfs: /tmp` is fine (the worker writes nothing to disk).
+  Ollama runs natively: `ollama pull qwen3.5:9b qwen3.5:4b`; `OLLAMA_NUM_PARALLEL=1` and
+  `OLLAMA_MAX_LOADED_MODELS=1` on the host keep memory bounded.
+- `worker_heartbeat {version, vlm_model, text_model, ollama_ok}` is emitted at startup and every
+  10 min (`HEARTBEAT_SECONDS`) — the liveness signal M9's deploy health check reads.
+- `make smoke` VLM checks: (1) `curl $OLLAMA_URL/api/tags` lists both models; (2) a
+  `/api/chat` with `format` + `keep_alive: "2m"` + a small synthetic receipt image returns JSON
+  that validates as the paper-receipt schema (`pandabase_worker.jobs.paper_receipt.VlmReceipt`)
+  in < 60s; (3) end to end: upload a synthetic receipt, `POST /api/jobs`, wait for
+  `GET /api/jobs/notifications` to show it completed with `model`/`prompt_version` set;
+  (4) `docker compose stop worker` exits 0 within the grace period.
 
 ---
 
@@ -610,7 +679,9 @@ profile), `README.md`, final `CLAUDE.md` touch-ups.
 R2 (bucket, API token, lifecycle rules), Google OAuth client, Vercel project + env vars + cron,
 `make secrets`, Mac Mini (Docker Desktop, native Ollama + model pull, memory budget table, Chromium
 profiles with remote debugging, OpenClaw skill install, cron entries, Discord channel), first run
-(`pnpm db:migrate:prod`, members in Settings, `make backfill`), `make smoke`, diagnostics workflow.
+(`pnpm db:migrate:prod`, members in Settings, `make backfill`), `make smoke`, diagnostics workflow,
+and a manual update procedure for the Mac Mini (`git pull`, `uv sync`, `docker compose up -d --build`)
+that M9 automates. Expose that procedure as `make update` so M9 can wrap it.
 
 **Acceptance:**
 ```
@@ -620,5 +691,56 @@ make -n smoke backfill install-agent-skills
 ```
 Plus a fresh-eyes review: someone following README from zero has no missing step (list any manual
 steps that can't be scripted).
+
+**Notes:** —
+
+---
+
+## M9 — Continuous deployment
+
+**Goal:** merging to `main` deploys everything safely — web (migrate, then deploy) and the Mac Mini
+(pull-based, health-checked, auto-rollback) — with no inbound ports on the home network.
+
+**Read:** DESIGN §1, §8 (incl. *Continuous deployment*), §10 #30–31. M8 Notes. `docker-compose.yml`,
+`Makefile`, `.github/workflows/ci.yml`.
+
+**Owns:**
+- `.github/workflows/deploy.yml` — on `workflow_run` of CI success on `main`: job `migrate`
+  (`pnpm db:migrate:prod`, GitHub environment `production` holding `TURSO_*`) → job `deploy-web`
+  (`vercel deploy --prod` via `VERCEL_TOKEN`/`VERCEL_ORG_ID`/`VERCEL_PROJECT_ID`) → job
+  `publish-worker` (build + push `ghcr.io/willchan/pandabase-worker:{sha,main}`). Concurrency group
+  so deploys never overlap. Emits a `deploy` telemetry event per component via the API.
+- Preview path: on PRs, migrate `pandabase-preview` before Vercel's preview build (or document why
+  Vercel's preview integration suffices). Vercel production auto-deploy disabled (`vercel.json`
+  `git.deploymentEnabled.main = false`).
+- `scripts/deploy/mac-update.sh` + `make update` (replacing M8's manual one) +
+  `ops/launchd/com.pandabase.update.plist` (every 15 min):
+  newer `main` sha with green CI (check via GitHub API with a read-only token, or the GHCR tag's
+  existence) → skip inside quiet windows (Fri 17:30–19:00, Sat 09:30–12:00 household TZ) → record
+  current sha/image → `git pull --ff-only` → `uv sync` (tools) → `docker compose pull && up -d` →
+  health check (worker heartbeat telemetry seen within 2 min + agent-token API round trip) → on
+  failure roll back to recorded sha/image and post once to `#pandabase` (via a tiny Discord webhook
+  or the agent) → emit `deploy` telemetry either way. Lockfile so runs never overlap.
+- `docker-compose.yml`: worker uses the GHCR image by tag (`PANDABASE_WORKER_TAG`, default `main`),
+  local build still possible via an override file.
+- `web/lib/diagnostics`: a *Deploys* section (component, sha, outcome, rollbacks) in the weekly report.
+- `CLAUDE.md` rule (already added): backward-compatible migrations. Add a CI check if cheap (e.g.
+  flag `DROP COLUMN`/`DROP TABLE`/`RENAME` in new migrations unless the PR carries a
+  `contract-migration` label or marker comment).
+- README: deploy secrets setup (GitHub environment, Vercel token, GHCR auth on the Mac Mini,
+  launchd install), how to pause auto-update, how to roll back by hand.
+
+**Acceptance:**
+```
+actionlint .github/workflows/*.yml
+shellcheck scripts/deploy/*.sh
+bats scripts/deploy/tests        # or pytest: quiet-window logic, no-op when up to date,
+                                 # rollback on failed health check (docker/git stubbed)
+plutil -lint ops/launchd/*.plist # if available; else xmllint --noout
+pnpm --filter web test -- lib/diagnostics
+```
+Plus a dry run documented in the PR: `make update DRY_RUN=1` output against a stubbed newer sha.
+
+**Out of scope:** blue/green or canary deploys; deploying OpenClaw itself.
 
 **Notes:** —
