@@ -37,7 +37,7 @@ contracts.
 | M3 Domain logic | done | #4 |
 | M4 API & contracts | in review | #5 |
 | M5 Web UI & auth | todo | |
-| M6 Python worker | in review | |
+| M6 Python worker | in review | #8 |
 | M7 Agent skill pack & tools | todo | |
 | M8 Ops, compose, README | todo | |
 | M9 Continuous deployment | todo | |
