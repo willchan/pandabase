@@ -238,8 +238,14 @@ All routes under `/web/app/api`. Payloads defined once as **Zod schemas** in `we
   honor `Idempotency-Key` (≤ 200 chars). The key is scoped to `{principal scope}:{METHOD path}`;
   responses with status < 500 are stored and replayed verbatim with `Idempotent-Replayed: true`
   for 24h. Manual receipts and text purchases also use the key as their dedupe key.
-- **Dev:** `DEV_AUTH_BYPASS=1` works only when `NODE_ENV=development` (acts as the first member by
-  email).
+- **Dev:** `DEV_AUTH_BYPASS=1` works only when `NODE_ENV=development`: API routes act as the first
+  member by email, and the sign-in page adds a "Continue as …" button per `ALLOWED_EMAILS` entry
+  (an Auth.js credentials provider `dev` that exists only then; `web/auth.test.ts` proves it's
+  absent under `production`/`test`). The e2e suite uses it against `next dev`.
+- **UI gate:** `web/proxy.ts` (Next 16's renamed middleware) redirects every non-API path without a
+  session to `/sign-in?callbackUrl=…`; pages and actions then resolve the member through
+  `currentMember()` (allowlist re-checked; an allowed email with no `member` row →
+  `/sign-in?error=NotAMember`). Rejected Google accounts land on `/sign-in?error=AccessDenied`.
 - **Cron:** `/api/cron/maintenance` requires `Authorization: Bearer ${CRON_SECRET}` (Vercel Cron,
   `web/vercel.json`, daily 11:17 UTC).
 - **Latency middleware:** every request logs `api_request {route, method, status, latencyMs,
@@ -275,7 +281,15 @@ All routes under `/web/app/api`. Payloads defined once as **Zod schemas** in `we
 | `GET /api/diagnostics/weekly?week=` | agent | Rendered Markdown + JSONL extracts |
 | `GET /api/cron/maintenance` | cron | Expire review items, shelf-life discards, release stale leases, purge idempotency/telemetry, open an overdue cycle |
 
-UI mutations use server actions that call the same domain functions as the routes.
+UI mutations use server actions (`web/app/(app)/**/actions.ts`) that call the same services as
+the routes — never the HTTP routes themselves. Services added for the UI (reusable by future agent
+routes): `reviews.ts` (`answerReceiptReview`, `mergeItems`, `confirmItem`, `answerTrashCam`,
+`dismissReview`, `pendingReviews`, `receiptReviewDetail`), `catalog.ts` (`itemDetail`,
+`updateItemSettings`), `settings.ts` (`updateMember`, `setCartAccount`, `deleteAwayPeriod`,
+`updateSettings`) and `inventory.ts#markItem` ("we're out" / "running low" / a count, via
+`recordInventoryEvents`). Each action resolves the signed-in member (`web/lib/auth/current.ts`,
+which re-checks `ALLOWED_EMAILS` on every request), turns `ApiError`s into an inline form message,
+refreshes the page, and logs `ui_action` (source `session`).
 
 The outline's chore routes (`/api/tasks/*`) are deferred to v2 ([ROADMAP.md](ROADMAP.md)).
 
@@ -474,6 +488,21 @@ Implementation notes (`web/lib/domain/receipts.ts`):
 - `resolveReceiptReview` turns a human's answers into effects: confirm → event confirmed + alias
   1.0; correct → event `expired` + corrected line applied; ignore → ignored alias; each answer is a
   `labeled_observation`.
+- The review UI answers all open (pending + provisional) lines with one confirm
+  (`answerReceiptReview`, `web/lib/services/reviews.ts`). Because lines of one item sum into one
+  event, events aren't patched line by line: after the line updates, `reconcileReceiptEvents`
+  rebuilds the receipt's `acquired` events from its final lines (base units via `lineBaseUnits`,
+  the same rule `applyReceipt` uses) — a matching event keeps its id (trust upgraded), anything else
+  is expired and re-inserted. Corrections don't re-run the EMA step. Unanswered pending lines stay
+  unmatched; the receipt becomes `applied` / `partial` / `pending_review` accordingly.
+- **Merges** (Cleanup → merges; `mergeItems`, rules in `web/lib/domain/merge.ts`): the source
+  item's products move to the target as `acceptable` (`NEW_PRODUCT_STANCE`; rejected stays
+  rejected), its events, aliases, receipt lines and cycle overrides are re-pointed, and the item gets
+  `merged_into_item_id`. An optional pack size (target base units per purchase unit, only for a
+  single-product source such as an auto-created ASIN item) confirms the product's `unit_quantity`
+  and rescales the moved events. The item's other pending reviews close with it. "Keep as its own
+  item" (`confirmItem`) confirms (and optionally renames) an auto-created item and closes its
+  `new_product` / `unverified_item` reviews.
 
 ### 4.6 Review expiry & trust
 
@@ -660,8 +689,11 @@ the `ReceiptEffects` metrics (with `receiptId`, `vendor`), `estimate_vs_observed
 location, estimated, observed, error}`, `preference_event`, `cart_line_result {cycleId, itemId,
 productId, vendor, outcome, error}`, `cycle_opened`, `cycle_transition`, `job_created`,
 `job_finished {jobType, outcome, attempts, model, promptVersion, …}`, `job_lease_expired`,
-`review_expired {reviewId, kind, action}`, `presumed_discarded`, `maintenance_run`,
-`settings_rejected {keys}`. The report reads these client metrics (payload fields it uses):
+`review_expired {reviewId, kind, action}`, `review_resolved {reviewId, kind, outcome,
+impactScore, ageHours, …line counts}`, `item_merged {itemId, intoItemId, reviewKind, eventScale}`,
+`item_settings_changed {itemId, fields}`, `settings_changed {keys}`, `presumed_discarded`,
+`maintenance_run`, `settings_rejected {keys}`; source `session`: `ui_action {action, ok, latencyMs,
+error?}` from every server action. The report reads these client metrics (payload fields it uses):
 `vlm_inference {model, prompt_version, latency_ms, totals_check, parse_failure}`,
 `vlm_parse_failure`, `selector_error {selector, error, page}`, `price_lookup_failed {asin,
 product_id, error}`, `cart_tier1_line {asin, item_id, product_id, vendor, outcome, error}`,
@@ -688,7 +720,8 @@ missing_models}`, `worker_job_failed {job_id, job_type, attempt, error}`, `worke
 4. VLM (latency p50/p95, totals-check failures, human-correction rate per model × prompt version)
 5. Product choice (switches, overrides, threshold drift)
 6. Cart injection (tier-1 success, tier-2 fallbacks, failures with selector/error)
-7. UX friction (expired items, clarifying questions, slow routes)
+7. UX friction (expired items, answered reviews by kind/outcome with median age, clarifying
+   questions, slow routes)
 8. Data appendix (extract paths, keyframe R2 keys)
 
 `GET /api/diagnostics/weekly?week=` (default: the last complete household-TZ ISO week) returns
@@ -738,6 +771,8 @@ Agent tools: `PANDABASE_API_URL`, `AGENT_API_TOKEN`, `PANDABASE_CONFIG`.
 
 ```
 /web            Next.js app (UI, API, domain logic)        pnpm workspace
+                  app/(app)/** pages + actions.ts, app/(auth)/sign-in, components/ (shadcn/ui in
+                  components/ui), proxy.ts (sign-in gate), e2e/ (Playwright)
 /db             @pandabase/db: Drizzle schema, migrations, seed   pnpm workspace
 /contracts      openapi.json (generated by scripts/gen-contracts.ts)
 /scripts        repo-level scripts (contract generation)
@@ -790,3 +825,5 @@ docker-compose.yml, Makefile, CLAUDE.md, README.md, .github/workflows/ci.yml
 | 35 | Photo-job replies via an OpenClaw command automation, not an agent poll | No model call every few minutes; `NO_REPLY` keeps it silent |
 | 36 | Receipt sweeps re-walk a 14-day overlap and ingest oldest-first | Dedupe makes overlap free; in-flight orders aren't skipped by the cursor; EMA skips out-of-order receipts |
 | 37 | Whole Foods tier 1 off until smoke-verified | A silent mis-add to the Amazon cart is worse than an agent fallback |
+| 38 | Web UI: server components + server actions over the shared services, shadcn/ui on Tailwind 4, system light/dark, native selects, phone-first bottom tabs | One code path with the agent; a minute-at-a-time household tool should feel native on a phone and work without client state |
+| 39 | Dev sign-in is an Auth.js credentials provider registered only under `NODE_ENV=development` + `DEV_AUTH_BYPASS=1` | The real session/proxy path is exercised in dev and e2e (the gate is testable), and the bypass can't exist in a production build |

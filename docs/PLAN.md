@@ -35,8 +35,8 @@ contracts.
 | M1 Skeleton & CI | done | #2 |
 | M2 Schema & seed | done | #3 |
 | M3 Domain logic | done | #4 |
-| M4 API & contracts | in review | #5 |
-| M5 Web UI & auth | todo | |
+| M4 API & contracts | done | #5 |
+| M5 Web UI & auth | in review | #10 |
 | M6 Python worker | in review | #8 |
 | M7 Agent skill pack & tools | in review | |
 | M8 Ops, compose, README | todo | |
@@ -466,7 +466,69 @@ Lighthouse mobile accessibility ≥ 90 on This Week (documented in PR, not CI-ga
 
 **Out of scope:** API changes (if needed, add minimally and note in PR).
 
-**Notes:** —
+**Notes:**
+
+*Versions added (web, checked 2026-10-20):* `radix-ui` 1.8.1, `class-variance-authority` 0.7.1,
+`clsx` 2.1.1, `tailwind-merge` 3.7.0, `lucide-react` 1.59.0, `react-markdown` 10.1.0, `remark-gfm`
+4.0.1; dev: `@playwright/test` 1.64.1, `tw-animate-css` 1.4.0, `@testing-library/react` 16.3,
+`@testing-library/dom` 10.4, `jsdom`. All past pnpm's minimum release age.
+
+*Deviations / choices (DESIGN §3, §3.1, §4.5, §7, §9, §10 #38–39 and PRD §4.6 updated):*
+- **shadcn/ui components are hand-written** (`web/components/ui/*`, new-york style on Tailwind 4,
+  `components.json` committed): the sandbox's proxy blocks `ui.shadcn.com`, so `shadcn add` can't
+  run. They match upstream's source; future `shadcn add` calls will work alongside them. Native
+  `<select>` (shadcn's NativeSelect) is used for every picker — it's the best picker on phones.
+- **Light/dark follow the system** (`prefers-color-scheme`); no toggle. Status hues (`ok`/`warn`/
+  `bad`/`info`) and chart slots are tokens in `globals.css`; chart slots pass the dataviz palette
+  checks in both modes.
+- **`web/proxy.ts`, not `middleware.ts`** — Next 16 renamed the convention. It gates every non-API
+  path; API routes keep `withAuth`'s 401s.
+- **Dev sign-in = an Auth.js credentials provider** that exists only with `DEV_AUTH_BYPASS=1` and
+  `NODE_ENV=development` (instead of skipping auth), so the gate itself is exercised in dev/e2e.
+  API routes keep M4's bypass (first member by email).
+- `cacheComponents` is on: every page is a sync shell + `<Suspense>` around its async content
+  (session/DB reads), and the layout's Cleanup-count nav streams separately (its fallback avoids
+  `usePathname`). Build output: all UI routes are partial-prerendered (◐).
+- Cleanup tabs: receipts / merges (merge suggestions + new products) / unverified / **jobs** (failed
+  jobs + low-confidence Trash Cam answers — the plan's list didn't place Trash Cam reviews).
+- Receipt review answers all open lines with one confirm; events are rebuilt from final lines
+  (`reconcileReceiptEvents`, new pure domain function, plus `lineBaseUnits` extracted from
+  `applyReceipt`). Corrections don't re-run the EMA step or product stats (as DESIGN §4.5 already
+  said for reversals). Unanswered pending lines stay unmatched.
+- Merges: new pure `web/lib/domain/merge.ts` (`planMerge`); `mergeItems` also re-points the source's
+  inventory events (rescaled when a pack size is given) — needed so merged stock isn't lost. The
+  target's EMA isn't recomputed.
+- Touched M4 files (small): `services/cycles.ts#addOverride` input no longer requires
+  `actor_discord_id` (agent-contract field; the route still validates it); `services/inventory.ts`
+  gained `markItem`; `lib/diagnostics/weekly.ts` UX section gained an "Answered review kind" table
+  (snapshot updated); `vitest.config.mts` includes `*.test.tsx` and inlines `next-auth`.
+- New telemetry: `review_resolved`, `item_merged`, `item_settings_changed`, `settings_changed`,
+  `ui_action` (source `session`). Insights charts read `receipt_line`, `review_item` and telemetry
+  directly (`web/lib/diagnostics/insights.ts`); the full weekly Markdown renders below them.
+- Item detail's EMA chart is **replayed** from purchases (`replayVelocity`, cold start + seed EMA);
+  the stored `current_ema_days` is shown as "one lasts". The seed's EMAs came from the simulation,
+  so the replayed curve and the stored value can differ slightly.
+- Settings → "default thresholds" exposes five tunables (`web/lib/tunables.ts`) as `setting` rows.
+- Known gaps (not needed by acceptance): no "undo" for an override other than adding the item back;
+  no product "make preferred" button (the agent's overrides and receipts teach preference); a
+  receipt photo needs R2 configured (otherwise "Photo unavailable").
+
+*Acceptance (local):* `pnpm --filter web test` 645 tests ✓ (domain 100% lines);
+`pnpm --filter web build` ✓; `pnpm --filter web test:e2e` 4 ✓ (sign-in gate, This Week add + skip,
+confirm a receipt review, add away period). Lighthouse 13.5 mobile, signed in, This Week:
+**accessibility 100**, best practices 100 (against `next dev`; not CI-gated). Screenshots of every
+page, 390px light + dark, against the seeded DB: `docs/screenshots/m5/`.
+
+*For M8 (ops):*
+- Env (web): `AUTH_SECRET` (required in every env, incl. local — `npx auth secret`),
+  `AUTH_GOOGLE_ID`, `AUTH_GOOGLE_SECRET`, `ALLOWED_EMAILS`; `AUTH_TRUST_HOST=true` if not on Vercel.
+  Google OAuth client → authorized redirect URIs: `https://<prod domain>/api/auth/callback/google`
+  (+ each preview origin you sign in on, and `http://localhost:3000/api/auth/callback/google`).
+- Every allowed email needs a `member` row (else `/sign-in?error=NotAMember`).
+- Receipt photos in the review page are presigned R2 GETs (`R2_*`).
+- CI job `e2e` installs Playwright's Chromium and runs `pnpm --filter web test:e2e` (`next dev`
+  on port 3210, `db/e2e.db`, build dir `.next-e2e`); the HTML report is uploaded on failure.
+
 
 ---
 

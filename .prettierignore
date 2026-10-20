@@ -8,3 +8,6 @@ next-env.d.ts
 worker/
 agent/
 diagnostics/
+.next-e2e/
+playwright-report/
+test-results/

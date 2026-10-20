@@ -376,7 +376,7 @@ const activeOr409 = (c: CycleRow) => {
 export async function addOverride(
   db: Db,
   cycleId: string,
-  input: z.infer<typeof CycleOverrideRequest>,
+  input: Omit<z.infer<typeof CycleOverrideRequest>, "actor_discord_id">,
   ctx: ServiceCtx,
 ): Promise<z.input<typeof CycleOverrideContract>> {
   const itemId = input.item_id ?? null;

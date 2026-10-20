@@ -106,10 +106,14 @@ estimate with an honest confidence hint: "~2 milk (bought Oct 12, unverified) �
 | Page | Purpose |
 |------|---------|
 | **This Week** | Current cycle, planned cart with reasons, running list, overrides. (Urgent HITL.) |
-| **Cleanup** | Receipt reviews, suggested merges, unverified items, failed jobs — sorted by impact on this week's cart, with expiry shown. (Long-term HITL.) |
+| **Cleanup** | Tabs: receipts (photo beside the lines, one dropdown per line, one confirm), merges (suggested merges and new products), unverified items, jobs (failed jobs and unsure Trash Cam photos) — sorted by impact on this week's cart, with expiry shown. (Long-term HITL.) |
 | **Pantry** | Estimated inventory by location; item detail with products, thresholds, EMA history, event log. |
 | **Insights** | Visual view of the diagnostics metrics. |
 | **Settings** | Away periods, members ↔ Discord IDs, cart account, default thresholds. |
+
+Every page answers "what needs me?" first. Machine guesses are labelled *provisional* /
+*unverified* and perishables show a use-by date, without prompting. "We're out", "running low" and
+counts can be recorded from This Week's please-check list and from any item.
 
 ### 4.7 Diagnostics
 

@@ -64,6 +64,8 @@ pnpm drizzle-kit check       # migration consistency (any drizzle-kit command wo
 pnpm --filter @pandabase/db test   # schema smoke + seed tests (in-memory libSQL)
 pnpm --filter web test -- lib/domain   # domain tests + coverage (≥ 95% lines on lib/domain enforced)
 pnpm --filter web test -- app/api lib/repo lib/diagnostics   # API integration tests (in-memory libSQL)
+pnpm --filter web test:e2e   # Playwright: next dev + DEV_AUTH_BYPASS on a fresh db/e2e.db (phone viewport)
+pnpm --filter web test -- app components lib/services lib/auth   # server actions, components, services
 pnpm contracts:gen           # Zod → contracts/openapi.json → worker/agent Pydantic models (commit them)
 make contracts-check         # regenerate + fail if the generated contracts differ from git
 docker build -t pandabase-worker worker   # worker image (CI job worker-image)

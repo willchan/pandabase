@@ -43,3 +43,8 @@ __pycache__/
 # Agent pack: local config (Discord ids, CDP ports) — copy from the *.example.json files
 /agent/pandabase.config.json
 /agent/profiles.json
+
+# playwright (web e2e)
+.next-e2e/
+playwright-report/
+test-results/

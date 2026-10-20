@@ -1,24 +1,127 @@
 @import "tailwindcss";
+@import "tw-animate-css";
 
+/* shadcn/ui tokens (new-york, Tailwind 4). Dark follows the system setting. */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
-
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
+  --radius: 0.75rem;
+  --background: oklch(0.985 0.004 95);
+  --foreground: oklch(0.22 0.01 160);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.22 0.01 160);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.22 0.01 160);
+  --primary: oklch(0.47 0.1 158);
+  --primary-foreground: oklch(0.985 0.01 160);
+  --secondary: oklch(0.955 0.008 150);
+  --secondary-foreground: oklch(0.27 0.02 160);
+  --muted: oklch(0.955 0.006 120);
+  --muted-foreground: oklch(0.47 0.015 160);
+  --accent: oklch(0.94 0.02 158);
+  --accent-foreground: oklch(0.27 0.04 160);
+  --destructive: oklch(0.55 0.2 27);
+  --border: oklch(0.9 0.008 140);
+  --input: oklch(0.88 0.008 140);
+  --ring: oklch(0.6 0.09 158);
+  /* Status hues (inventory, trust). */
+  --ok: oklch(0.5 0.11 155);
+  --ok-soft: oklch(0.95 0.04 155);
+  --warn: oklch(0.52 0.12 70);
+  --warn-soft: oklch(0.96 0.05 85);
+  --bad: oklch(0.52 0.18 27);
+  --bad-soft: oklch(0.95 0.03 27);
+  --info: oklch(0.5 0.1 250);
+  --info-soft: oklch(0.95 0.025 250);
+  /* Categorical chart slots (validated with the dataviz palette checks, light + dark). */
+  --chart-1: oklch(0.52 0.11 158);
+  --chart-2: oklch(0.6 0.14 255);
+  --chart-3: oklch(0.72 0.14 72);
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+    --background: oklch(0.17 0.01 165);
+    --foreground: oklch(0.95 0.008 140);
+    --card: oklch(0.21 0.012 165);
+    --card-foreground: oklch(0.95 0.008 140);
+    --popover: oklch(0.21 0.012 165);
+    --popover-foreground: oklch(0.95 0.008 140);
+    --primary: oklch(0.76 0.12 158);
+    --primary-foreground: oklch(0.2 0.03 160);
+    --secondary: oklch(0.27 0.012 165);
+    --secondary-foreground: oklch(0.95 0.008 140);
+    --muted: oklch(0.26 0.01 165);
+    --muted-foreground: oklch(0.74 0.015 150);
+    --accent: oklch(0.3 0.03 158);
+    --accent-foreground: oklch(0.95 0.008 140);
+    --destructive: oklch(0.7 0.17 25);
+    --border: oklch(0.32 0.012 165);
+    --input: oklch(0.36 0.012 165);
+    --ring: oklch(0.7 0.1 158);
+    --ok: oklch(0.8 0.12 155);
+    --ok-soft: oklch(0.3 0.05 155);
+    --warn: oklch(0.83 0.12 80);
+    --warn-soft: oklch(0.32 0.05 75);
+    --bad: oklch(0.78 0.13 25);
+    --bad-soft: oklch(0.32 0.06 25);
+    --info: oklch(0.8 0.09 250);
+    --info-soft: oklch(0.3 0.04 250);
+    --chart-1: oklch(0.66 0.12 158);
+    --chart-2: oklch(0.62 0.13 255);
+    --chart-3: oklch(0.67 0.13 72);
   }
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: ui-sans-serif, system-ui, sans-serif;
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-ok: var(--ok);
+  --color-ok-soft: var(--ok-soft);
+  --color-warn: var(--warn);
+  --color-warn-soft: var(--warn-soft);
+  --color-bad: var(--bad);
+  --color-bad-soft: var(--bad-soft);
+  --color-info: var(--info);
+  --color-info-soft: var(--info-soft);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  html {
+    color-scheme: light dark;
+    -webkit-tap-highlight-color: transparent;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-family:
+      ui-sans-serif,
+      system-ui,
+      -apple-system,
+      "Segoe UI",
+      sans-serif;
+  }
 }
