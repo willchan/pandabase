@@ -21,7 +21,7 @@
 
 ```
 M1 ─▶ M2 ─▶ M3 ─▶ M4 ─┬─▶ M5 (web UI)       ─┐
-                      ├─▶ M6 (worker)       ─┼─▶ M8 (ops & docs)
+                      ├─▶ M6 (worker)       ─┼─▶ M8 (ops & docs) ─▶ M9 (continuous deployment)
                       └─▶ M7 (agent pack)   ─┘
 ```
 
@@ -40,6 +40,7 @@ contracts.
 | M6 Python worker | todo | |
 | M7 Agent skill pack & tools | todo | |
 | M8 Ops, compose, README | todo | |
+| M9 Continuous deployment | todo | |
 
 ---
 
@@ -548,7 +549,9 @@ profile), `README.md`, final `CLAUDE.md` touch-ups.
 R2 (bucket, API token, lifecycle rules), Google OAuth client, Vercel project + env vars + cron,
 `make secrets`, Mac Mini (Docker Desktop, native Ollama + model pull, memory budget table, Chromium
 profiles with remote debugging, OpenClaw skill install, cron entries, Discord channel), first run
-(`pnpm db:migrate:prod`, members in Settings, `make backfill`), `make smoke`, diagnostics workflow.
+(`pnpm db:migrate:prod`, members in Settings, `make backfill`), `make smoke`, diagnostics workflow,
+and a manual update procedure for the Mac Mini (`git pull`, `uv sync`, `docker compose up -d --build`)
+that M9 automates. Expose that procedure as `make update` so M9 can wrap it.
 
 **Acceptance:**
 ```
@@ -558,5 +561,56 @@ make -n smoke backfill install-agent-skills
 ```
 Plus a fresh-eyes review: someone following README from zero has no missing step (list any manual
 steps that can't be scripted).
+
+**Notes:** —
+
+---
+
+## M9 — Continuous deployment
+
+**Goal:** merging to `main` deploys everything safely — web (migrate, then deploy) and the Mac Mini
+(pull-based, health-checked, auto-rollback) — with no inbound ports on the home network.
+
+**Read:** DESIGN §1, §8 (incl. *Continuous deployment*), §10 #30–31. M8 Notes. `docker-compose.yml`,
+`Makefile`, `.github/workflows/ci.yml`.
+
+**Owns:**
+- `.github/workflows/deploy.yml` — on `workflow_run` of CI success on `main`: job `migrate`
+  (`pnpm db:migrate:prod`, GitHub environment `production` holding `TURSO_*`) → job `deploy-web`
+  (`vercel deploy --prod` via `VERCEL_TOKEN`/`VERCEL_ORG_ID`/`VERCEL_PROJECT_ID`) → job
+  `publish-worker` (build + push `ghcr.io/willchan/pandabase-worker:{sha,main}`). Concurrency group
+  so deploys never overlap. Emits a `deploy` telemetry event per component via the API.
+- Preview path: on PRs, migrate `pandabase-preview` before Vercel's preview build (or document why
+  Vercel's preview integration suffices). Vercel production auto-deploy disabled (`vercel.json`
+  `git.deploymentEnabled.main = false`).
+- `scripts/deploy/mac-update.sh` + `make update` (replacing M8's manual one) +
+  `ops/launchd/com.pandabase.update.plist` (every 15 min):
+  newer `main` sha with green CI (check via GitHub API with a read-only token, or the GHCR tag's
+  existence) → skip inside quiet windows (Fri 17:30–19:00, Sat 09:30–12:00 household TZ) → record
+  current sha/image → `git pull --ff-only` → `uv sync` (tools) → `docker compose pull && up -d` →
+  health check (worker heartbeat telemetry seen within 2 min + agent-token API round trip) → on
+  failure roll back to recorded sha/image and post once to `#pandabase` (via a tiny Discord webhook
+  or the agent) → emit `deploy` telemetry either way. Lockfile so runs never overlap.
+- `docker-compose.yml`: worker uses the GHCR image by tag (`PANDABASE_WORKER_TAG`, default `main`),
+  local build still possible via an override file.
+- `web/lib/diagnostics`: a *Deploys* section (component, sha, outcome, rollbacks) in the weekly report.
+- `CLAUDE.md` rule (already added): backward-compatible migrations. Add a CI check if cheap (e.g.
+  flag `DROP COLUMN`/`DROP TABLE`/`RENAME` in new migrations unless the PR carries a
+  `contract-migration` label or marker comment).
+- README: deploy secrets setup (GitHub environment, Vercel token, GHCR auth on the Mac Mini,
+  launchd install), how to pause auto-update, how to roll back by hand.
+
+**Acceptance:**
+```
+actionlint .github/workflows/*.yml
+shellcheck scripts/deploy/*.sh
+bats scripts/deploy/tests        # or pytest: quiet-window logic, no-op when up to date,
+                                 # rollback on failed health check (docker/git stubbed)
+plutil -lint ops/launchd/*.plist # if available; else xmllint --noout
+pnpm --filter web test -- lib/diagnostics
+```
+Plus a dry run documented in the PR: `make update DRY_RUN=1` output against a stubbed newer sha.
+
+**Out of scope:** blue/green or canary deploys; deploying OpenClaw itself.
 
 **Notes:** —

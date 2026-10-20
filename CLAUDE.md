@@ -26,6 +26,10 @@ Read only the sections your task needs.
 - **Contracts are generated.** Zod in `web/lib/contracts/` → `contracts/openapi.json` → Python
   models. Never hand-edit generated files; run `pnpm contracts:gen`.
 - **Tunables live in `web/lib/config.ts`.** No magic numbers in domain code.
+- **Migrations are backward-compatible (expand → contract).** `main` deploys automatically and
+  migrations run *before* the new code ships, so the previous release must keep working against the
+  new schema. Add columns/tables freely; drop or rename only in a later PR, after no deployed code
+  uses them.
 - **Nothing blocks on a human.** New review flows need a default outcome and an expiry.
   Only human-confirmed data becomes `labeled_observation`s.
 - **Cart only, never checkout.** No code path may navigate to or submit checkout.
