@@ -31,7 +31,9 @@ async function InsightsPageContent(props: PageProps<"/insights">) {
   const params = await props.searchParams;
   const weeks = await weeklyInsights(db, ctx, 8);
   const defaultWeek = lastCompleteWeek(ctx.now, ctx.config.householdTz);
-  const choices = [...new Set([...weeks.map((w) => w.week).slice(0, -1), defaultWeek])].sort();
+  const choices = [...new Set([...weeks.map((w) => w.week).slice(0, -1), defaultWeek])]
+    .sort()
+    .reverse();
   const week =
     typeof params.week === "string" && choices.includes(params.week) ? params.week : defaultWeek;
   const [report, reviews] = await Promise.all([renderWeekly(db, week, ctx), pendingReviews(db)]);

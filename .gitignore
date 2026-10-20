@@ -39,3 +39,8 @@ __pycache__/
 .DS_Store
 *.pem
 *.log
+
+# playwright (web e2e)
+.next-e2e/
+playwright-report/
+test-results/

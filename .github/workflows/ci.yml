@@ -39,6 +39,29 @@ jobs:
         run: pnpm db:reset && pnpm db:seed
       - run: pnpm --filter web build
 
+  e2e:
+    # Playwright against `next dev` with DEV_AUTH_BYPASS and a freshly seeded db/e2e.db (PLAN M5).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Install Chromium for Playwright
+        run: pnpm --filter web exec playwright install --with-deps chromium
+      - run: pnpm --filter web test:e2e
+      - if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-report
+          path: |
+            web/playwright-report
+            web/test-results
+          retention-days: 7
+
   contracts:
     # Zod contracts → openapi.json → Pydantic models must be committed and up to date.
     runs-on: ubuntu-latest
