@@ -1,10 +1,11 @@
 // Inventory reads (read-time estimates, §4.2) and `inventory_state` maintenance.
 import { awayPeriod, inventoryEvent, inventoryState, item } from "@pandabase/db";
 import { projectRows, toInventoryItem } from "@pandabase/db/rebuild-state";
-import { and, asc, eq, inArray, isNull, ne } from "drizzle-orm";
+import { and, asc, inArray, isNull, ne } from "drizzle-orm";
 import type { Config } from "../config";
 import {
   estimateItem,
+  freshnessBatches,
   type Estimate,
   type InventoryItem,
   type InventoryState,
@@ -78,12 +79,16 @@ export async function loadEstimates(
   const states = ids.length
     ? await q.select().from(inventoryState).where(inArray(inventoryState.itemId, ids))
     : [];
-  const acquired = ids.length
+  // Acquisitions and counts: the events that start a shelf-life clock (§4.2).
+  const clockEvents = ids.length
     ? await q
         .select({
           itemId: inventoryEvent.itemId,
+          kind: inventoryEvent.kind,
           location: inventoryEvent.location,
           quantity: inventoryEvent.quantity,
+          toLocation: inventoryEvent.toLocation,
+          statusOverride: inventoryEvent.statusOverride,
           occurredAt: inventoryEvent.occurredAt,
           trust: inventoryEvent.trust,
         })
@@ -91,7 +96,7 @@ export async function loadEstimates(
         .where(
           and(
             inArray(inventoryEvent.itemId, ids),
-            eq(inventoryEvent.kind, "acquired"),
+            inArray(inventoryEvent.kind, ["acquired", "observed"]),
             ne(inventoryEvent.trust, "expired"),
           ),
         )
@@ -102,11 +107,9 @@ export async function loadEstimates(
   for (const i of items) {
     const inv = toInventoryItem(i);
     const mine = states.filter((s) => s.itemId === i.id).map(toState);
-    const acq = acquired.filter((a) => a.itemId === i.id);
-    const byLoc: Record<string, Acquisition[]> = {};
-    for (const a of acq)
-      (byLoc[a.location] ??= []).push({ at: a.occurredAt, qty: a.quantity ?? 0 });
-    const last = acq.at(-1);
+    const mineEvents = clockEvents.filter((e) => e.itemId === i.id);
+    const byLoc = freshnessBatches(mineEvents);
+    const last = mineEvents.filter((e) => e.kind === "acquired").at(-1);
     const verified = mine
       .map((s) => s.lastVerifiedAt)
       .filter((t): t is string => t !== null)

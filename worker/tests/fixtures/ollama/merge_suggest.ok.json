@@ -1,0 +1,16 @@
+{
+  "model": "qwen3.5:4b",
+  "created_at": "2026-10-20T16:00:00.000000Z",
+  "message": {
+    "role": "assistant",
+    "content": "{\"suggestions\": [{\"item_id\": \"01ITEMTOWELS\", \"merge_into_item_id\": \"01ITEMTOWEL\", \"confidence\": 0.94, \"reason\": \"plural of the same product\"}, {\"item_id\": \"01ITEMTOWEL\", \"merge_into_item_id\": \"01ITEMTOWELS\", \"confidence\": 0.5, \"reason\": \"duplicate pair\"}, {\"item_id\": \"01ITEMOAT\", \"merge_into_item_id\": \"01ITEMNOPE\", \"confidence\": 0.7, \"reason\": \"unknown id\"}]}"
+  },
+  "done_reason": "stop",
+  "done": true,
+  "total_duration": 900000000,
+  "load_duration": 1200000000,
+  "prompt_eval_count": 1312,
+  "prompt_eval_duration": 1100000000,
+  "eval_count": 310,
+  "eval_duration": 1900000000
+}

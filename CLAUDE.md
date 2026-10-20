@@ -26,6 +26,10 @@ Read only the sections your task needs.
 - **Contracts are generated.** Zod in `web/lib/contracts/` → `contracts/openapi.json` → Python
   models. Never hand-edit generated files; run `pnpm contracts:gen`.
 - **Tunables live in `web/lib/config.ts`.** No magic numbers in domain code.
+- **Migrations are backward-compatible (expand → contract).** `main` deploys automatically and
+  migrations run *before* the new code ships, so the previous release must keep working against the
+  new schema. Add columns/tables freely; drop or rename only in a later PR, after no deployed code
+  uses them.
 - **Nothing blocks on a human.** New review flows need a default outcome and an expiry.
   Only human-confirmed data becomes `labeled_observation`s.
 - **Cart only, never checkout.** No code path may navigate to or submit checkout.
@@ -34,6 +38,9 @@ Read only the sections your task needs.
   rows) in the weekly diagnostics report.
 - **Privacy:** never commit `/diagnostics`, `.env*`, real receipts, or real order HTML. Test fixtures
   must be synthetic or scrubbed.
+- **Bug fixes start with a regression test.** Write a test that reproduces the bug and fails before
+  the fix, then make it pass. Name or comment it so the bug is recognisable (what input, what was
+  wrong).
 - **Prompts are versioned files** in `worker/prompts/`; changing a prompt means a new version file,
   and jobs record `prompt_version`.
 
@@ -59,6 +66,8 @@ pnpm --filter web test -- lib/domain   # domain tests + coverage (≥ 95% lines 
 pnpm --filter web test -- app/api lib/repo lib/diagnostics   # API integration tests (in-memory libSQL)
 pnpm contracts:gen           # Zod → contracts/openapi.json → worker/agent Pydantic models (commit them)
 make contracts-check         # regenerate + fail if the generated contracts differ from git
+docker build -t pandabase-worker worker   # worker image (CI job worker-image)
+(cd worker && uv run python -m pandabase_worker)   # run the worker (env: PANDABASE_API_URL, WORKER_API_TOKEN, OLLAMA_URL)
 (cd agent/tools && uv run pandabase-tools --help)   # agent CLI used by the skills (JSON on stdout)
 (cd agent/tools && uv run pytest tests/test_skills.py)   # skill frontmatter + every command a skill names parses
 make check                   # everything CI runs
