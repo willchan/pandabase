@@ -10,11 +10,11 @@ set -euo pipefail
 
 need vercel
 VERCEL_FILE="${VERCEL_FILE:-$ROOT/.env.vercel}"
-[ -f "$ENV_FILE" ] && [ -f "$VERCEL_FILE" ] || die "run 'make secrets' first"
+if [ ! -f "$ENV_FILE" ] || [ ! -f "$VERCEL_FILE" ]; then die "run 'make secrets' first"; fi
 [ -d "$ROOT/web/.vercel" ] || die "web/ isn't linked to a Vercel project — run: (cd web && vercel link)"
 
 for target in ${VERCEL_ENVS:-production}; do
-  existing="$(cd "$ROOT/web" && vercel env ls "$target" 2>/dev/null || true)"
+  existing="$(vercel --cwd "$ROOT/web" env ls "$target" 2>/dev/null || true)"
   for key in AGENT_API_TOKEN WORKER_API_TOKEN AUTH_SECRET CRON_SECRET; do
     if [ "$key" = AUTH_SECRET ] || [ "$key" = CRON_SECRET ]; then
       value="$(env_get "$key" "$VERCEL_FILE")"
@@ -27,7 +27,7 @@ for target in ${VERCEL_ENVS:-production}; do
     elif [ "$DRY_RUN" = 1 ]; then
       info "[dry-run] would add $key to $target"
     else
-      printf '%s' "$value" | (cd "$ROOT/web" && vercel env add "$key" "$target" >/dev/null)
+      printf '%s' "$value" | vercel --cwd "$ROOT/web" env add "$key" "$target" >/dev/null
       info "added $key to $target"
     fi
   done
