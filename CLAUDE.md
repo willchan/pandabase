@@ -66,6 +66,8 @@ pnpm --filter web test -- lib/domain   # domain tests + coverage (≥ 95% lines 
 pnpm --filter web test -- app/api lib/repo lib/diagnostics   # API integration tests (in-memory libSQL)
 pnpm contracts:gen           # Zod → contracts/openapi.json → worker/agent Pydantic models (commit them)
 make contracts-check         # regenerate + fail if the generated contracts differ from git
+docker build -t pandabase-worker worker   # worker image (CI job worker-image)
+(cd worker && uv run python -m pandabase_worker)   # run the worker (env: PANDABASE_API_URL, WORKER_API_TOKEN, OLLAMA_URL)
 make check                   # everything CI runs
 ```
 

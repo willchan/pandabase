@@ -51,8 +51,13 @@ evening Claude Code sessions. Therefore:
 
 - Worker concurrency = **1**, always.
 - VLM requests use `keep_alive: "2m"` so the model unloads soon after a burst.
-- Default VLM is an ~8B Qwen-VL-class model (choose the current best in Ollama's catalog at build
-  time; configurable via `OLLAMA_VLM_MODEL`).
+- Default VLM is **`qwen3.5:9b`** (Qwen3.5 9B, natively multimodal; `q4_K_M` ≈ 6.6GB on disk,
+  ~7–8GB resident with the worker's 8K context), chosen from Ollama's catalog in Oct 2026 over
+  `qwen3-vl:8b` (older generation, similar size) and `gemma4:e4b` (stronger general chat, weaker
+  document OCR); configurable via `OLLAMA_VLM_MODEL`. Requests turn thinking off (`think: false`).
+- `merge_suggest` (text only) uses **`qwen3.5:4b`** (≈ 3.4GB, `OLLAMA_TEXT_MODEL`).
+- Requests use `num_ctx` 8192 to keep the KV cache small. The worker only claims job types whose
+  model is pulled (`GET /api/tags`), since every claim costs the job an attempt.
 - Only one Chromium profile is driven at a time (tools take a file lock).
 
 ## 2. Data model
@@ -534,11 +539,27 @@ unless its build time has passed or its label is taken, then the next free week.
    `notified_at`, each with a one-line `summary`), replies in a thread under the original
    message, then `POST /api/jobs/{id}/notified`.
 
+**Worker details** (`/worker`): prompts are `worker/prompts/{job_type}.v{N}.md` (system prompt,
+a `---user---` line, the user message; highest N wins; `prompt_version` = `{job_type}.v{N}`).
+Each model call asks Ollama for JSON matching the job's output schema (`format`), validates it,
+and on invalid output sends one repair turn (the bad reply + the validation error); a second
+invalid reply fails the attempt (`vlm_parse_failure`). The first keyframe is the normalized photo
+(EXIF-rotated, ≤ 2048px, re-encoded JPEG, so EXIF/GPS is stripped), uploaded before inference and
+listed in `complete` even on failure. `complete` sends `Idempotency-Key: complete:{job_id}:{attempt}`;
+a 409 drops the result. SIGTERM finishes the current job, then exits (a second signal exits at
+once; the lease then expires).
+**merge_suggest input** (set by the job's creator; the worker never reads the catalog):
+`{items: [{item_id, name, aliases?: [str]}]}`, 2–150 items. The worker keeps suggestions between
+two distinct listed items, one per pair.
+
 **Paper receipt prompt contract:** transcribe only — `{store, date, lines:[{raw_text, qty,
 unit_price, line_total}], subtotal, tax, total}`. The worker converts money to cents, runs the
 totals check (`|Σ line_total − subtotal| ≤ 2¢`) and posts contract `PaperReceiptResult`
 (`{store, date, lines:[{raw_text, qty, unit_price_cents, line_total_cents}], subtotal_cents,
-tax_cents, total_cents, totals_check}`). The receipt row's `totals_check` is the app's own exact
+tax_cents, total_cents, totals_check}`). Lines with a negative amount (discounts, coupons) count
+toward the totals check but are not posted (money fields are ≥ 0 and they aren't purchases). An
+unreadable date falls back to today in `HOUSEHOLD_TZ`, an unreadable store to `UNKNOWN` (vendor
+`unknown`); both are flagged in `vlm_inference`. The receipt row's `totals_check` is the app's own exact
 check; the worker's is kept in `job_finished` telemetry. Trash Cam posts `TrashCamResult`
 (`{detections:[{name, confidence, bbox?}]}`); merge-suggest posts `MergeSuggestResult`.
 
@@ -601,7 +622,15 @@ productId, vendor, outcome, error}`, `cycle_opened`, `cycle_transition`, `job_cr
 `settings_rejected {keys}`. The report reads these client metrics (payload fields it uses):
 `vlm_inference {model, prompt_version, latency_ms, totals_check, parse_failure}`,
 `vlm_parse_failure`, `selector_error {selector, error}`, `price_lookup_failed`,
-`cart_tier1_line`, `clarifying_question {question}`.
+`cart_tier1_line`, `clarifying_question {question}`. The worker's `vlm_inference` /
+`vlm_parse_failure` also carry `job_id`, `job_type`, `attempt`, `repaired` and per-type fields
+(receipts `lines`, `discount_lines`, `date_fallback`, `store_missing`; Trash Cam `detections`,
+`top_confidence`; merges `items`, `suggestions`, `dropped`), all copied into the `vlm` extract.
+Worker health metrics (stored, not yet in the report): `worker_heartbeat {version, vlm_model,
+text_model, ollama_ok}` (at startup and every 10 min; `ollama_ok` null until first checked),
+`worker_ollama_unavailable {reason,
+missing_models}`, `worker_job_failed {job_id, job_type, attempt, error}`, `worker_lease_lost`,
+`worker_complete_error {error}`.
 
 **Weekly report** — rendered by the app (`web/lib/diagnostics/`), written by the agent to
 `/diagnostics/YYYY-Www.md` with extracts in `/diagnostics/YYYY-Www/*.jsonl`. Fixed sections, each
@@ -655,7 +684,8 @@ Timestamps stored UTC; `HOUSEHOLD_TZ=America/Los_Angeles` defines "today" and sc
 `AUTH_GOOGLE_SECRET`, `ALLOWED_EMAILS`, `AGENT_API_TOKEN`, `WORKER_API_TOKEN`, `CRON_SECRET`,
 `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET`, `HOUSEHOLD_TZ`,
 `DEV_AUTH_BYPASS`. Worker: `PANDABASE_API_URL`, `WORKER_API_TOKEN`, `OLLAMA_URL`
-(`http://host.docker.internal:11434`), `OLLAMA_VLM_MODEL`, `POLL_INTERVAL_SECONDS`.
+(`http://host.docker.internal:11434`), `OLLAMA_VLM_MODEL` (`qwen3.5:9b`), `OLLAMA_TEXT_MODEL`
+(`qwen3.5:4b`), `POLL_INTERVAL_SECONDS` (10), `HOUSEHOLD_TZ`, `PROMPTS_DIR` (set by the image).
 Agent tools: `PANDABASE_API_URL`, `AGENT_API_TOKEN`, `PANDABASE_CONFIG`.
 
 ## 9. Repository layout
@@ -708,3 +738,4 @@ docker-compose.yml, Makefile, CLAUDE.md, README.md, .github/workflows/ci.yml
 | 29 | Text purchases become manual receipts | One `applyReceipt` path, so velocity, overbuy and product stats learn from "bought milk" too |
 | 30 | CD: one workflow migrates Turso then deploys Vercel; migrations backward-compatible | Code never ships ahead of its schema; a half-failed deploy can't break production |
 | 31 | Mac Mini updates are pulled by a `launchd` timer with health check, rollback and quiet windows | No inbound ports or self-hosted runner on a home machine; never disrupt the Friday nudge or Saturday build |
+| 32 | Worker VLM `qwen3.5:9b` (Q4), text `qwen3.5:4b`, Ollama JSON-schema output + one repair turn | Best OCR-capable vision model that fits ~8GB next to OpenClaw's model; one family keeps prompts portable; schema-constrained output makes repair rare and bounded |
