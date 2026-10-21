@@ -277,8 +277,9 @@ Then say "do we have milk?" mentioning the bot in any channel, and post a test m
 
 ### 12. Decide on photo privacy
 
-Read [Photo privacy](#photo-privacy) below and pick an option. The default config (step 11)
-describes photos locally; option A closes the remaining gap and is recommended.
+Read [Photo privacy](#photo-privacy) below. If OpenClaw's reply model is local (our setup),
+there is nothing to do beyond keeping cloud models out of its fallbacks. With a cloud reply model,
+pick an option; A is recommended.
 
 ### 13. Smoke test
 
@@ -340,6 +341,24 @@ that model is a cloud model (your `$OPENCLAW_MODEL`), the photo — a receipt, o
 your trash can — goes to that provider. OpenClaw documents this; `tools.media.image.enabled:
 false` does not stop native delivery.
 
+**With a local reply model (our setup), there is no residual risk.** If OpenClaw's agent runs on
+a model served by this Mac's Ollama, a photo the media model couldn't describe goes to that local
+model instead: it never leaves the Mac. That's option C below, with two conditions:
+
+- **No cloud fallback.** OpenClaw's model setting can list backups (`model: { primary,
+  fallbacks }`). Don't put a cloud model there, and the simplest guarantee is to configure no
+  cloud provider keys at all.
+- **Memory.** The reply model and `qwen3.5:9b` share one Ollama. With
+  `OLLAMA_MAX_LOADED_MODELS=1` each photo swaps them (unload yours, describe the photo, reload
+  yours): correct but slower. If both fit (see [Memory budget](#memory-budget-32gb)), set it
+  to `2` in `ops/launchd/com.pandabase.ollama-env.plist` and re-run `make install-ollama-env`.
+
+Small local models are weaker than cloud ones at multi-step tool use; the Saturday cart build
+(tier-2 browsing for lines the add-to-cart link couldn't handle) is the most demanding job, so
+use the most capable model your memory allows and watch the first few builds.
+
+The options below matter only if the reply model is a cloud model.
+
 Options (the owner chooses; record the choice in PLAN M8 Notes):
 
 - **A. Text-only reply model for PandaBase (recommended).** A dedicated `pandabase` agent bound to
@@ -364,7 +383,8 @@ Options (the owner chooses; record the choice in PLAN M8 Notes):
 - **B. Mark your model text-only everywhere.** One metadata row,
   `models.providers.<provider>.models: [{id: "<model>", input: ["text"]}]`. Simplest, but every
   agent on the gateway loses vision.
-- **C. Accept the residual risk.** Keep the step-11 config only. Failures are rare when Ollama is
+- **C. Keep the step-11 config only.** Right for a local reply model (no risk; the conditions
+  above). With a cloud reply model it means accepting the risk: failures are rare when Ollama is
   healthy (`make smoke` checks it), and the photos are household receipts and bins.
 
 Scoping media understanding to `#pandabase` (`tools.media.image.scope`) doesn't help here: it

@@ -675,6 +675,8 @@ Residual risk: when that local description fails, OpenClaw delivers the image na
 image-capable reply model. The recommended mitigation (§10 #42, owner's choice, README *Photo
 privacy*) is a dedicated `pandabase` agent bound to `#pandabase` whose model is catalogued
 text-only (`input: ["text"]`): OpenClaw injects images only into turns of image-capable models.
+Our household runs the reply model locally on Ollama, which removes the risk (the fallback stays on
+the Mac) as long as no cloud model is configured as a fallback.
 
 Agent message style: short, Discord markdown, ✅ ⚠️ ❓ markers, one web link when needed, no
 components/embeds.
@@ -878,4 +880,4 @@ docker-compose.yml, Makefile, CLAUDE.md, README.md, .github/workflows/ci.yml
 | 39 | Dev sign-in is an Auth.js credentials provider registered only under `NODE_ENV=development` + `DEV_AUTH_BYPASS=1` | The real session/proxy path is exercised in dev and e2e (the gate is testable), and the bypass can't exist in a production build |
 | 40 | Compose runs only the worker; OpenClaw, Ollama and Chromium stay native | OpenClaw is the household's existing native agent (host Chromium over CDP, `~/.openclaw` state); Ollama needs Metal; a containerized OpenClaw would be a second agent to keep in sync |
 | 41 | Members are bootstrapped with `pnpm db:add-member`, not the UI | Sign-in requires a member row, so the first member can't be created from inside the app; two members don't justify an admin flow |
-| 42 | Inbound photos: local `tools.media.models` description always; a text-only PandaBase agent recommended against the native-delivery fallback (owner decides) | Keeps §10 #10 without forcing a model change on the family agent; the fallback is OpenClaw behavior we can't turn off by config |
+| 42 | Inbound photos: local `tools.media.models` description always; the native-delivery fallback is made safe by a local reply model (our choice) or, with a cloud reply model, a text-only PandaBase agent | Keeps §10 #10 without forcing a model change on the family agent; the fallback is OpenClaw behavior we can't turn off by config |

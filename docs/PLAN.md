@@ -865,12 +865,16 @@ model's turns; multi-agent `bindings[]` with `match.peer {kind: "channel", id}`.
 - **R2 lifecycle:** none in v1 (photos/keyframes kept forever). R2 rules filter by prefix, not
   extension, so v1.1 video should use its own prefix (e.g. `media/video/`) for the 90-day rule.
 
-*Photo privacy — owner decision needed.* `tools.media.models` → local `ollama/qwen3.5:9b` is in
-the base patch. Residual risk (OpenClaw-documented): a photo whose local description fails is
-delivered natively to an image-capable reply model, which may be a cloud model. README *Photo
-privacy* lists A (recommended: a `pandabase` agent bound to `#pandabase` with a text-only
-catalogue row of the owner's model, `agent/openclaw.privacy.example.json5`), B (mark the model
-text-only gateway-wide), C (accept). The owner picks; record the choice here.
+*Photo privacy — decided (owner, 2026-10-21): option C with a local reply model.*
+`tools.media.models` → local `ollama/qwen3.5:9b` is in the base patch. Residual risk
+(OpenClaw-documented): a photo whose local description fails is delivered natively to an
+image-capable reply model. The owner will run OpenClaw's reply model locally on Ollama, so that
+fallback stays on the Mac and there's no residual risk, provided no cloud model is configured as
+a fallback (no cloud provider keys). Consequences: the reply model shares Ollama with the VLM, so
+with `OLLAMA_MAX_LOADED_MODELS=1` a photo swaps models (raise it to 2 if both fit); and a small
+local model may struggle with tier-2 cart browsing, so watch the first Saturday builds. Option A
+(`agent/openclaw.privacy.example.json5`) and B stay documented in README *Photo privacy* for a
+cloud reply model.
 
 *Acceptance (local, 2026-10-20):* `docker compose config` ✓; `make -n smoke backfill
 install-agent-skills` ✓; `docker compose build` ✗ **in this sandbox only**: Docker Hub HEAD
