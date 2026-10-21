@@ -1022,6 +1022,15 @@ checked with `xmllint --noout` + Python `plistlib`; a new `launchd` CI job runs 
 `ops-check` runs `bats scripts/deploy/tests`, `actionlint`, the migration check, both compose
 files and the plists.
 
+*Acceptance (local, 2026-10-21):* `actionlint .github/workflows/*.yml` ✓; `shellcheck
+scripts/deploy/*.sh` ✓; `bats scripts/deploy/tests` ✓ 29/29 (quiet windows incl. DST both ways
+and UTC/local day crossing, no-op, non-green refusal, newest-green pick, rollback + skip + one
+Discord post, pull failure, rollback_failed, lock + stale lock, DRY_RUN, pause, dirty/branch
+refusal, manual rollback, migration check on fixtures); `plutil` n/a → `xmllint --noout` ✓ +
+plistlib ✓; `pnpm --filter web test -- lib/diagnostics` ✓; `make check` ✓. `make update
+DRY_RUN=1` against stubbed git/docker (newer sha with a published image) prints the merge, uv
+sync, tag, pull, up, health check and telemetry it would do (PR body).
+
 *Not verifiable here (verify on first use):* the deploy workflow itself (needs the `production`
 environment, Vercel token and a merge to `main`); `vercel deploy --prod` from the repo root
 honouring the project's Root Directory `web`; GHCR auth through Docker Desktop's keychain from a
