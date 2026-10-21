@@ -2,7 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    # claude/** too: GitHub skips pull_request runs while a PR conflicts with main, so a
+    # head-commit run still reports (and wakes the session driving the PR).
+    branches: [main, "claude/**"]
   pull_request:
 
 concurrency:
