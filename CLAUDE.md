@@ -17,6 +17,8 @@ Read only the sections your task needs.
 
 ## Rules
 
+- **Driving a PR?** Follow `.claude/skills/steward/SKILL.md`: check mergeability before CI on every
+  wake and after each push — GitHub runs no PR CI while a PR conflicts with `main`.
 - **The docs are living.** Any PR that changes user-visible behavior updates `docs/PRD.md`; any PR
   that changes architecture, schema, API contracts, algorithms or agent behavior updates
   `docs/DESIGN.md` (including §10 *Key decisions* when a decision changes). Deviations from a
