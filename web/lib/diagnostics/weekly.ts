@@ -269,6 +269,35 @@ export async function renderWeekly(
   const weakFuzzy = lines
     .filter((l) => lineClass(l) === "provisional")
     .sort((a, b) => (a.matchScore ?? 0) - (b.matchScore ?? 0) || a.id.localeCompare(b.id));
+  // Suggested merges (§4.5): jobs queued, reviews created (and why suggestions were dropped), and
+  // what humans did with them (`review_resolved` / `review_expired` of kind merge_suggestion).
+  const mergeRequests = metric("merge_suggest_requested");
+  const mergeCreated = metric("merge_suggestions_created");
+  const sum = (rows: Telemetry[], key: string) => rows.reduce((a, t) => a + (Number.isFinite(n(t.p[key])) ? n(t.p[key]) : 0), 0);
+  const mergeJobs = mergeRequests.reduce((a, t) => a + (Array.isArray(t.p.jobIds) ? t.p.jobIds.length : 0), 0);
+  const mergeAnswers = metric("review_resolved").filter((t) => t.p.kind === "merge_suggestion");
+  const mergeAnswered = mergeAnswers.length;
+  const mergeOutcome = (o: string) => mergeAnswers.filter((t) => t.p.outcome === o).length;
+  const mergeDropped = ["duplicate", "low_confidence", "merged", "self", "unknown", "both_confirmed"]
+    .map((r) => `${r} ${sum(mergeCreated, r)}`)
+    .filter((x) => !x.endsWith(" 0"));
+  const mergeRows = [
+    ["Runs (jobs)", `${mergeRequests.length} (${mergeJobs})${mergeRequests.length ? ` — ${countBy(mergeRequests, (t) => s(t.p.trigger) ?? "?").map(([k, c]) => `${k} ${c}`).join(", ")}` : ""}`],
+    ["Suggestions from the model", sum(mergeCreated, "suggestions")],
+    ["Reviews created", sum(mergeCreated, "created")],
+    ["Dropped", mergeDropped.join(", ") || 0],
+    ["Accepted (merged as suggested)", mergeOutcome("confirmed")],
+    ["Merged into another item", mergeOutcome("corrected")],
+    ["Dismissed (not the same)", mergeOutcome("dismissed")],
+    ["Expired unanswered", expiredReviews.filter((t) => t.p.kind === "merge_suggestion").length],
+  ];
+  const mergesRejected = mergeAnswered >= 5 && mergeOutcome("confirmed") / mergeAnswered < 0.5;
+  if (mergesRejected) {
+    findings.push({
+      score: 1,
+      text: `Suggested merges: only ${pct(mergeOutcome("confirmed"), mergeAnswered)} of ${mergeAnswered} answered were accepted.`,
+    });
+  }
   const receiptSection = section(
     "3. Receipt matching",
     [
@@ -276,6 +305,10 @@ export async function renderWeekly(
       "",
       `Paper lines matched by exact alias: ${pct(paperExact, paper.length)} (${paperExact}/${paper.length}). ` +
         `Receipt reviews expired this week: ${expiredReceiptReviews}.`,
+      "",
+      "Suggested merges:",
+      "",
+      table(["Merges", "Count"], mergeRows),
     ].join("\n"),
     bullets([
       ...pendingLines.slice(0, 5).map((l) => `Pending: \`${l.rawText}\` (${byReceipt.get(l.receiptId)!.vendor})`),
@@ -288,6 +321,9 @@ export async function renderWeekly(
     ]),
     [
       ...(pendingLines.length ? ["Add aliases for the pending lines above (confirm them in Cleanup)."] : []),
+      ...(mergesRejected
+        ? ["Mostly dismissed merge suggestions: raise `mergeSuggest.minConfidence` or tighten the merge_suggest prompt (new version)."]
+        : []),
       ...(weakFuzzy.length ? ["Check the weakest fuzzy matches; consider raising `matching.fuzzyApplyThreshold` if any are wrong."] : []),
     ],
   );
@@ -301,6 +337,7 @@ export async function renderWeekly(
     .orderBy(asc(auditJob.createdAt), asc(auditJob.id));
   extracts["vlm.jsonl"] = [
     ...vlm.map((t) => ({ at: t.at, metric: t.metric, ...t.p })),
+    ...metric("worker_heartbeat", "merge_suggest_requested", "merge_suggestions_created").map((t) => ({ at: t.at, metric: t.metric, ...t.p })),
     ...jobsDone.map((j) => ({
       job_id: j.id,
       job_type: j.jobType,
@@ -334,6 +371,29 @@ export async function renderWeekly(
     const corrected = reviews.filter((r) => r.status === "corrected");
     return [k, mine.length, mine.filter((j) => j.status === "failed").length, pct(corrected.length, answered.length)];
   });
+  // Worker health: `worker_heartbeat` every 10 min (M6); a silence longer than
+  // `diagnostics.workerGapMinutes` (from the week's start, between beats, or up to now) is downtime.
+  const beats = metric("worker_heartbeat");
+  const windowEnd = ctx.now < start ? start : ctx.now < end ? ctx.now : end;
+  const marks = [start, ...beats.map((t) => t.at), windowEnd];
+  const gaps = marks
+    .slice(1)
+    .map((to, i) => ({ from: marks[i]!, to, ms: Date.parse(to) - Date.parse(marks[i]!) }))
+    .filter((g) => g.ms > config.diagnostics.workerGapMinutes * 60_000);
+  extracts["vlm.jsonl"].push(...gaps.map((g) => ({ metric: "worker_gap", from: g.from, to: g.to, minutes: Math.round(g.ms / 60_000) })));
+  const lastBeat = beats.at(-1);
+  const workerModels = [...new Set(beats.map((t) => `${s(t.p.version) ?? "?"}: ${s(t.p.vlm_model) ?? "?"} / ${s(t.p.text_model) ?? "?"}`))];
+  const ollamaDown = beats.filter((t) => t.p.ollama_ok === false).length;
+  const hours = (ms: number) => `${num(ms / 3_600_000, 1)} h`;
+  if (beats.length === 0) {
+    findings.push({ score: 3, text: "The worker sent no heartbeat this week — photos and merge suggestions weren't processed." });
+  } else if (gaps.length) {
+    findings.push({
+      score: 3,
+      text: `The worker was silent ${gaps.length} time(s) for over ${config.diagnostics.workerGapMinutes} min (longest ${hours(Math.max(...gaps.map((g) => g.ms)))}).`,
+    });
+  }
+  if (ollamaDown) findings.push({ score: 2, text: `The worker couldn't reach Ollama in ${ollamaDown} heartbeat(s).` });
   if (totalsFailed > 0) findings.push({ score: 3, text: `${totalsFailed} paper receipt(s) failed the totals check.` });
   const failedJobs = jobsDone.filter((j) => j.status === "failed");
   if (failedJobs.length) findings.push({ score: 2, text: `${failedJobs.length} media job(s) failed.` });
@@ -344,9 +404,28 @@ export async function renderWeekly(
         `Parse failures: ${parseFailures}. Totals-check failures: ${totalsFailed}. Labels written: ${labels.length}.`,
       "",
       table(["Model × prompt", "Jobs", "Failed", "Human-correction rate"], modelRows),
+      "",
+      "Worker health:",
+      "",
+      table(
+        ["Worker", "Value"],
+        [
+          ["Last heartbeat", lastBeat?.at ?? "none this week"],
+          ["Heartbeats", beats.length],
+          ["Version: VLM / text model", workerModels.join("; ") || "–"],
+          ["ollama_ok (last)", lastBeat ? String(lastBeat.p.ollama_ok ?? "unchecked") : "–"],
+          ["Heartbeats with Ollama down", ollamaDown],
+          [`Gaps > ${config.diagnostics.workerGapMinutes} min`, gaps.length ? `${gaps.length} (${hours(gaps.reduce((a, g) => a + g.ms, 0))} total)` : 0],
+        ],
+      ),
     ].join("\n"),
-    bullets(failedJobs.slice(0, 5).map((j) => `Failed ${j.jobType} ${j.id}: ${j.error ?? "?"} (${j.attempts} attempts)`)),
+    bullets([
+      ...failedJobs.slice(0, 5).map((j) => `Failed ${j.jobType} ${j.id}: ${j.error ?? "?"} (${j.attempts} attempts)`),
+      ...gaps.slice(0, 5).map((g) => `Worker silent ${g.from} → ${g.to} (${hours(g.ms)})`),
+    ]),
     [
+      ...(gaps.length ? ["Worker downtime: check the worker container's status and logs on the Mac Mini, and that it restarts."] : []),
+      ...(ollamaDown ? ["Ollama unreachable from the worker: check that Ollama is running and both models are pulled."] : []),
       ...(parseFailures > 0 ? ["Parse failures: tighten the prompt's JSON instructions (new prompt version)."] : []),
       ...(latencies.length && percentile(latencies, 95) > 60_000 ? ["p95 latency over a minute — try a smaller VLM or lower image size."] : []),
     ],

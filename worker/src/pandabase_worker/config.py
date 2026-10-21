@@ -25,8 +25,6 @@ API_TIMEOUT_SECONDS = 30.0
 OLLAMA_TIMEOUT_SECONDS = 240.0
 # Liveness: `worker_heartbeat` at startup and this often (deploy health checks look for it).
 HEARTBEAT_SECONDS = 600
-# Merge suggestions: most items one job sends to the text model.
-MERGE_MAX_ITEMS = 150
 
 PROMPTS_DIR = Path(__file__).resolve().parents[2] / "prompts"
 

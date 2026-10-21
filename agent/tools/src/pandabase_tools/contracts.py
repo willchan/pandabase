@@ -140,11 +140,18 @@ class LookupResponse(BaseModel):
 class MaintenanceResponse(BaseModel):
     expired_reviews: Annotated[int, Field(ge=-9007199254740991, le=9007199254740991)]
     failed_jobs: Annotated[int, Field(ge=-9007199254740991, le=9007199254740991)]
+    merge_suggest_jobs: Annotated[int, Field(ge=-9007199254740991, le=9007199254740991)]
     opened_cycle_id: str | None
     presumed_discards: Annotated[int, Field(ge=-9007199254740991, le=9007199254740991)]
     purged_idempotency_keys: Annotated[int, Field(ge=-9007199254740991, le=9007199254740991)]
     purged_telemetry: Annotated[int, Field(ge=-9007199254740991, le=9007199254740991)]
     released_leases: Annotated[int, Field(ge=-9007199254740991, le=9007199254740991)]
+
+
+class MergeSuggestItem(BaseModel):
+    aliases: Annotated[list[str] | None, Field(max_length=20)] = None
+    item_id: Annotated[str, Field(max_length=64, min_length=1)]
+    name: Annotated[str, Field(max_length=200, min_length=1)]
 
 
 class Suggestion(BaseModel):
@@ -156,6 +163,10 @@ class Suggestion(BaseModel):
 
 class MergeSuggestResult(BaseModel):
     suggestions: list[Suggestion]
+
+
+class MergeSuggestRunRequest(BaseModel):
+    actor_discord_id: Annotated[str | None, Field(max_length=32, min_length=1)] = None
 
 
 class Line(BaseModel):
@@ -484,6 +495,17 @@ class JobNotificationsResponse(BaseModel):
 
 class JobResponse(BaseModel):
     job: Job
+
+
+class MergeSuggestInput(BaseModel):
+    items: Annotated[list[MergeSuggestItem], Field(max_length=150, min_length=2)]
+
+
+class MergeSuggestRunResponse(BaseModel):
+    candidates: Annotated[int, Field(ge=-9007199254740991, le=9007199254740991)]
+    created: bool
+    jobs: list[Job]
+    skipped: Literal["already_queued", "no_candidates"] | None
 
 
 class PlanLine(BaseModel):

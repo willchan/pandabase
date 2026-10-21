@@ -1,6 +1,7 @@
 // Every route handler keyed by its contract route name (for table-driven tests).
 import type { RouteName } from "@/lib/contracts";
 import * as awayPeriods from "@/app/api/away-periods/route";
+import * as mergeSuggestionsRun from "@/app/api/catalog/merge-suggestions/run/route";
 import * as cronMaintenance from "@/app/api/cron/maintenance/route";
 import * as diagnosticsWeekly from "@/app/api/diagnostics/weekly/route";
 import * as freezerAging from "@/app/api/freezer/aging/route";
@@ -28,6 +29,7 @@ import * as telemetry from "@/app/api/telemetry/route";
 
 export const HANDLERS: Record<RouteName, Record<string, unknown>> = {
   awayPeriods,
+  mergeSuggestionsRun,
   cronMaintenance,
   diagnosticsWeekly,
   freezerAging,
