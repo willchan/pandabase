@@ -127,7 +127,9 @@ jobs:
     runs-on: ubuntu-latest
     env:
       MIGRATIONS_BASE: origin/${{ github.base_ref || 'main' }}
-      CONTRACT_MIGRATION_LABEL: ${{ contains(github.event.pull_request.labels.*.name, 'contract-migration') && '1' || '0' }}
+      # The `contract-migration` label lives on the PR, so only pull_request runs can see it; push
+      # runs (main, claude/**) defer to them instead of failing a labeled PR's head commit.
+      CONTRACT_MIGRATION_LABEL: ${{ (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'contract-migration')) && '1' || '0' }}
     steps:
       - uses: actions/checkout@v7
         with:

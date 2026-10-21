@@ -1010,7 +1010,8 @@ Plus a dry run documented in the PR: `make update DRY_RUN=1` output against a st
   full history) flags `DROP TABLE`/`DROP COLUMN`/`RENAME` in migrations added since the base,
   including Drizzle's table rebuild (existing `0001` is one; old migrations aren't re-checked).
   Opt-out: `-- contract-migration: <reason>` in the file or the PR label (CI re-runs on
-  `labeled`/`unlabeled`). Fixtures in `scripts/deploy/tests/fixtures/migrations/` are synthetic.
+  `labeled`/`unlabeled`; push runs on `claude/**`, added by #13, can't see labels and defer to the
+  PR run). Fixtures in `scripts/deploy/tests/fixtures/migrations/` are synthetic.
 - **Weekly report:** new section *8. Deploys*; the data appendix is now *9*. No new extract (the
   section lists every row).
 - **Telemetry from GitHub** uses the agent token (`AGENT_API_TOKEN` secret in `production`),
