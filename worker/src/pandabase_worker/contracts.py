@@ -298,6 +298,19 @@ class UploadUrlResponse(BaseModel):
     url: AnyUrl
 
 
+class Heartbeat(BaseModel):
+    at: AwareDatetime
+    ollama_ok: bool | None
+    sha: str | None
+    text_model: str | None
+    version: str | None
+    vlm_model: str | None
+
+
+class WorkerHealthResponse(BaseModel):
+    heartbeat: Heartbeat | None
+
+
 class CartLine(BaseModel):
     free_text: str | None
     item_id: Annotated[str | None, Field(max_length=64, min_length=1)]

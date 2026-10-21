@@ -5,6 +5,7 @@ import * as mergeSuggestionsRun from "@/app/api/catalog/merge-suggestions/run/ro
 import * as cronMaintenance from "@/app/api/cron/maintenance/route";
 import * as diagnosticsWeekly from "@/app/api/diagnostics/weekly/route";
 import * as freezerAging from "@/app/api/freezer/aging/route";
+import * as workerHealth from "@/app/api/health/worker/route";
 import * as checkin from "@/app/api/grocery/checkin/route";
 import * as cycleCart from "@/app/api/grocery/cycle/[id]/cart/route";
 import * as cycleCartResult from "@/app/api/grocery/cycle/[id]/cart-result/route";
@@ -32,6 +33,7 @@ export const HANDLERS: Record<RouteName, Record<string, unknown>> = {
   mergeSuggestionsRun,
   cronMaintenance,
   diagnosticsWeekly,
+  workerHealth,
   freezerAging,
   checkin,
   cycleCart,

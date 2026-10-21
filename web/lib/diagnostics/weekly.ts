@@ -45,7 +45,10 @@ const num = (x: number, digits = 2): string =>
         .replace(/\.$/, "")
     : "–";
 const pct = (n: number, d: number): string => (d === 0 ? "–" : `${Math.round((100 * n) / d)}%`);
-const cell = (v: unknown): string => String(v ?? "–").replaceAll("|", "\\|").replaceAll("\n", " ");
+const cell = (v: unknown): string =>
+  String(v ?? "–")
+    .replaceAll("|", "\\|")
+    .replaceAll("\n", " ");
 
 function table(headers: string[], rows: unknown[][]): string {
   if (rows.length === 0) return "_No data._";
@@ -63,7 +66,9 @@ const bullets = (items: string[], empty = "_None._"): string =>
 export function percentile(values: readonly number[], p: number): number {
   if (values.length === 0) return NaN;
   const sorted = [...values].sort((a, b) => a - b);
-  return sorted[Math.min(sorted.length - 1, Math.max(0, Math.ceil((p / 100) * sorted.length) - 1))]!;
+  return sorted[
+    Math.min(sorted.length - 1, Math.max(0, Math.ceil((p / 100) * sorted.length) - 1))
+  ]!;
 }
 
 const n = (v: unknown): number => (typeof v === "number" ? v : Number(v ?? NaN));
@@ -111,11 +116,19 @@ export async function renderWeekly(
       .from(systemTelemetry)
       .where(inWeek(systemTelemetry.createdAt))
       .orderBy(asc(systemTelemetry.createdAt), asc(systemTelemetry.id))
-  ).map((t) => ({ source: t.source, metric: t.metricType, at: t.createdAt, p: asRecord(t.payload) }));
+  ).map((t) => ({
+    source: t.source,
+    metric: t.metricType,
+    at: t.createdAt,
+    p: asRecord(t.payload),
+  }));
   const metric = (...names: string[]) => telemetry.filter((t) => names.includes(t.metric));
 
   const items = new Map(
-    (await q.select({ id: item.id, name: item.canonicalName }).from(item)).map((i) => [i.id, i.name]),
+    (await q.select({ id: item.id, name: item.canonicalName }).from(item)).map((i) => [
+      i.id,
+      i.name,
+    ]),
   );
   const itemName = (p: Row): string =>
     s(p.item) ?? (s(p.itemId) ? (items.get(s(p.itemId)!) ?? s(p.itemId)!) : "?");
@@ -142,12 +155,18 @@ export async function renderWeekly(
     "presumed_discarded",
   ];
   const velocity = metric(...velocityMetrics);
-  extracts["velocity.jsonl"] = velocity.map((t) => ({ at: t.at, metric: t.metric, item: itemName(t.p), ...t.p }));
+  extracts["velocity.jsonl"] = velocity.map((t) => ({
+    at: t.at,
+    metric: t.metric,
+    item: itemName(t.p),
+    ...t.p,
+  }));
   const evo = metric("estimate_vs_observed");
   const evoByItem = new Map<string, number[]>();
   for (const t of evo) {
     const err = n(t.p.estimated) - n(t.p.observed);
-    if (Number.isFinite(err)) evoByItem.set(itemName(t.p), [...(evoByItem.get(itemName(t.p)) ?? []), err]);
+    if (Number.isFinite(err))
+      evoByItem.set(itemName(t.p), [...(evoByItem.get(itemName(t.p)) ?? []), err]);
   }
   const evoRows = [...evoByItem.entries()]
     .map(([name, errs]) => ({
@@ -193,7 +212,7 @@ export async function renderWeekly(
         .map(
           (t) =>
             `Overbuy: ${itemName(t.p)} — ${num(n(t.p.onHandBefore ?? t.p.on_hand_before))} on hand` +
-            (t.p.daysOfStock ?? t.p.days_of_stock
+            ((t.p.daysOfStock ?? t.p.days_of_stock)
               ? ` (~${num(n(t.p.daysOfStock ?? t.p.days_of_stock), 0)} days of stock)`
               : ""),
         ),
@@ -208,17 +227,32 @@ export async function renderWeekly(
       ...evoRows
         .filter((r) => r.mae >= 2)
         .slice(0, 3)
-        .map((r) => `${r.name}: estimates ${r.bias > 0 ? "high" : "low"} by ~${num(Math.abs(r.bias), 1)} — check its EMA / shelf life.`),
-      ...(overbuys.length >= 3 ? ["Several overbuys — is the cart quantity (cartCoverDays) too generous?"] : []),
-      ...(outliers.length >= 3 ? ["Many EMA outliers — check unit quantities of recently bought products."] : []),
+        .map(
+          (r) =>
+            `${r.name}: estimates ${r.bias > 0 ? "high" : "low"} by ~${num(Math.abs(r.bias), 1)} — check its EMA / shelf life.`,
+        ),
+      ...(overbuys.length >= 3
+        ? ["Several overbuys — is the cart quantity (cartCoverDays) too generous?"]
+        : []),
+      ...(outliers.length >= 3
+        ? ["Many EMA outliers — check unit quantities of recently bought products."]
+        : []),
     ],
   );
 
   // 3. Receipt matching --------------------------------------------------------------------------
-  const receipts = await q.select().from(receipt).where(inWeek(receipt.createdAt)).orderBy(asc(receipt.createdAt), asc(receipt.id));
+  const receipts = await q
+    .select()
+    .from(receipt)
+    .where(inWeek(receipt.createdAt))
+    .orderBy(asc(receipt.createdAt), asc(receipt.id));
   const receiptIds = receipts.map((r) => r.id);
   const lines = receiptIds.length
-    ? await q.select().from(receiptLine).where(inArray(receiptLine.receiptId, receiptIds)).orderBy(asc(receiptLine.id))
+    ? await q
+        .select()
+        .from(receiptLine)
+        .where(inArray(receiptLine.receiptId, receiptIds))
+        .orderBy(asc(receiptLine.id))
     : [];
   const byReceipt = new Map(receipts.map((r) => [r.id, r]));
   const lineClass = (l: (typeof lines)[number]) =>
@@ -252,7 +286,13 @@ export async function renderWeekly(
       return `${r.source}:${r.vendor}` === k && !l.ignored;
     });
     const c = (cls: string) => mine.filter((l) => lineClass(l) === cls).length;
-    return [k, mine.length, pct(c("auto"), mine.length), pct(c("provisional"), mine.length), pct(c("pending"), mine.length)];
+    return [
+      k,
+      mine.length,
+      pct(c("auto"), mine.length),
+      pct(c("provisional"), mine.length),
+      pct(c("pending"), mine.length),
+    ];
   });
   const paper = lines.filter((l) => byReceipt.get(l.receiptId)!.source === "paper" && !l.ignored);
   const paperExact = paper.filter((l) => l.matchMethod === "alias_exact").length;
@@ -264,7 +304,10 @@ export async function renderWeekly(
   }
   const pendingLines = lines.filter((l) => lineClass(l) === "pending");
   if (pendingLines.length) {
-    findings.push({ score: 2, text: `${pendingLines.length} receipt line(s) unmatched, waiting in review.` });
+    findings.push({
+      score: 2,
+      text: `${pendingLines.length} receipt line(s) unmatched, waiting in review.`,
+    });
   }
   const weakFuzzy = lines
     .filter((l) => lineClass(l) === "provisional")
@@ -273,16 +316,36 @@ export async function renderWeekly(
   // what humans did with them (`review_resolved` / `review_expired` of kind merge_suggestion).
   const mergeRequests = metric("merge_suggest_requested");
   const mergeCreated = metric("merge_suggestions_created");
-  const sum = (rows: Telemetry[], key: string) => rows.reduce((a, t) => a + (Number.isFinite(n(t.p[key])) ? n(t.p[key]) : 0), 0);
-  const mergeJobs = mergeRequests.reduce((a, t) => a + (Array.isArray(t.p.jobIds) ? t.p.jobIds.length : 0), 0);
+  const sum = (rows: Telemetry[], key: string) =>
+    rows.reduce((a, t) => a + (Number.isFinite(n(t.p[key])) ? n(t.p[key]) : 0), 0);
+  const mergeJobs = mergeRequests.reduce(
+    (a, t) => a + (Array.isArray(t.p.jobIds) ? t.p.jobIds.length : 0),
+    0,
+  );
   const mergeAnswers = metric("review_resolved").filter((t) => t.p.kind === "merge_suggestion");
   const mergeAnswered = mergeAnswers.length;
   const mergeOutcome = (o: string) => mergeAnswers.filter((t) => t.p.outcome === o).length;
-  const mergeDropped = ["duplicate", "low_confidence", "merged", "self", "unknown", "both_confirmed"]
+  const mergeDropped = [
+    "duplicate",
+    "low_confidence",
+    "merged",
+    "self",
+    "unknown",
+    "both_confirmed",
+  ]
     .map((r) => `${r} ${sum(mergeCreated, r)}`)
     .filter((x) => !x.endsWith(" 0"));
   const mergeRows = [
-    ["Runs (jobs)", `${mergeRequests.length} (${mergeJobs})${mergeRequests.length ? ` — ${countBy(mergeRequests, (t) => s(t.p.trigger) ?? "?").map(([k, c]) => `${k} ${c}`).join(", ")}` : ""}`],
+    [
+      "Runs (jobs)",
+      `${mergeRequests.length} (${mergeJobs})${
+        mergeRequests.length
+          ? ` — ${countBy(mergeRequests, (t) => s(t.p.trigger) ?? "?")
+              .map(([k, c]) => `${k} ${c}`)
+              .join(", ")}`
+          : ""
+      }`,
+    ],
     ["Suggestions from the model", sum(mergeCreated, "suggestions")],
     ["Reviews created", sum(mergeCreated, "created")],
     ["Dropped", mergeDropped.join(", ") || 0],
@@ -311,7 +374,9 @@ export async function renderWeekly(
       table(["Merges", "Count"], mergeRows),
     ].join("\n"),
     bullets([
-      ...pendingLines.slice(0, 5).map((l) => `Pending: \`${l.rawText}\` (${byReceipt.get(l.receiptId)!.vendor})`),
+      ...pendingLines
+        .slice(0, 5)
+        .map((l) => `Pending: \`${l.rawText}\` (${byReceipt.get(l.receiptId)!.vendor})`),
       ...weakFuzzy
         .slice(0, 5)
         .map(
@@ -320,11 +385,19 @@ export async function renderWeekly(
         ),
     ]),
     [
-      ...(pendingLines.length ? ["Add aliases for the pending lines above (confirm them in Cleanup)."] : []),
-      ...(mergesRejected
-        ? ["Mostly dismissed merge suggestions: raise `mergeSuggest.minConfidence` or tighten the merge_suggest prompt (new version)."]
+      ...(pendingLines.length
+        ? ["Add aliases for the pending lines above (confirm them in Cleanup)."]
         : []),
-      ...(weakFuzzy.length ? ["Check the weakest fuzzy matches; consider raising `matching.fuzzyApplyThreshold` if any are wrong."] : []),
+      ...(mergesRejected
+        ? [
+            "Mostly dismissed merge suggestions: raise `mergeSuggest.minConfidence` or tighten the merge_suggest prompt (new version).",
+          ]
+        : []),
+      ...(weakFuzzy.length
+        ? [
+            "Check the weakest fuzzy matches; consider raising `matching.fuzzyApplyThreshold` if any are wrong.",
+          ]
+        : []),
     ],
   );
 
@@ -337,7 +410,9 @@ export async function renderWeekly(
     .orderBy(asc(auditJob.createdAt), asc(auditJob.id));
   extracts["vlm.jsonl"] = [
     ...vlm.map((t) => ({ at: t.at, metric: t.metric, ...t.p })),
-    ...metric("worker_heartbeat", "merge_suggest_requested", "merge_suggestions_created").map((t) => ({ at: t.at, metric: t.metric, ...t.p })),
+    ...metric("worker_heartbeat", "merge_suggest_requested", "merge_suggestions_created").map(
+      (t) => ({ at: t.at, metric: t.metric, ...t.p }),
+    ),
     ...jobsDone.map((j) => ({
       job_id: j.id,
       job_type: j.jobType,
@@ -352,24 +427,39 @@ export async function renderWeekly(
   const latencies = metric("vlm_inference")
     .map((t) => n(t.p.latency_ms))
     .filter(Number.isFinite);
-  const parseFailures = vlm.filter((t) => t.metric === "vlm_parse_failure" || t.p.parse_failure === true).length;
+  const parseFailures = vlm.filter(
+    (t) => t.metric === "vlm_parse_failure" || t.p.parse_failure === true,
+  ).length;
   const totalsFailed =
     metric("job_finished").filter((t) => t.p.workerTotalsCheck === "fail").length +
     metric("vlm_inference").filter((t) => t.p.totals_check === "fail").length;
   const jobIds = jobsDone.map((j) => j.id);
   const jobReviews = jobIds.length
-    ? await q.select().from(reviewItem).where(inArray(reviewItem.jobId, jobIds)).orderBy(asc(reviewItem.id))
+    ? await q
+        .select()
+        .from(reviewItem)
+        .where(inArray(reviewItem.jobId, jobIds))
+        .orderBy(asc(reviewItem.id))
     : [];
   const labels = jobIds.length
     ? await q.select().from(labeledObservation).where(inArray(labeledObservation.jobId, jobIds))
     : [];
-  const modelKeys = [...new Set(jobsDone.filter((j) => j.model).map((j) => `${j.model} × ${j.promptVersion ?? "?"}`))].sort();
+  const modelKeys = [
+    ...new Set(
+      jobsDone.filter((j) => j.model).map((j) => `${j.model} × ${j.promptVersion ?? "?"}`),
+    ),
+  ].sort();
   const modelRows = modelKeys.map((k) => {
     const mine = jobsDone.filter((j) => `${j.model} × ${j.promptVersion ?? "?"}` === k);
     const reviews = jobReviews.filter((r) => mine.some((j) => j.id === r.jobId));
     const answered = reviews.filter((r) => r.status === "confirmed" || r.status === "corrected");
     const corrected = reviews.filter((r) => r.status === "corrected");
-    return [k, mine.length, mine.filter((j) => j.status === "failed").length, pct(corrected.length, answered.length)];
+    return [
+      k,
+      mine.length,
+      mine.filter((j) => j.status === "failed").length,
+      pct(corrected.length, answered.length),
+    ];
   });
   // Worker health: `worker_heartbeat` every 10 min (M6); a silence longer than
   // `diagnostics.workerGapMinutes` (from the week's start, between beats, or up to now) is downtime.
@@ -380,23 +470,45 @@ export async function renderWeekly(
     .slice(1)
     .map((to, i) => ({ from: marks[i]!, to, ms: Date.parse(to) - Date.parse(marks[i]!) }))
     .filter((g) => g.ms > config.diagnostics.workerGapMinutes * 60_000);
-  extracts["vlm.jsonl"].push(...gaps.map((g) => ({ metric: "worker_gap", from: g.from, to: g.to, minutes: Math.round(g.ms / 60_000) })));
+  extracts["vlm.jsonl"].push(
+    ...gaps.map((g) => ({
+      metric: "worker_gap",
+      from: g.from,
+      to: g.to,
+      minutes: Math.round(g.ms / 60_000),
+    })),
+  );
   const lastBeat = beats.at(-1);
-  const workerModels = [...new Set(beats.map((t) => `${s(t.p.version) ?? "?"}: ${s(t.p.vlm_model) ?? "?"} / ${s(t.p.text_model) ?? "?"}`))];
+  const workerModels = [
+    ...new Set(
+      beats.map(
+        (t) => `${s(t.p.version) ?? "?"}: ${s(t.p.vlm_model) ?? "?"} / ${s(t.p.text_model) ?? "?"}`,
+      ),
+    ),
+  ];
   const ollamaDown = beats.filter((t) => t.p.ollama_ok === false).length;
   const hours = (ms: number) => `${num(ms / 3_600_000, 1)} h`;
   if (beats.length === 0) {
-    findings.push({ score: 3, text: "The worker sent no heartbeat this week — photos and merge suggestions weren't processed." });
+    findings.push({
+      score: 3,
+      text: "The worker sent no heartbeat this week — photos and merge suggestions weren't processed.",
+    });
   } else if (gaps.length) {
     findings.push({
       score: 3,
       text: `The worker was silent ${gaps.length} time(s) for over ${config.diagnostics.workerGapMinutes} min (longest ${hours(Math.max(...gaps.map((g) => g.ms)))}).`,
     });
   }
-  if (ollamaDown) findings.push({ score: 2, text: `The worker couldn't reach Ollama in ${ollamaDown} heartbeat(s).` });
-  if (totalsFailed > 0) findings.push({ score: 3, text: `${totalsFailed} paper receipt(s) failed the totals check.` });
+  if (ollamaDown)
+    findings.push({
+      score: 2,
+      text: `The worker couldn't reach Ollama in ${ollamaDown} heartbeat(s).`,
+    });
+  if (totalsFailed > 0)
+    findings.push({ score: 3, text: `${totalsFailed} paper receipt(s) failed the totals check.` });
   const failedJobs = jobsDone.filter((j) => j.status === "failed");
-  if (failedJobs.length) findings.push({ score: 2, text: `${failedJobs.length} media job(s) failed.` });
+  if (failedJobs.length)
+    findings.push({ score: 2, text: `${failedJobs.length} media job(s) failed.` });
   const vlmSection = section(
     "4. VLM",
     [
@@ -415,24 +527,45 @@ export async function renderWeekly(
           ["Version: VLM / text model", workerModels.join("; ") || "–"],
           ["ollama_ok (last)", lastBeat ? String(lastBeat.p.ollama_ok ?? "unchecked") : "–"],
           ["Heartbeats with Ollama down", ollamaDown],
-          [`Gaps > ${config.diagnostics.workerGapMinutes} min`, gaps.length ? `${gaps.length} (${hours(gaps.reduce((a, g) => a + g.ms, 0))} total)` : 0],
+          [
+            `Gaps > ${config.diagnostics.workerGapMinutes} min`,
+            gaps.length ? `${gaps.length} (${hours(gaps.reduce((a, g) => a + g.ms, 0))} total)` : 0,
+          ],
         ],
       ),
     ].join("\n"),
     bullets([
-      ...failedJobs.slice(0, 5).map((j) => `Failed ${j.jobType} ${j.id}: ${j.error ?? "?"} (${j.attempts} attempts)`),
+      ...failedJobs
+        .slice(0, 5)
+        .map((j) => `Failed ${j.jobType} ${j.id}: ${j.error ?? "?"} (${j.attempts} attempts)`),
       ...gaps.slice(0, 5).map((g) => `Worker silent ${g.from} → ${g.to} (${hours(g.ms)})`),
     ]),
     [
-      ...(gaps.length ? ["Worker downtime: check the worker container's status and logs on the Mac Mini, and that it restarts."] : []),
-      ...(ollamaDown ? ["Ollama unreachable from the worker: check that Ollama is running and both models are pulled."] : []),
-      ...(parseFailures > 0 ? ["Parse failures: tighten the prompt's JSON instructions (new prompt version)."] : []),
-      ...(latencies.length && percentile(latencies, 95) > 60_000 ? ["p95 latency over a minute — try a smaller VLM or lower image size."] : []),
+      ...(gaps.length
+        ? [
+            "Worker downtime: check the worker container's status and logs on the Mac Mini, and that it restarts.",
+          ]
+        : []),
+      ...(ollamaDown
+        ? [
+            "Ollama unreachable from the worker: check that Ollama is running and both models are pulled.",
+          ]
+        : []),
+      ...(parseFailures > 0
+        ? ["Parse failures: tighten the prompt's JSON instructions (new prompt version)."]
+        : []),
+      ...(latencies.length && percentile(latencies, 95) > 60_000
+        ? ["p95 latency over a minute — try a smaller VLM or lower image size."]
+        : []),
     ],
   );
 
   // 5. Product choice ----------------------------------------------------------------------------
-  const prefs = await q.select().from(preferenceEvent).where(inWeek(preferenceEvent.createdAt)).orderBy(asc(preferenceEvent.createdAt), asc(preferenceEvent.id));
+  const prefs = await q
+    .select()
+    .from(preferenceEvent)
+    .where(inWeek(preferenceEvent.createdAt))
+    .orderBy(asc(preferenceEvent.createdAt), asc(preferenceEvent.id));
   extracts["product_choice.jsonl"] = prefs.map((p) => ({
     at: p.createdAt,
     item: items.get(p.itemId) ?? p.itemId,
@@ -454,12 +587,21 @@ export async function renderWeekly(
     .filter(([, d]) => d.before !== d.after)
     .sort((a, b) => a[0].localeCompare(b[0]))
     .map(([name, d]) => [name, num(d.before), num(d.after)]);
-  const overrides = prefs.filter((p) => p.kind.startsWith("override") || p.kind === "implicit_swap");
-  if (overrides.length >= 3) findings.push({ score: 2, text: `${overrides.length} product overrides / swaps — the cart's choices were corrected often.` });
+  const overrides = prefs.filter(
+    (p) => p.kind.startsWith("override") || p.kind === "implicit_swap",
+  );
+  if (overrides.length >= 3)
+    findings.push({
+      score: 2,
+      text: `${overrides.length} product overrides / swaps — the cart's choices were corrected often.`,
+    });
   const productSection = section(
     "5. Product choice",
     [
-      table(["Event", "Count"], countBy(prefs, (p) => p.kind)),
+      table(
+        ["Event", "Count"],
+        countBy(prefs, (p) => p.kind),
+      ),
       "",
       "Switch-threshold drift:",
       "",
@@ -468,22 +610,36 @@ export async function renderWeekly(
     bullets(
       overrides
         .slice(0, 5)
-        .map((p) => `${p.kind}: ${items.get(p.itemId) ?? p.itemId} (${p.fromProductId ?? "?"} → ${p.toProductId ?? "?"})`),
+        .map(
+          (p) =>
+            `${p.kind}: ${items.get(p.itemId) ?? p.itemId} (${p.fromProductId ?? "?"} → ${p.toProductId ?? "?"})`,
+        ),
     ),
-    driftRows.length ? ["Thresholds moved — check the items above still pick the product we want."] : [],
+    driftRows.length
+      ? ["Thresholds moved — check the items above still pick the product we want."]
+      : [],
   );
 
   // 6. Cart injection ----------------------------------------------------------------------------
   const cartLines = metric("cart_line_result");
   const toolErrors = metric("selector_error", "price_lookup_failed", "cart_tier1_line");
-  extracts["cart_injection.jsonl"] = [...cartLines, ...toolErrors].map((t) => ({ at: t.at, metric: t.metric, source: t.source, ...t.p }));
+  extracts["cart_injection.jsonl"] = [...cartLines, ...toolErrors].map((t) => ({
+    at: t.at,
+    metric: t.metric,
+    source: t.source,
+    ...t.p,
+  }));
   const outcomeCount = (o: string) => cartLines.filter((t) => t.p.outcome === o).length;
   const tier1 = outcomeCount("tier1");
   const failedCart = cartLines.filter((t) => t.p.outcome === "failed");
   if (cartLines.length && tier1 / cartLines.length < 0.9) {
-    findings.push({ score: 4, text: `Tier-1 cart injection succeeded for ${pct(tier1, cartLines.length)} of lines (target ≥ 90%).` });
+    findings.push({
+      score: 4,
+      text: `Tier-1 cart injection succeeded for ${pct(tier1, cartLines.length)} of lines (target ≥ 90%).`,
+    });
   }
-  if (failedCart.length) findings.push({ score: 4, text: `${failedCart.length} cart line(s) failed to inject.` });
+  if (failedCart.length)
+    findings.push({ score: 4, text: `${failedCart.length} cart line(s) failed to inject.` });
   const cartSection = section(
     "6. Cart injection",
     [
@@ -492,12 +648,16 @@ export async function renderWeekly(
         ["tier1", "tier2", "failed"].map((o) => [o, outcomeCount(o)]),
       ),
       "",
-      `Tier-1 success: ${pct(tier1, cartLines.length)}. Tool errors: ${countBy(toolErrors, (t) => t.metric)
-        .map(([m, c]) => `${m} ${c}`)
-        .join(", ") || "none"}.`,
+      `Tier-1 success: ${pct(tier1, cartLines.length)}. Tool errors: ${
+        countBy(toolErrors, (t) => t.metric)
+          .map(([m, c]) => `${m} ${c}`)
+          .join(", ") || "none"
+      }.`,
     ].join("\n"),
     bullets([
-      ...failedCart.slice(0, 5).map((t) => `Failed: ${itemName(t.p)} — ${s(t.p.error) ?? "no error text"}`),
+      ...failedCart
+        .slice(0, 5)
+        .map((t) => `Failed: ${itemName(t.p)} — ${s(t.p.error) ?? "no error text"}`),
       ...metric("selector_error")
         .slice(0, 3)
         .map((t) => `Selector error: ${s(t.p.selector) ?? "?"} — ${s(t.p.error) ?? ""}`),
@@ -545,16 +705,31 @@ export async function renderWeekly(
     ...[...photos, ...refiled].map((t) => ({ at: t.at, metric: t.metric, ...t.p })),
     ...routeStats.map((r) => ({ metric: "route_latency", ...r })),
   ];
-  if (expiredReviews.length) findings.push({ score: 1, text: `${expiredReviews.length} review item(s) expired unanswered.` });
-  if (slow.length) findings.push({ score: 1, text: `${slow.length} slow route(s) (p95 > ${config.diagnostics.slowRouteMs} ms).` });
+  if (expiredReviews.length)
+    findings.push({
+      score: 1,
+      text: `${expiredReviews.length} review item(s) expired unanswered.`,
+    });
+  if (slow.length)
+    findings.push({
+      score: 1,
+      text: `${slow.length} slow route(s) (p95 > ${config.diagnostics.slowRouteMs} ms).`,
+    });
   const errors = routeStats.filter((r) => r.errors > 0);
-  if (errors.length) findings.push({ score: 3, text: `Server errors on ${errors.map((r) => r.route).join(", ")}.` });
+  if (errors.length)
+    findings.push({ score: 3, text: `Server errors on ${errors.map((r) => r.route).join(", ")}.` });
   const uxSection = section(
     "7. UX friction",
     [
-      table(["Expired review kind", "Count"], countBy(expiredReviews, (t) => s(t.p.kind) ?? "?")),
+      table(
+        ["Expired review kind", "Count"],
+        countBy(expiredReviews, (t) => s(t.p.kind) ?? "?"),
+      ),
       "",
-      table(["Answered review kind", "Confirmed", "Corrected", "Dismissed", "Median age h"], answeredRows),
+      table(
+        ["Answered review kind", "Confirmed", "Corrected", "Dismissed", "Median age h"],
+        answeredRows,
+      ),
       "",
       `Clarifying questions asked: ${questions.length}.`,
       "",
@@ -574,20 +749,104 @@ export async function renderWeekly(
       ...slow.slice(0, 5).map((r) => `Slow: ${r.route} p95 ${num(r.p95, 0)} ms`),
     ]),
     [
-      ...(expiredReviews.length ? ["Expired reviews: are those questions worth asking? Consider better defaults."] : []),
+      ...(expiredReviews.length
+        ? ["Expired reviews: are those questions worth asking? Consider better defaults."]
+        : []),
       ...(slow.length ? ["Profile the slow routes above."] : []),
-      ...(refiled.length ? ["Re-filed photos: check the caption/description keywords in the agent's photo classifier."] : []),
+      ...(refiled.length
+        ? [
+            "Re-filed photos: check the caption/description keywords in the agent's photo classifier.",
+          ]
+        : []),
     ],
   );
 
-  // 8. Data appendix ------------------------------------------------------------------------------
-  const keyframes = jobsDone.flatMap((j) => (j.keyframeR2Keys ?? []).map((k) => `\`${k}\` (${j.jobType} ${j.id})`));
+  // 8. Deploys (M9): `deploy {component, sha, outcome, …}` from deploy.yml (migrate, web,
+  // worker_image) and the Mac Mini updater (mac_mini: success / rolled_back / rollback_failed).
+  const deploys = metric("deploy");
+  const deployOutcome = (t: Telemetry) => s(t.p.outcome) ?? "?";
+  const badDeploys = deploys.filter((t) => deployOutcome(t) !== "success");
+  const rollbacks = deploys.filter(
+    (t) => deployOutcome(t) === "rolled_back" || deployOutcome(t) === "rollback_failed",
+  );
+  const stuck = deploys.filter((t) => deployOutcome(t) === "rollback_failed");
+  if (stuck.length)
+    findings.push({
+      score: 3,
+      text: `${stuck.length} Mac Mini rollback(s) failed — the worker may be down.`,
+    });
+  else if (badDeploys.length)
+    findings.push({ score: 2, text: `${badDeploys.length} deploy step(s) failed or rolled back.` });
+  const deploysSection = section(
+    "8. Deploys",
+    [
+      table(
+        ["Component", "Deploys", "Succeeded", "Failed / rolled back"],
+        countBy(deploys, (t) => s(t.p.component) ?? "?").map(([c, count]) => {
+          const mine = deploys.filter((t) => (s(t.p.component) ?? "?") === c);
+          return [
+            c,
+            count,
+            mine.filter((t) => deployOutcome(t) === "success").length,
+            mine.length - mine.filter((t) => deployOutcome(t) === "success").length,
+          ];
+        }),
+      ),
+      "",
+      `Mac Mini rollbacks: ${rollbacks.length}.`,
+      "",
+      table(
+        ["At", "Component", "Sha", "Outcome", "Detail"],
+        deploys.map((t) => [
+          t.at,
+          s(t.p.component) ?? "?",
+          (s(t.p.sha) ?? "?").slice(0, 7),
+          deployOutcome(t),
+          s(t.p.reason) ?? (s(t.p.previous_sha) ? `from ${s(t.p.previous_sha)!.slice(0, 7)}` : ""),
+        ]),
+      ),
+    ].join("\n"),
+    bullets(
+      badDeploys
+        .slice(0, 5)
+        .map(
+          (t) =>
+            `${s(t.p.component) ?? "?"} ${(s(t.p.sha) ?? "?").slice(0, 7)}: ${deployOutcome(t)}${s(t.p.reason) ? ` — ${s(t.p.reason)}` : ""}`,
+        ),
+    ),
+    [
+      ...(rollbacks.length
+        ? [
+            "Mac Mini rollback: check `make logs` and the updater log (~/Library/Logs/pandabase-update.log) for the failed sha; it is skipped until a newer green commit lands.",
+          ]
+        : []),
+      ...(stuck.length
+        ? [
+            "A rollback failed: run `make update-status`, then roll back by hand (README *Manual rollback*).",
+          ]
+        : []),
+      ...(badDeploys.some((t) => s(t.p.component) === "migrate")
+        ? [
+            "A production migration failed: the web deploy was skipped; read the deploy workflow's migrate log.",
+          ]
+        : []),
+    ],
+  );
+
+  // 9. Data appendix ------------------------------------------------------------------------------
+  const keyframes = jobsDone.flatMap((j) =>
+    (j.keyframeR2Keys ?? []).map((k) => `\`${k}\` (${j.jobType} ${j.id})`),
+  );
   const appendix = [
-    "## 8. Data appendix",
+    "## 9. Data appendix",
     "",
     "Extracts:",
     "",
-    bullets(Object.keys(extracts).map((name) => `\`/diagnostics/${week}/${name}\` (${extracts[name]!.length} rows)`)),
+    bullets(
+      Object.keys(extracts).map(
+        (name) => `\`/diagnostics/${week}/${name}\` (${extracts[name]!.length} rows)`,
+      ),
+    ),
     "",
     "Keyframes (R2):",
     "",
@@ -615,6 +874,7 @@ export async function renderWeekly(
       productSection,
       cartSection,
       uxSection,
+      deploysSection,
       appendix,
     ].join("\n\n") + "\n";
 
@@ -627,4 +887,3 @@ export async function renderWeekly(
     })),
   };
 }
-

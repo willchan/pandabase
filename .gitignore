@@ -51,3 +51,6 @@ test-results/
 # Mac Mini ops (make secrets / README): real OpenClaw patches with ids filled in
 /agent/openclaw.pandabase.json5
 /agent/openclaw.privacy.json5
+
+# Mac Mini updater state (make update: lock, last deploy, rolled-back shas, pause flag)
+/.deploy/

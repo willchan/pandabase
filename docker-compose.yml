@@ -2,17 +2,18 @@
 # (Metal; Docker on macOS has no GPU), and OpenClaw is the household's existing native agent
 # (PLAN M8 Notes). Secrets come from the repo-root `.env` (`make secrets`; never committed).
 #
-#   make up      # build + start (docker compose up -d --build)
-#   make logs    # follow the worker's logs
+#   make up        # start the published image (docker compose up -d)
+#   make up-local  # build ./worker locally instead (docker-compose.build.yml)
+#   make logs      # follow the worker's logs
 #
-# M9 switches `image` to the GHCR tag (PANDABASE_WORKER_IMAGE / PANDABASE_WORKER_TAG) and moves
-# `build` into an override file; until then the image is built locally from ./worker.
+# The image comes from GHCR (PLAN M9): deploy.yml pushes ghcr.io/willchan/pandabase-worker:<sha>
+# and :main after CI passes on main, and `make update` pins PANDABASE_WORKER_TAG=<sha> in `.env`
+# (compose reads it for this interpolation). Pulling needs `docker login ghcr.io` (README).
 name: pandabase
 
 services:
   worker:
-    build: ./worker
-    image: ${PANDABASE_WORKER_IMAGE:-pandabase-worker}:${PANDABASE_WORKER_TAG:-local}
+    image: ${PANDABASE_WORKER_IMAGE:-ghcr.io/willchan/pandabase-worker}:${PANDABASE_WORKER_TAG:-main}
     restart: unless-stopped
     env_file:
       - path: .env

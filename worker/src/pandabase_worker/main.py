@@ -66,8 +66,9 @@ class Worker:
 
     def run(self) -> None:
         log.info(
-            "worker %s: vlm=%s text=%s poll=%ss",
+            "worker %s (%s): vlm=%s text=%s poll=%ss",
             __version__,
+            self.settings.build_sha or "local build",
             self.settings.vlm_model,
             self.settings.text_model,
             self.settings.poll_interval_seconds,
@@ -92,6 +93,7 @@ class Worker:
         self._emit_now(
             "worker_heartbeat",
             version=__version__,
+            sha=self.settings.build_sha,
             vlm_model=self.settings.vlm_model,
             text_model=self.settings.text_model,
             ollama_ok=(self._ollama_health is None) if self._ollama_checked else None,

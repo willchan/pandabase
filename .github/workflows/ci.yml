@@ -6,6 +6,8 @@ on:
     # head-commit run still reports (and wakes the session driving the PR).
     branches: [main, "claude/**"]
   pull_request:
+    # labeled/unlabeled: the `contract-migration` label changes the migrations check's verdict.
+    types: [opened, synchronize, reopened, labeled, unlabeled]
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -111,19 +113,33 @@ jobs:
       - run: uv run pytest
 
   worker-image:
-    # The worker's Docker image (python slim + ffmpeg, non-root) builds, through the compose file
-    # the Mac Mini uses (PLAN M8 acceptance: docker compose config + build).
+    # The worker's Docker image (python slim + ffmpeg, non-root) builds from ./worker through the
+    # local-build override (PLAN M8/M9); deploy.yml builds and pushes the same Dockerfile to GHCR.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
       - run: docker compose config --quiet
-      - run: docker compose build
+      - run: docker compose -f docker-compose.yml -f docker-compose.build.yml build
 
   ops:
-    # Mac Mini ops (PLAN M8): shellcheck, compose file, make dry runs, smoke helpers' ruff/mypy.
+    # Mac Mini ops (PLAN M8/M9): shellcheck, actionlint, compose files, plists, deploy-script tests
+    # (bats), the backward-compatible-migration check, make dry runs, smoke helpers' ruff/mypy.
     runs-on: ubuntu-latest
+    env:
+      MIGRATIONS_BASE: origin/${{ github.base_ref || 'main' }}
+      # The `contract-migration` label lives on the PR, so only pull_request runs can see it; push
+      # runs (main, claude/**) defer to them instead of failing a labeled PR's head commit.
+      CONTRACT_MIGRATION_LABEL: ${{ (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'contract-migration')) && '1' || '0' }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # the migrations check diffs against the base branch
+      - name: Install bats, xmllint and actionlint
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq bats libxml2-utils shellcheck
+          GOBIN="$HOME/.local/bin" go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
+          echo "$HOME/.local/bin" >>"$GITHUB_PATH"
       - uses: astral-sh/setup-uv@v7
         with:
           version: "0.13.3"
@@ -133,3 +149,10 @@ jobs:
             agent/tools/uv.lock
       - run: (cd worker && uv sync --locked) && (cd agent/tools && uv sync --locked)
       - run: make ops-check
+
+  launchd:
+    # plutil is macOS-only; the ops job checks the plists with xmllint + plistlib on Linux.
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: plutil -lint ops/launchd/*.plist

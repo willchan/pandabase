@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  PandaBase: pull-based auto-update of the Mac Mini every 15 min (PLAN M9, DESIGN §8). Runs
+  scripts/deploy/mac-update.sh (= `make update`): newest green main → pull → health check →
+  rollback on failure; skips quiet windows and overlapping runs itself.
+  Rendered by scripts/ops/install-update-timer.sh (`make install-update-timer`) into
+  ~/Library/LaunchAgents with @REPO@ / @HOME@ / @LOG_DIR@ filled in; don't edit the copy.
+  A LaunchAgent (not a daemon) so docker's keychain credential helper can read the GHCR login.
+  Pause: `make update-pause` (or `launchctl bootout gui/$(id -u)/com.pandabase.update`).
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.pandabase.update</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>@REPO@/scripts/deploy/mac-update.sh</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>@REPO@</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/usr/local/bin:@HOME@/.local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <key>NO_COLOR</key>
+    <string>1</string>
+  </dict>
+  <key>StartInterval</key>
+  <integer>900</integer>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>ProcessType</key>
+  <string>Background</string>
+  <key>StandardOutPath</key>
+  <string>@LOG_DIR@/pandabase-update.log</string>
+  <key>StandardErrorPath</key>
+  <string>@LOG_DIR@/pandabase-update.log</string>
+</dict>
+</plist>

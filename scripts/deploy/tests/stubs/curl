@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# curl stub: records the config read from stdin (-K -) and the arguments.
+printf 'curl %s\n' "$*" >>"$STUB/calls"
+cat >>"$STUB/curl-stdin"

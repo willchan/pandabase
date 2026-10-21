@@ -22,7 +22,8 @@ const SECTIONS = [
   "## 5. Product choice",
   "## 6. Cart injection",
   "## 7. UX friction",
-  "## 8. Data appendix",
+  "## 8. Deploys",
+  "## 9. Data appendix",
 ];
 
 describe("weekly diagnostics", () => {
@@ -236,6 +237,78 @@ describe("weekly diagnostics", () => {
     const vlm = report.extracts.find((e) => e.name === "vlm.jsonl")!.jsonl;
     expect(vlm).toContain('"metric":"worker_gap","from":"2026-10-19T16:55:00.000Z"');
     expect(vlm).toContain('"metric":"merge_suggestions_created"');
+  });
+
+  it("reports deploys per component, with Mac Mini rollbacks", async () => {
+    const deploy = (i: number, at: string, payload: Record<string, unknown>) => ({
+      id: `01D${String(i).padStart(23, "0")}`,
+      source: "agent",
+      metricType: "deploy",
+      payload,
+      createdAt: at,
+    });
+    const sha1 = "1111111aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    const sha2 = "2222222bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+    await h.db.insert(systemTelemetry).values([
+      deploy(1, "2026-10-20T10:00:00.000Z", {
+        component: "migrate",
+        sha: sha1,
+        outcome: "success",
+      }),
+      deploy(2, "2026-10-20T10:01:00.000Z", { component: "web", sha: sha1, outcome: "success" }),
+      deploy(3, "2026-10-20T10:05:00.000Z", {
+        component: "worker_image",
+        sha: sha1,
+        outcome: "success",
+      }),
+      deploy(4, "2026-10-20T10:15:00.000Z", {
+        component: "mac_mini",
+        sha: sha1,
+        outcome: "success",
+        previous_sha: sha2,
+      }),
+      deploy(5, "2026-10-22T10:15:00.000Z", {
+        component: "mac_mini",
+        sha: sha2,
+        outcome: "rolled_back",
+        previous_sha: sha1,
+        reason: "no worker heartbeat from 2222222 within 120s",
+      }),
+    ]);
+    const md = (
+      await renderWeekly(h.db, "2026-W43", {
+        now: "2026-10-27T20:00:00.000Z",
+        config: DEFAULT_CONFIG,
+      })
+    ).markdown;
+    expect(md).toContain("| mac_mini | 2 | 1 | 1 |");
+    expect(md).toContain("| web | 1 | 1 | 0 |");
+    expect(md).toContain("Mac Mini rollbacks: 1.");
+    expect(md).toContain(
+      "| 2026-10-20T10:15:00.000Z | mac_mini | 1111111 | success | from 2222222 |",
+    );
+    expect(md).toContain(
+      "- mac_mini 2222222: rolled_back — no worker heartbeat from 2222222 within 120s",
+    );
+    expect(md).toContain("1 deploy step(s) failed or rolled back.");
+
+    await h.db
+      .insert(systemTelemetry)
+      .values(
+        deploy(6, "2026-10-23T10:15:00.000Z", {
+          component: "mac_mini",
+          sha: sha2,
+          outcome: "rollback_failed",
+        }),
+      );
+    const md2 = (
+      await renderWeekly(h.db, "2026-W43", {
+        now: "2026-10-27T20:00:00.000Z",
+        config: DEFAULT_CONFIG,
+      })
+    ).markdown;
+    expect(md2).toContain("1 Mac Mini rollback(s) failed — the worker may be down.");
+    expect(md2).toContain("Mac Mini rollbacks: 2.");
   });
 
   it("is served by GET /api/diagnostics/weekly", async () => {

@@ -117,7 +117,11 @@ your production URL (step 6).
    The four generated secrets can be pushed without copy-pasting: `(cd web && vercel link)`,
    then `make vercel-env` (production; `VERCEL_ENVS="production preview" make vercel-env` for
    both). It skips variables that already exist and prints names only.
-3. Deploy. The daily maintenance cron (`web/vercel.json`, 11:17 UTC) registers itself.
+3. Deploy once by hand (*Deployments → Redeploy*, or `vercel deploy --prod` from the repo root).
+   The daily maintenance cron (`web/vercel.json`, 11:17 UTC) registers itself. After that,
+   production deploys come only from GitHub Actions (step 15): `web/vercel.json` sets
+   `git.deploymentEnabled.main: false`, so a push to `main` no longer deploys on its own (it would
+   ship code before its migration). PR previews still build through Vercel's Git integration.
 4. Put the production URL in `.env` (`PANDABASE_API_URL`) and in
    `agent/pandabase.config.json` (step 9).
 
@@ -212,12 +216,16 @@ missing; both gitignored). Edit `agent/pandabase.config.json`:
 Make sure `~/.local/bin` is on your `PATH`. The OpenClaw gateway needs it too: if `openclaw
 skills check` (step 11) reports `pandabase-tools` missing, link it into a directory the gateway
 already has, e.g. `BIN_DIR=/opt/homebrew/bin make install-agent-tools`. Then start Docker
-Desktop and the worker:
+Desktop, log in to GHCR (the worker image is private; step 15 has the token) and start the worker:
 
 ```sh
-make up     # docker compose up -d --build
-make logs   # expect a heartbeat; "ollama ok" once models are pulled
+docker login ghcr.io -u <github-user>   # password: the read:packages token from step 15
+make up        # docker compose up -d — ghcr.io/willchan/pandabase-worker:main
+make logs      # expect a heartbeat; "ollama ok" once models are pulled
 ```
+
+Before the first deploy workflow has published an image, `make up-local` builds `./worker` here
+instead.
 
 Check: `scripts/ops/agent-run.sh config show` prints your members and `"token_set": true`.
 
@@ -329,6 +337,70 @@ build, nightly receipt sweeps, Sunday 23:00 diagnostics (see [PRD §4](docs/PRD.
 
 ---
 
+### 15. Continuous deployment
+
+Merging to `main` deploys everything (DESIGN §8 *Continuous deployment*): GitHub Actions
+`deploy.yml` runs after CI passes — **migrate** Turso production → **deploy-web** (`vercel deploy
+--prod`) → **publish-worker** (`ghcr.io/willchan/pandabase-worker:<sha>` and `:main`, arm64) —
+and the Mac Mini pulls the new worker, tools and skills itself every 15 min. Nothing connects
+into the home network.
+
+1. **GitHub environment `production`** (repo → *Settings → Environments → New environment*).
+   Restrict *Deployment branches* to `main`. Add:
+
+   | Kind | Name | Value |
+   |---|---|---|
+   | secret | `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN` | production DB (step 2) |
+   | secret | `VERCEL_TOKEN` | vercel.com → *Account Settings → Tokens* (scope: your team) |
+   | secret | `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID` | `web/.vercel/project.json` after `(cd web && vercel link)` (`orgId`, `projectId`) |
+   | secret | `AGENT_API_TOKEN` | from `.env` — only for `deploy` telemetry (optional) |
+   | variable | `PANDABASE_API_URL` | production URL (telemetry target + the environment's link) |
+
+2. **GitHub environment `preview`** with `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN` = the preview
+   DB. `preview-migrate.yml` migrates it for PRs that add migrations (it skips with a notice until
+   these exist).
+3. **Vercel:** nothing more — `web/vercel.json` already turns off production auto-deploys from
+   `main`. Keep the *Production Branch* = `main` (previews for every other branch).
+4. **GHCR on the Mac Mini:** GitHub → *Settings → Developer settings → Personal access tokens →
+   Tokens (classic)* → a token with only **`read:packages`**, no expiry or a reminder to rotate
+   it. Then `docker login ghcr.io -u <github-user>` and paste it; Docker Desktop keeps it in the
+   macOS keychain. The updater uses it twice: to check that `:<sha>` exists (that is its "CI
+   passed and the web deployed" signal — it never deploys a commit without it) and to pull.
+   After the first deploy run, open the package (github.com → your profile → *Packages*) and
+   check it's linked to this repo and private.
+5. **Discord alert (optional but recommended):** `#pandabase` → *Edit Channel → Integrations →
+   Webhooks → New Webhook* → copy URL into `.env` as `DEPLOY_DISCORD_WEBHOOK_URL`. A failed
+   update posts there once.
+6. **Install the timer:**
+
+   ```sh
+   make update DRY_RUN=1      # what it would do now (git fetch runs; nothing else changes)
+   make install-update-timer  # launchd: make update every 15 min; log ~/Library/Logs/pandabase-update.log
+   ```
+
+What `make update` does: skip if paused or inside a quiet window (**Fri 17:30–19:00, Sat
+09:30–12:00** household time, around the nudge and the cart build) or if another run holds the
+lock → `git fetch` → pick the newest commit on `origin/main` whose image exists (older green
+commits still deploy while the newest is red or building) → `git merge --ff-only` → `uv sync`
+(tools) → `PANDABASE_WORKER_TAG=<sha>` in `.env` → `docker compose pull && up -d` → health check
+(worker running, a heartbeat from the new sha within 2 min via `GET /api/health/worker`, an
+agent-token API round trip). On failure it rolls back to the previous sha and image, remembers
+the bad sha (skipped until a newer commit lands), posts once to Discord, and sends `deploy`
+telemetry (weekly report, *Deploys*). It needs a clean checkout on `main`.
+
+- **Pause / resume:** `make update-pause` / `make update-resume` (`make update-status` shows
+  state, the last update and skipped shas). To stop the timer entirely:
+  `launchctl bootout gui/$(id -u)/com.pandabase.update`.
+- **Manual rollback:** `make rollback` (to the sha before the last update) or
+  `make rollback TO=<sha>`. It resets the checkout, reuses that image, health-checks, and pauses
+  auto-update so the next tick doesn't move forward again; `make update-resume` when fixed.
+  The web app: Vercel → *Deployments* → the previous production deployment → *Instant Rollback*
+  (safe because migrations are backward-compatible; a rolled-back web app runs on the newer
+  schema).
+- **Migrations that drop or rename** must wait for a later PR (CLAUDE.md). CI's ops job fails a
+  PR whose *new* migration has `DROP TABLE`/`DROP COLUMN`/`RENAME` unless the file has a
+  `-- contract-migration: <reason>` line or the PR has the `contract-migration` label.
+
 ## Photo privacy
 
 PandaBase is local-first for vision ([PRD §3.6](docs/PRD.md), [DESIGN §10 #10, #34](docs/DESIGN.md#10-key-decisions--rationale)):
@@ -406,6 +478,11 @@ model more often, not less.
 | `R2_*` | Cloudflare (step 3) | Vercel | presigned upload/download URLs |
 | Amazon sessions | you, by hand | each Chromium user-data dir | agent tools over CDP (never stored by PandaBase) |
 | Discord bot token, cloud model keys | OpenClaw setup | OpenClaw's own config | OpenClaw |
+| `TURSO_*` (prod), `VERCEL_TOKEN`, `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID`, `AGENT_API_TOKEN` | Turso, Vercel, `make secrets` (step 15) | GitHub environment `production` secrets | `deploy.yml` (migrate, deploy, telemetry) |
+| `TURSO_*` (preview) | `turso` (step 2) | GitHub environment `preview` secrets | `preview-migrate.yml` |
+| `GITHUB_TOKEN` | GitHub, per run | nowhere (ephemeral) | `deploy.yml` pushes to GHCR (`packages: write` in that job only) |
+| GHCR read token (`read:packages`) | you (step 15) | macOS keychain via `docker login ghcr.io` | Mac Mini: image exists? + pull |
+| `DEPLOY_DISCORD_WEBHOOK_URL` | Discord (step 15) | `.env` | Mac Mini updater's failure post |
 
 `.env*`, `agent/pandabase.config.json`, `agent/profiles.json`, `agent/openclaw.*.json5` and
 `diagnostics/` are gitignored. To rotate a token: delete its line from `.env` (or
@@ -422,14 +499,15 @@ model more often, not less.
 - Discord: Message Content Intent and the bot's channel permissions; copying ids (steps 7, 11).
 - Filling in `agent/pandabase.config.json` and the OpenClaw patch file (steps 9, 11).
 - The photo-privacy choice (step 12) and turning on `cart.wholefoods_tier1` after the cart check.
+- GitHub environments and their secrets, the Vercel token, the GHCR read token + `docker login`,
+  the Discord webhook, and checking the GHCR package is private (step 15).
 - Extracting orders the backfill couldn't read (ask the agent; step 14).
 
 ## Day 2
 
-- **Update the Mac Mini:** `make update` — `git pull --ff-only`, `uv sync` for the agent tools,
-  `docker compose up -d --build`. It prints the before/after sha; roll back with
-  `git checkout <before> && make up`. Skills load straight from the repo, so new skill text
-  applies to new OpenClaw sessions. (M9 automates this with health checks and rollback.)
+- **Updates:** automatic (step 15). `make update` runs one now (same checks); `make
+  update-status`, `make update-pause`/`update-resume`, `make rollback [TO=<sha>]`. Skills load
+  straight from the repo, so new skill text applies to new OpenClaw sessions.
 - **Logs:** `make logs` (worker), `openclaw logs`, `~/Library/Logs/PandaBase/` (Chromium).
 - **Re-check everything:** `make smoke`.
 - **Diagnostics:** every Sunday the agent writes `diagnostics/YYYY-Www.md` plus JSONL extracts

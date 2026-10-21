@@ -25,8 +25,12 @@ RUN apt-get update \
 WORKDIR /app
 COPY --from=build /app/.venv /app/.venv
 COPY prompts ./prompts
+# CI passes the commit (deploy.yml); the heartbeat reports it so the Mac Mini's deploy health
+# check knows the new image is the one running. Empty for local builds.
+ARG GIT_SHA=""
 ENV PATH="/app/.venv/bin:$PATH" \
     PROMPTS_DIR=/app/prompts \
+    PANDABASE_BUILD_SHA=$GIT_SHA \
     PYTHONUNBUFFERED=1
 USER worker
 # SIGTERM finishes the current job before exiting; give it a grace period (compose

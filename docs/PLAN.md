@@ -41,8 +41,8 @@ contracts.
 | M5 Web UI & auth | done | #10 |
 | M6 Python worker | done | #8 |
 | M7 Agent skill pack & tools | done | #9 |
-| M8 Ops, compose, README | in review | |
-| M9 Continuous deployment | todo | |
+| M8 Ops, compose, README | done | #11 |
+| M9 Continuous deployment | in review | |
 
 ---
 
@@ -974,4 +974,69 @@ Plus a dry run documented in the PR: `make update DRY_RUN=1` output against a st
 
 **Out of scope:** blue/green or canary deploys; deploying OpenClaw itself.
 
-**Notes:** —
+**Notes:**
+
+*Deviations / choices (DESIGN §3.2, §7, §8 *Continuous deployment*, §9, §10 #30, #44–46 updated):*
+- **Green signal = GHCR tag**, not the checks API: `publish-worker` runs after `migrate` and
+  `deploy-web`, so `ghcr.io/willchan/pandabase-worker:<sha>` exists only when CI passed *and* the
+  web app with its migration is live. The Mac needs one `read:packages` token (to pull anyway)
+  and no second GitHub token. It deploys the newest such commit in `HEAD..origin/main`, so a red
+  newest commit doesn't block an older green one.
+- **Heartbeat read path:** `GET /api/health/worker` (agent scope; contract `WorkerHealthResponse`,
+  regenerated Python models) returns the latest worker-sourced `worker_heartbeat`. The worker
+  now reports `sha` (Dockerfile `ARG GIT_SHA` → `PANDABASE_BUILD_SHA`; touches M6's worker:
+  `config.py`, `main.py`, Dockerfile, one test). The health check requires a heartbeat with the
+  new sha, sent no earlier than a minute before the switch (Docker Desktop's VM clock can lag),
+  plus `api get /api/grocery/cycle/current` through the freshly synced tools — 120 s, every 10 s.
+- **Bad shas** are remembered in `.deploy/bad-shas` (gitignored) and never retried; without that
+  the timer would re-deploy and roll back every 15 min and post to Discord each time.
+- **Rollback reuses the local image** (no pull): the pre-M9 tag is `main`/`local`, and pulling
+  `:main` would fetch the new image again. `git reset --keep` moves `main` back; the next update
+  fast-forwards again.
+- **Discord** via a channel webhook (`DEPLOY_DISCORD_WEBHOOK_URL` in `.env`), not the agent: it
+  works when the tools or the gateway are the broken part. Unset → warning in the log only.
+- **Manual rollback / pause:** `make rollback [TO=<sha>]` (pauses auto-update),
+  `make update-pause|update-resume|update-status`, `make install-update-timer`. M8's
+  `scripts/ops/update.sh` is removed; `make update` is the new script.
+- **Compose:** default image `ghcr.io/willchan/pandabase-worker:main`; local builds through
+  `docker-compose.build.yml` (`make up-local`, CI `worker-image`) — deliberately not
+  `docker-compose.override.yml`, which compose would auto-load on the Mac.
+- **Image platform:** `linux/arm64` only (Apple Silicon), built under QEMU with the GHA cache.
+- **Preview path:** Vercel's preview integration stays; `preview-migrate.yml` migrates
+  `pandabase-preview` (GitHub environment `preview`) for PRs touching `db/migrations/`, in
+  parallel with Vercel's build — safe because no route runs at build time. Skips with a notice
+  until the environment has secrets.
+- **Migration check:** `scripts/deploy/check-migrations.sh` (in `make ops-check`, CI `ops` job with
+  full history) flags `DROP TABLE`/`DROP COLUMN`/`RENAME` in migrations added since the base,
+  including Drizzle's table rebuild (existing `0001` is one; old migrations aren't re-checked).
+  Opt-out: `-- contract-migration: <reason>` in the file or the PR label (CI re-runs on
+  `labeled`/`unlabeled`; push runs on `claude/**`, added by #13, can't see labels and defer to the
+  PR run). Fixtures in `scripts/deploy/tests/fixtures/migrations/` are synthetic.
+- **Weekly report:** new section *8. Deploys*; the data appendix is now *9*. No new extract (the
+  section lists every row).
+- **Telemetry from GitHub** uses the agent token (`AGENT_API_TOKEN` secret in `production`),
+  stored with source `agent`; the payload's `component` tells them apart. Optional: without it
+  the jobs skip telemetry with a notice.
+
+*Tools:* `actionlint` v1.7.12 (go install), `bats` 1.10.0 and `shellcheck` 0.9.0 (apt) were
+installed here. **`plutil` doesn't exist on Linux:** locally and in CI's `ops` job the plists are
+checked with `xmllint --noout` + Python `plistlib`; a new `launchd` CI job runs `plutil -lint` on
+`macos-latest`. The `ops` job now installs bats, xmllint, shellcheck and actionlint, and
+`ops-check` runs `bats scripts/deploy/tests`, `actionlint`, the migration check, both compose
+files and the plists.
+
+*Acceptance (local, 2026-10-21):* `actionlint .github/workflows/*.yml` ✓; `shellcheck
+scripts/deploy/*.sh` ✓; `bats scripts/deploy/tests` ✓ 29/29 (quiet windows incl. DST both ways
+and UTC/local day crossing, no-op, non-green refusal, newest-green pick, rollback + skip + one
+Discord post, pull failure, rollback_failed, lock + stale lock, DRY_RUN, pause, dirty/branch
+refusal, manual rollback, migration check on fixtures); `plutil` n/a → `xmllint --noout` ✓ +
+plistlib ✓; `pnpm --filter web test -- lib/diagnostics` ✓; `make check` ✓. `make update
+DRY_RUN=1` against stubbed git/docker (newer sha with a published image) prints the merge, uv
+sync, tag, pull, up, health check and telemetry it would do (PR body).
+
+*Not verifiable here (verify on first use):* the deploy workflow itself (needs the `production`
+environment, Vercel token and a merge to `main`); `vercel deploy --prod` from the repo root
+honouring the project's Root Directory `web`; GHCR auth through Docker Desktop's keychain from a
+LaunchAgent; `docker manifest inspect` against a private GHCR package; the arm64 image on the
+Mac. The first merge after setup is the end-to-end test: watch the Actions run, then
+`make update-status` / the log on the Mac.
