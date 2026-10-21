@@ -160,6 +160,23 @@ def test_invalid_merge_input_fails_without_calling_the_model(rig: Rig) -> None:
     assert rig.ollama.requests == []
 
 
+@pytest.mark.parametrize(
+    "items",
+    [
+        # MergeSuggestInput (generated): at most 150 items, names at most 200 chars.
+        [{"item_id": f"01ITEM{i}", "name": f"item {i}"} for i in range(151)],
+        [{"item_id": "01A", "name": "x" * 201}, {"item_id": "01B", "name": "b"}],
+    ],
+    ids=["151 items", "201-char name"],
+)
+def test_merge_input_follows_the_contract(rig: Rig, items: list[dict[str, str]]) -> None:
+    job = rig.engine.add("merge_suggest", input={"items": items})
+    assert rig.worker.run_once()
+    assert job.completes[0]["status"] == "failed"
+    assert "merge_suggest input invalid" in job.completes[0]["error"]
+    assert rig.ollama.requests == []
+
+
 def test_lease_lost_drops_the_result(rig: Rig) -> None:
     job = rig.engine.add("trash_cam", receipt_image(fmt="JPEG"))
 

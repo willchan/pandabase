@@ -485,6 +485,23 @@ export async function mergeItems(
       .from(reviewItem)
       .where(and(eq(reviewItem.itemId, source.id), eq(reviewItem.status, "pending")));
     for (const o of others) await closeReview(tx, o, "confirmed", ctx, { via: "merge" });
+    // Suggestions to fold another item into the source now mean its target (or are answered).
+    const incoming = await tx
+      .select()
+      .from(reviewItem)
+      .where(and(eq(reviewItem.kind, "merge_suggestion"), eq(reviewItem.status, "pending")));
+    for (const o of incoming) {
+      const payload = asRecord(o.payload);
+      if (payload.merge_into_item_id !== source.id) continue;
+      if (o.itemId === target.id) {
+        await closeReview(tx, o, "confirmed", ctx, { via: "merge" });
+        continue;
+      }
+      await tx
+        .update(reviewItem)
+        .set({ payload: { ...payload, merge_into_item_id: target.id }, updatedAt: ctx.now })
+        .where(eq(reviewItem.id, o.id));
+    }
 
     await refreshInventoryState(tx, [source.id, target.id], ctx.now, ctx.config);
     await emitTelemetry(

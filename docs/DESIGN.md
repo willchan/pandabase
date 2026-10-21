@@ -273,6 +273,7 @@ All routes under `/web/app/api`. Payloads defined once as **Zod schemas** in `we
 | `POST /api/products/{id}/reject` | agent | "Never buy X": stance `rejected` + `reject` preference event |
 | `GET /api/receipts/cursor?account=` | agent | Last ingested `external_order_id`/date for a member's account |
 | `POST /api/receipts/ingest` | agent | Digital/manual receipt JSON → resolve, apply, EMA |
+| `POST /api/catalog/merge-suggestions/run` | agent | Queue `merge_suggest` jobs over the unverified catalog (§4.5); the receipt-scraper skill calls it once at the end of a backfill. Idempotent: while one is queued/claimed it returns those (`skipped: already_queued`); `no_candidates` when nothing is unverified |
 | `POST /api/media/upload-url` | agent | R2 presigned PUT for a new media key |
 | `POST /api/jobs` | agent | Create audit job |
 | `GET /api/jobs/notifications` | agent | Completed/failed jobs not yet replied to in Discord |
@@ -281,7 +282,7 @@ All routes under `/web/app/api`. Payloads defined once as **Zod schemas** in `we
 | `POST /api/jobs/complete` | worker | Result or failure for the claimed attempt (`attempt` echoed; stale → 409) |
 | `POST /api/telemetry` | agent, worker | Telemetry events (batched) |
 | `GET /api/diagnostics/weekly?week=` | agent | Rendered Markdown + JSONL extracts |
-| `GET /api/cron/maintenance` | cron | Expire review items, shelf-life discards, release stale leases, purge idempotency/telemetry, open an overdue cycle |
+| `GET /api/cron/maintenance` | cron | Expire review items, shelf-life discards, release stale leases, purge idempotency/telemetry, open an overdue cycle, weekly merge suggestions (§4.5) |
 
 UI mutations use server actions (`web/app/(app)/**/actions.ts`) that call the same services as
 the routes — never the HTTP routes themselves. Services added for the UI (reusable by future agent
@@ -504,7 +505,27 @@ Implementation notes (`web/lib/domain/receipts.ts`):
   single-product source such as an auto-created ASIN item) confirms the product's `unit_quantity`
   and rescales the moved events. The item's other pending reviews close with it. "Keep as its own
   item" (`confirmItem`) confirms (and optionally renames) an auto-created item and closes its
-  `new_product` / `unverified_item` reviews.
+  `new_product` / `unverified_item` reviews. Pending suggestions that pointed *into* the merged
+  item are re-pointed at its target (or closed, if they named the target itself).
+- **Suggested merges** (`web/lib/domain/mergeSuggest.ts`, `web/lib/services/mergeSuggest.ts`): a
+  backfill leaves one `unverified` item per product, so the State Engine asks the worker's text
+  model which of them are an existing item (or each other) under another name.
+  - *Triggers:* the receipt-scraper skill calls `POST /api/catalog/merge-suggestions/run` once when a
+    backfill finishes; the daily cron queues a run at most every `mergeSuggest.cadenceDays` (7) when
+    ≥ `mergeSuggest.minNewItems` (10) unverified items were created since the last merge_suggest job.
+    Both queue nothing while a merge_suggest job is still queued or claimed.
+  - *Batches* (`planMergeSuggestBatches`): candidates = unverified, unmerged items; targets =
+    confirmed, unmerged items; aliases = product titles + receipt texts (≤ `aliasesPerItem`). If
+    everything fits `mergeSuggest.batchSize` (clamped to the contract's 2–150), one job gets it all;
+    otherwise each candidate travels with its `targetsPerItem` closest targets (token-set ratio on
+    names) and candidates are grouped by category (their own, else their closest target's), whole
+    groups packed per job, so look-alike new items meet. Merged items are never sent.
+  - *Results* (`mergeSuggestionReviews`): one `merge_suggestion` review per kept suggestion (30d,
+    default `none`, `cleanup` urgency). Dropped: unknown ids, self-pairs, a source merged meanwhile (a
+    merged target is followed to where it went), two confirmed items, confidence below
+    `minConfidence` (0.5), and pairs (either way round) that already have a pending or dismissed
+    suggestion. The unverified side is the one merged away; one suggestion per source item (most
+    confident). An expired suggestion may be asked again.
 
 ### 4.6 Review expiry & trust
 
@@ -514,7 +535,7 @@ Run daily by `/api/cron/maintenance`:
 |---|---|---|
 | receipt (pending lines) | drop pending lines | 14d |
 | new_product | keep auto-created item/product | 30d |
-| merge_suggestion | do nothing | 30d |
+| merge_suggestion | do nothing (both items stay; may be suggested again later) | 30d |
 | unverified_item | stays unverified | never expires (low priority) |
 | failed_job | dismiss | 14d |
 | trash_cam (low confidence) | do nothing | 7d |
@@ -579,9 +600,11 @@ invalid reply fails the attempt (`vlm_parse_failure`). The first keyframe is the
 listed in `complete` even on failure. `complete` sends `Idempotency-Key: complete:{job_id}:{attempt}`;
 a 409 drops the result. SIGTERM finishes the current job, then exits (a second signal exits at
 once; the lease then expires).
-**merge_suggest input** (set by the job's creator; the worker never reads the catalog):
-`{items: [{item_id, name, aliases?: [str]}]}`, 2–150 items. The worker keeps suggestions between
-two distinct listed items, one per pair.
+**merge_suggest input** is the `MergeSuggestInput` contract, set by the State Engine (§4.5; the
+worker never reads the catalog): `{items: [{item_id, name (≤ 200), aliases?: [str] (≤ 20)}]}`,
+2–150 items; `POST /api/jobs` rejects a merge_suggest job whose `input` doesn't validate. The
+worker validates it with the generated model, keeps suggestions between two distinct listed items,
+one per pair, and posts `MergeSuggestResult`; the app then applies §4.5's rules.
 
 **Paper receipt prompt contract:** transcribe only — `{store, date, lines:[{raw_text, qty,
 unit_price, line_total}], subtotal, tax, total}`. The worker converts money to cents, runs the
@@ -610,7 +633,7 @@ with `AGENT_API_TOKEN`. Discord I/O (thread creation, replies, ✅ reactions) us
 |---|---|---|
 | `grocery-cycle` | automations Fri 18:00, Sat 10:00, Mon 09:00; replies in the cycle thread | Open cycles (thread per cycle), record list edits/skips/away/other-store, Friday nudge (incl. freezer), Saturday build (`cart build` → tier-2 fallback in the agent's browser → `cart finish` → summary) |
 | `discord-intake` | photo or inventory text in `#pandabase` | Photos: `photo submit` (classify, upload, create job); text purchases, "we're out", "froze X", "never buy X" → inventory events / product reject. Job results are posted by a **command automation** (`pandabase-tools jobs replies` every 5 min, no model call) |
-| `digital-receipt-scraper` | automations daily 21:00 (cart member), Sun 21:00 (other member); backfill on request | `receipts sweep` per member profile → `/api/receipts/ingest`; agent extracts zero-ASIN pages |
+| `digital-receipt-scraper` | automations daily 21:00 (cart member), Sun 21:00 (other member); backfill on request | `receipts sweep` per member profile → `/api/receipts/ingest`; agent extracts zero-ASIN pages; a finished backfill ends with `POST /api/catalog/merge-suggestions/run` |
 | `item-lookup` | "do we have X?" anywhere the bot is addressed | `/api/items/lookup` → `matches[0].text` |
 | `telemetry-aggregator` | automation Sun 23:00 | `diagnostics write` → `/diagnostics` → 3-line summary |
 
@@ -672,7 +695,7 @@ workspace unless `skills.load.allowSymlinkTargets` trusts the target.
 OpenClaw's media understanding must use the local Ollama VLM (`tools.media.models` with an
 `ollama/…` image entry) so the agent's cloud model never needs the photo pixels (§10 #10).
 Residual risk: when that local description fails, OpenClaw delivers the image natively to an
-image-capable reply model. The recommended mitigation (§10 #42, owner's choice, README *Photo
+image-capable reply model. The recommended mitigation (§10 #43, owner's choice, README *Photo
 privacy*) is a dedicated `pandabase` agent bound to `#pandabase` whose model is catalogued
 text-only (`input: ["text"]`): OpenClaw injects images only into turns of image-capable models.
 Our household runs the reply model locally on Ollama, which removes the risk (the fallback stays on
@@ -700,7 +723,10 @@ productId, vendor, outcome, error}`, `cycle_opened`, `cycle_transition`, `job_cr
 `review_expired {reviewId, kind, action}`, `review_resolved {reviewId, kind, outcome,
 impactScore, ageHours, …line counts}`, `item_merged {itemId, intoItemId, reviewKind, eventScale}`,
 `item_settings_changed {itemId, fields}`, `settings_changed {keys}`, `presumed_discarded`,
-`maintenance_run`, `settings_rejected {keys}`; source `session`: `ui_action {action, ok, latencyMs,
+`maintenance_run`, `settings_rejected {keys}`, `merge_suggest_requested {trigger: backfill|cron,
+jobIds, candidates, items}`, `merge_suggestions_created {jobId, items, suggestions, created,
+duplicate, low_confidence, merged, self, unknown, both_confirmed}` (accepted / dismissed / expired
+suggestions are the `review_resolved` / `review_expired` rows of kind `merge_suggestion`); source `session`: `ui_action {action, ok, latencyMs,
 error?}` from every server action. The report reads these client metrics (payload fields it uses):
 `vlm_inference {model, prompt_version, latency_ms, totals_check, parse_failure}`,
 `vlm_parse_failure`, `selector_error {selector, error, page}`, `price_lookup_failed {asin,
@@ -712,8 +738,9 @@ errors, complete}` (stored for ad-hoc queries; no report section). The worker's 
 `vlm_parse_failure` also carry `job_id`, `job_type`, `attempt`, `repaired` and per-type fields
 (receipts `lines`, `discount_lines`, `date_fallback`, `store_missing`; Trash Cam `detections`,
 `top_confidence`; merges `items`, `suggestions`, `dropped`), all copied into the `vlm` extract.
-Worker health metrics (stored, not yet in the report): `worker_heartbeat {version, vlm_model,
-text_model, ollama_ok}` (at startup and every 10 min; `ollama_ok` null until first checked),
+Worker health metrics: `worker_heartbeat {version, vlm_model,
+text_model, ollama_ok}` (at startup and every 10 min; `ollama_ok` null until first checked; the
+report's worker-health table reads it),
 `worker_ollama_unavailable {reason,
 missing_models}`, `worker_job_failed {job_id, job_type, attempt, error}`, `worker_lease_lost`,
 `worker_complete_error {error}`.
@@ -724,8 +751,13 @@ missing_models}`, `worker_job_failed {job_id, job_type, attempt, error}`, `worke
 
 1. Summary (top 3 findings)
 2. Velocity (updates, outliers, estimate-vs-observed error by item, overbuys)
-3. Receipt matching (auto/provisional/expired rates per store, worst aliases)
-4. VLM (latency p50/p95, totals-check failures, human-correction rate per model × prompt version)
+3. Receipt matching (auto/provisional/expired rates per store, worst aliases; suggested merges:
+   runs, reviews created, dropped by reason, accepted / merged elsewhere / dismissed / expired)
+4. VLM (latency p50/p95, totals-check failures, human-correction rate per model × prompt version;
+   worker health: last heartbeat, version and models, `ollama_ok`, heartbeats with Ollama down,
+   silences longer than `diagnostics.workerGapMinutes` (30) from the week's start, between beats or
+   up to now — each also a `worker_gap` row in the `vlm` extract with the heartbeats and merge
+   metrics)
 5. Product choice (switches, overrides, threshold drift)
 6. Cart injection (tier-1 success, tier-2 fallbacks, failures with selector/error)
 7. UX friction (expired items, answered reviews by kind/outcome with median age, clarifying
@@ -736,8 +768,9 @@ missing_models}`, `worker_job_failed {job_id, job_type, attempt, error}`, `worke
 `{week, markdown, extracts:[{name, jsonl}]}`; extracts are `velocity`, `receipt_lines`, `vlm`,
 `product_choice`, `cart_injection`, `ux` (`.jsonl`), always present. The summary ranks findings
 (cart failures and tier-1 rate below 90% first, then paper exact-alias rate below 70%, totals-check
-failures and server errors, then overbuys, estimate error, pending lines, failed jobs, overrides,
-then expired reviews and slow routes over `diagnostics.slowRouteMs`) and keeps the top 3.
+failures, server errors and worker silence (no heartbeat, or a gap), then Ollama unreachable, overbuys, estimate error, pending lines, failed jobs, overrides,
+then expired reviews, slow routes over `diagnostics.slowRouteMs` and merge suggestions mostly
+rejected (≥ 5 answered, < 50% accepted)) and keeps the top 3.
 
 `/diagnostics` is gitignored. The Claude review playbook lives in [CLAUDE.md](../CLAUDE.md).
 
@@ -807,7 +840,7 @@ Setup is the README checklist; every step is a `make` target over an idempotent 
 - **First run:** `pnpm db:add-member` upserts a member by email (the UI edits members but can't
   create them, and sign-in requires a member row), keeping exactly one cart account.
 - **`make backfill`** repeats `receipts sweep --backfill` per member until `complete` (waits on a
-  busy profile lock). **`make update`** = `git pull --ff-only` → `uv sync` (tools) →
+  busy profile lock), then calls `POST /api/catalog/merge-suggestions/run` once, like the skill. **`make update`** = `git pull --ff-only` → `uv sync` (tools) →
   `docker compose up -d --build`, printing the before/after sha (M9 wraps it).
 - **`make smoke`** (`scripts/smoke/run.sh`): env, agent-token round trip, worker running, models
   pulled, Ollama host settings, the worker image's VLM path on a synthetic receipt
@@ -878,6 +911,7 @@ docker-compose.yml, Makefile, CLAUDE.md, README.md, .github/workflows/ci.yml
 | 37 | Whole Foods tier 1 off until smoke-verified | A silent mis-add to the Amazon cart is worse than an agent fallback |
 | 38 | Web UI: server components + server actions over the shared services, shadcn/ui on Tailwind 4, system light/dark, native selects, phone-first bottom tabs | One code path with the agent; a minute-at-a-time household tool should feel native on a phone and work without client state |
 | 39 | Dev sign-in is an Auth.js credentials provider registered only under `NODE_ENV=development` + `DEV_AUTH_BYPASS=1` | The real session/proxy path is exercised in dev and e2e (the gate is testable), and the bypass can't exist in a production build |
-| 40 | Compose runs only the worker; OpenClaw, Ollama and Chromium stay native | OpenClaw is the household's existing native agent (host Chromium over CDP, `~/.openclaw` state); Ollama needs Metal; a containerized OpenClaw would be a second agent to keep in sync |
-| 41 | Members are bootstrapped with `pnpm db:add-member`, not the UI | Sign-in requires a member row, so the first member can't be created from inside the app; two members don't justify an admin flow |
-| 42 | Inbound photos: local `tools.media.models` description always; the native-delivery fallback is made safe by a local reply model (our choice) or, with a cloud reply model, a text-only PandaBase agent | Keeps §10 #10 without forcing a model change on the family agent; the fallback is OpenClaw behavior we can't turn off by config |
+| 40 | Suggested merges are queued by the State Engine (agent route at backfill end + weekly cron), with a typed `MergeSuggestInput` | The worker can't read the catalog; the app owns which items are asked about, dedupes answers and never blocks on them (30-day no-op default) |
+| 41 | Compose runs only the worker; OpenClaw, Ollama and Chromium stay native | OpenClaw is the household's existing native agent (host Chromium over CDP, `~/.openclaw` state); Ollama needs Metal; a containerized OpenClaw would be a second agent to keep in sync |
+| 42 | Members are bootstrapped with `pnpm db:add-member`, not the UI | Sign-in requires a member row, so the first member can't be created from inside the app; two members don't justify an admin flow |
+| 43 | Inbound photos: local `tools.media.models` description always; the native-delivery fallback is made safe by a local reply model (our choice) or, with a cloud reply model, a text-only PandaBase agent | Keeps §10 #10 without forcing a model change on the family agent; the fallback is OpenClaw behavior we can't turn off by config |

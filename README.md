@@ -319,7 +319,9 @@ make backfill               # every member with receipt_sweep ≠ off; or MEMBER
 Walks each member's Amazon order history back 12 months (3s per page), ingesting delivered,
 picked-up and in-store orders. It's resumable and deduped by order id: if it stops (Chromium
 signed out, network), fix the cause and run it again. Orders whose items it can't read are
-listed; ask the agent in `#pandabase`: "backfill receipts for will" to extract them. Then check
+listed; ask the agent in `#pandabase`: "backfill receipts for will" to extract them. At the end it
+asks the State Engine for merge suggestions (backfilled products start as unverified items); they
+show up in *Cleanup → Merges* and nobody has to answer them. Then check
 the *Pantry* page: items should show purchase history and estimates.
 
 You're done. From here the automations run the week: Friday 18:00 nudge, Saturday 10:00 cart

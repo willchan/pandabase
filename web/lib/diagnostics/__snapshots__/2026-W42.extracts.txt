@@ -32,6 +32,7 @@
 {"job_id":"01M559EV00BCMSC163Y8N78ZHC","job_type":"paper_receipt","status":"failed","model":"seed-vlm","prompt_version":"paper_receipt.v1","attempts":2,"error":"could not read totals (image too blurry)","keyframe_r2_keys":[]}
 {"job_id":"01M55NG3SNCQNQTMGYF9C0VVAQ","job_type":"paper_receipt","status":"completed","model":"seed-vlm","prompt_version":"paper_receipt.v1","attempts":1,"error":null,"keyframe_r2_keys":[]}
 {"job_id":"01M57VVJ00CK8MKJXP0DW80XEM","job_type":"trash_cam","status":"completed","model":"seed-vlm","prompt_version":"trash_cam.v1","attempts":1,"error":null,"keyframe_r2_keys":["seed/trash-cam/1-k0.jpg","seed/trash-cam/1-k1.jpg"]}
+{"metric":"worker_gap","from":"2026-10-12T07:00:00.000Z","to":"2026-10-19T07:00:00.000Z","minutes":10080}
 
 ## product_choice.jsonl
 

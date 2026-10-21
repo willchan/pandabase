@@ -94,13 +94,29 @@ export const DEFAULT_CONFIG = {
     /** Presigned R2 URL lifetime. */
     presignSeconds: 900,
   },
+  /** §4.5 Suggested merges (`merge_suggest` jobs over unverified items). */
+  mergeSuggest: {
+    /** Most items sent in one job (clamped to `MERGE_SUGGEST_ITEMS`). */
+    batchSize: 150,
+    /** When the catalog doesn't fit one job: confirmed items sent along with each candidate. */
+    targetsPerItem: 8,
+    /** Product titles / receipt texts sent per item as `aliases`. */
+    aliasesPerItem: 5,
+    /** Cron: queue a run only when this many unverified items arrived since the last one. */
+    minNewItems: 10,
+    /** Cron: at most one run per this many days. */
+    cadenceDays: 7,
+    /** Suggestions below this confidence don't become reviews. */
+    minConfidence: 0.5,
+  },
   /** §5 step 5 Trash Cam: a resolved detection at or above this confidence is applied. */
   trashCam: { applyConfidence: 0.8 },
 
   /** §2.7 retention, purged by the daily cron. */
   retention: { telemetryDays: 180, idempotencyHours: 24 },
-  /** §7 diagnostics: requests slower than this count as slow routes. */
-  diagnostics: { slowRouteMs: 1000 },
+  /** §7 diagnostics: requests slower than this count as slow routes; heartbeat gaps longer than
+   * `workerGapMinutes` count as worker downtime. */
+  diagnostics: { slowRouteMs: 1000, workerGapMinutes: 30 },
 
   /** §4.6 `impact_score` weights. */
   impact: { inCartPlan: 10, inPleaseCheck: 3, otherwise: 1 },
@@ -113,6 +129,9 @@ export const DEFAULT_CONFIG = {
     openBy: { isoWeekday: 1, hour: 9, minute: 0 },
   },
 } as const;
+
+/** `MergeSuggestInput.items` bounds (wire contract; not overridable). */
+export const MERGE_SUGGEST_ITEMS = { min: 2, max: 150 } as const;
 
 type Widen<T> = T extends string
   ? string

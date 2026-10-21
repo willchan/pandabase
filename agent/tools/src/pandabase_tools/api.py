@@ -88,6 +88,13 @@ ROUTES: dict[str, Route] = {
             c.ReceiptIngestRequest,
             actor="required",
         ),
+        Route(
+            "POST",
+            "/api/catalog/merge-suggestions/run",
+            c.MergeSuggestRunResponse,
+            c.MergeSuggestRunRequest,
+            actor="optional",
+        ),
         Route("POST", "/api/media/upload-url", c.UploadUrlResponse, c.UploadUrlRequest),
         Route("POST", "/api/jobs", c.JobResponse, c.JobCreateRequest, actor="required"),
         Route("GET", "/api/jobs/notifications", c.JobNotificationsResponse),

@@ -3,6 +3,7 @@
 # `pandabase-tools receipts sweep --member M --backfill` until it reports `complete` — each run
 # resumes where the last stopped, and orders are deduped by id, so re-running is always safe.
 # Default: every member whose receipt_sweep isn't "off". Their Chromium must be signed in.
+# Afterwards it queues merge suggestions once (as the digital-receipt-scraper skill does).
 #
 #   MAX_RUNS=40      give up after this many sweep runs per member
 #   LOCK_WAIT=60     seconds to wait when the profile is busy (exit 3), e.g. a cart build
@@ -64,3 +65,19 @@ backfill_member() {
 }
 
 for member in "${targets[@]}"; do backfill_member "$member"; done
+
+# Like the skill: once the backfill is in, ask the State Engine for merge suggestions (the
+# backfill created one unverified item per product). Idempotent; results land in Cleanup → Merges.
+actor="$(jq -r --arg m "${targets[0]}" '.members[] | select(.name == $m) | .discord_id' "$PANDABASE_CONFIG")"
+key="backfill-merges:$actor:$(date +%F)"
+if [ "$DRY_RUN" = 1 ]; then
+  run "$TOOLS_BIN" api post /api/catalog/merge-suggestions/run --json '{}' --actor "$actor" --key "$key"
+elif out="$(tools api post /api/catalog/merge-suggestions/run --json '{}' --actor "$actor" --key "$key")"; then
+  if [ "$(printf '%s' "$out" | jq -r '.created // false')" = true ]; then
+    info "✓ queued merge suggestions — they'll appear in Cleanup → Merges"
+  else
+    note "merge suggestions: $(printf '%s' "$out" | jq -r '.skipped // "nothing to suggest"')"
+  fi
+else
+  warn "couldn't queue merge suggestions ($out); the weekly cron will queue them"
+fi

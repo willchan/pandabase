@@ -53,5 +53,7 @@ export const MaintenanceResponse = named(
     purged_idempotency_keys: z.number().int(),
     purged_telemetry: z.number().int(),
     opened_cycle_id: z.string().nullable(),
+    /** merge_suggest jobs queued by this run (at most weekly, §4.6). */
+    merge_suggest_jobs: z.number().int(),
   }),
 );

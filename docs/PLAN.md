@@ -603,6 +603,12 @@ Locked with uv 0.13.3 (revision 5). Image installs uv 0.13.3 from PyPI in a buil
   `worker_complete_error`, `worker_ollama_unavailable`, plus extra `vlm_inference` fields. They
   reach the weekly `vlm` extract only where the report already reads them (`vlm_inference`
   fields); a "worker health" row in the report is a follow-up (web/lib/diagnostics is M4's).
+- *Follow-ups done* (PR "Wire up suggested merges and worker health diagnostics", branch
+  `claude/merge-suggestions`): `MergeSuggestInput` is a Zod contract (the worker validates with the
+  generated model; `MERGE_MAX_ITEMS` is gone); the State Engine queues merge_suggest jobs
+  (`POST /api/catalog/merge-suggestions/run` at the end of a backfill, weekly from the cron) and
+  turns results into deduped `merge_suggestion` reviews (DESIGN §4.5); the weekly report has
+  merge rows (§3) and a worker-health table from `worker_heartbeat` (§4).
 - Tests: in-memory fake State Engine (leases, attempts, 409, idempotent replay), fake R2 and
   Ollama via `httpx.MockTransport`; Ollama fixtures in `tests/fixtures/ollama/` are synthetic
   responses in Ollama's wire shape (no live model was reachable); the receipt image is rendered
@@ -825,7 +831,7 @@ models[{input: ["text","image"]}]` (OpenClaw's own Ollama-vision example, plus `
 ollama-local`); `models.providers.*.models.*.input: ["text"]` → images are not injected into that
 model's turns; multi-agent `bindings[]` with `match.peer {kind: "channel", id}`.
 
-*Deviations / choices (DESIGN §1.2, §6, §8 "Mac Mini operations", §9, §10 #40–42 updated):*
+*Deviations / choices (DESIGN §1.2, §6, §8 "Mac Mini operations", §9, §10 #41–43 updated):*
 - **No `openclaw` compose service and no `/diagnostics` volume.** DESIGN §1 has OpenClaw native
   (the household's existing agent: host Chromium over CDP, `~/.openclaw` state), so compose runs
   only the worker. Diagnostics go to the repo's gitignored `diagnostics/` (macOS has no writable

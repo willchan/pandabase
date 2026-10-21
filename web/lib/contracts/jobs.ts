@@ -1,5 +1,6 @@
 // Media upload, audit jobs, worker leases and results (DESIGN §3.2, §5).
 import { z } from "zod";
+import { MERGE_SUGGEST_ITEMS } from "../config";
 import { ActorDiscordId, Cents, Id, LocalDate, Timestamp } from "./common";
 import { named } from "./registry";
 
@@ -115,6 +116,22 @@ export const TrashCamResult = named(
   }),
   "`result` of a completed trash_cam job.",
 );
+export const MergeSuggestItem = named(
+  "MergeSuggestItem",
+  z.object({
+    item_id: Id,
+    name: z.string().min(1).max(200),
+    /** Other names it went by: product titles and receipt texts. */
+    aliases: z.array(z.string()).max(20).optional(),
+  }),
+);
+export const MergeSuggestInput = named(
+  "MergeSuggestInput",
+  z.object({
+    items: z.array(MergeSuggestItem).min(MERGE_SUGGEST_ITEMS.min).max(MERGE_SUGGEST_ITEMS.max),
+  }),
+  "`input` of a merge_suggest job (set by the State Engine; the worker never reads the catalog).",
+);
 export const MergeSuggestResult = named(
   "MergeSuggestResult",
   z.object({
@@ -128,6 +145,26 @@ export const MergeSuggestResult = named(
     ),
   }),
   "`result` of a completed merge_suggest job.",
+);
+
+export const MergeSuggestRunRequest = named(
+  "MergeSuggestRunRequest",
+  z.object({
+    /** The member whose backfill finished (recorded on the jobs); optional. */
+    actor_discord_id: ActorDiscordId.optional(),
+  }),
+);
+export const MergeSuggestRunResponse = named(
+  "MergeSuggestRunResponse",
+  z.object({
+    /** Queued merge_suggest jobs: the new ones, or the ones already waiting. */
+    jobs: z.array(Job),
+    /** False when nothing new was queued (see `skipped`). */
+    created: z.boolean(),
+    skipped: z.enum(["already_queued", "no_candidates"]).nullable(),
+    /** Unverified, unmerged items sent for suggestions. */
+    candidates: z.number().int(),
+  }),
 );
 
 export const JobCompleteRequest = named(

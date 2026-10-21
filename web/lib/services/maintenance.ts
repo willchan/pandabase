@@ -1,6 +1,7 @@
 // Daily maintenance (`GET /api/cron/maintenance`, Vercel Cron): review expiries (§4.6), shelf-life
-// discards (§4.2), stale leases (§5), retention purges (§2.7), and the Monday-9am cycle fallback
-// (§4.7). Each step is idempotent, so a re-run the same day is harmless.
+// discards (§4.2), stale leases (§5), retention purges (§2.7), the Monday-9am cycle fallback
+// (§4.7) and the weekly merge suggestions (§4.5). Each step is idempotent, so a re-run the same day
+// is harmless.
 import {
   groceryCycle,
   idempotencyKey,
@@ -21,6 +22,7 @@ import { awayPeriods, loadEstimates, refreshInventoryState } from "../repo/inven
 import { emitTelemetry } from "../telemetry";
 import { openCycle } from "./cycles";
 import { releaseExpiredLeases } from "./jobs";
+import { scheduledMergeSuggestions } from "./mergeSuggest";
 import { newId } from "./receipts";
 import type { ServiceCtx } from "./types";
 
@@ -130,6 +132,8 @@ export async function runMaintenance(
     if (res.created) openedCycleId = res.cycle.id;
   }
 
+  const merges = await scheduledMergeSuggestions(db, ctx);
+
   const summary = {
     expired_reviews: expired,
     released_leases: leases.released,
@@ -138,6 +142,7 @@ export async function runMaintenance(
     purged_idempotency_keys: purgedIdem.rowsAffected,
     purged_telemetry: purgedTel.rowsAffected,
     opened_cycle_id: openedCycleId,
+    merge_suggest_jobs: merges.jobs.length,
   };
   await emitTelemetry(db, "cron", [{ metric: "maintenance_run", ...summary }], now);
   return summary;
