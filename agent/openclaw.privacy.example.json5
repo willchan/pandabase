@@ -1,0 +1,57 @@
+// OPTIONAL — README "Photo privacy", option A (recommended). The owner decides; nothing applies
+// this automatically.
+//
+// A dedicated `pandabase` agent answers #pandabase (and its cycle threads) with a model that
+// OpenClaw treats as text-only, so a photo whose local description failed is never attached to
+// a cloud request: OpenClaw injects images only into turns whose model is marked image-capable.
+// The PandaBase skills never need pixels (the local Ollama description is enough).
+//
+// The text-only model is your usual cloud model registered a second time under its own provider
+// id with `input: ["text"]`, so your other agents keep vision. Shown for Anthropic; for another
+// vendor use its `api` adapter and base URL (OpenClaw docs: gateway/config-tools/custom-providers).
+//
+// Apply like openclaw.pandabase.example.json5 (copy to agent/openclaw.privacy.json5, fill the
+// <…>, `openclaw config patch --file … --dry-run`, then for real). Then re-run the automations
+// as this agent:  OPENCLAW_AGENT=pandabase make install-agent-cron
+{
+  models: {
+    providers: {
+      "pandabase-text": {
+        baseUrl: "https://api.anthropic.com",
+        api: "anthropic-messages",
+        apiKey: "${ANTHROPIC_API_KEY}",
+        models: [{ id: "<MODEL_ID>", name: "<MODEL_ID> (text only)", input: ["text"] }],
+      },
+    },
+  },
+  agents: {
+    entries: {
+      pandabase: {
+        name: "PandaBase",
+        workspace: "~/.openclaw/workspace-pandabase",
+        model: "pandabase-text/<MODEL_ID>",
+        skills: [
+          "grocery-cycle",
+          "discord-intake",
+          "digital-receipt-scraper",
+          "item-lookup",
+          "telemetry-aggregator",
+        ],
+      },
+    },
+  },
+  // A peer binding wins over channel-wide ones. If `pandabase` is your gateway's second agent,
+  // also bind your existing agent for everything else (sole-agent fallback stops applying), e.g.
+  //   { agentId: "<YOUR_MAIN_AGENT_ID>", match: { channel: "discord", accountId: "*" } }
+  // and one such entry per other channel you use. Arrays replace: merge with existing bindings.
+  bindings: [
+    {
+      agentId: "pandabase",
+      match: {
+        channel: "discord",
+        guildId: "<GUILD_ID>",
+        peer: { kind: "channel", id: "<PANDABASE_CHANNEL_ID>" },
+      },
+    },
+  ],
+}

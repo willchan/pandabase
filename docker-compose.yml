@@ -1,0 +1,39 @@
+# PandaBase on the Mac Mini (DESIGN §1, §8). Only the worker runs here: Ollama runs natively
+# (Metal; Docker on macOS has no GPU), and OpenClaw is the household's existing native agent
+# (PLAN M8 Notes). Secrets come from the repo-root `.env` (`make secrets`; never committed).
+#
+#   make up      # build + start (docker compose up -d --build)
+#   make logs    # follow the worker's logs
+#
+# M9 switches `image` to the GHCR tag (PANDABASE_WORKER_IMAGE / PANDABASE_WORKER_TAG) and moves
+# `build` into an override file; until then the image is built locally from ./worker.
+name: pandabase
+
+services:
+  worker:
+    build: ./worker
+    image: ${PANDABASE_WORKER_IMAGE:-pandabase-worker}:${PANDABASE_WORKER_TAG:-local}
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false # `docker compose config` works on a fresh checkout
+    environment:
+      # The container reaches the host's Ollama through Docker's host gateway.
+      OLLAMA_URL: ${OLLAMA_URL:-http://host.docker.internal:11434}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    # SIGTERM finishes the in-flight job (a job lease is 5 min), then exits 0.
+    stop_grace_period: 5m
+    # Stateless: no ports, no volumes, nothing written to disk.
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"

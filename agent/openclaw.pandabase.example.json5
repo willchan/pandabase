@@ -1,0 +1,70 @@
+// PandaBase's additions to the OpenClaw gateway config (README step 11; PLAN M7/M8 Notes).
+// Copy to agent/openclaw.pandabase.json5 (gitignored), replace every <…>, then apply:
+//
+//   openclaw gateway stop
+//   openclaw config patch --file agent/openclaw.pandabase.json5 --dry-run   # review the diff
+//   openclaw config patch --file agent/openclaw.pandabase.json5
+//   openclaw gateway start
+//
+// Arrays are replaced, not merged: if your config already has `tools.media.models` (e.g. an audio
+// transcriber) or `models.providers.ollama.models`, add these entries to your lists by hand.
+{
+  channels: {
+    discord: {
+      // Needed to read unmentioned messages in #pandabase and in the cycle threads.
+      intents: { messageContent: true },
+      guilds: {
+        "<GUILD_ID>": {
+          // A channel map is an allowlist: keep "*" so the bot still answers when mentioned
+          // elsewhere ("do we have eggs?").
+          channels: {
+            "<PANDABASE_CHANNEL_ID>": {
+              enabled: true,
+              requireMention: false,
+              // Cycle threads are bot-created; follow-ups there shouldn't need a mention.
+              requireMentionInBotThreads: false,
+              users: ["<MEMBER_1_DISCORD_ID>", "<MEMBER_2_DISCORD_ID>"],
+            },
+            "*": { requireMention: true },
+          },
+        },
+      },
+    },
+  },
+
+  // Local vision for inbound photos (PRD §3.6, DESIGN §6): OpenClaw describes each photo with the
+  // same Ollama VLM the worker uses, and the reply model gets that text instead of the pixels.
+  // Residual risk and the mitigation: README "Photo privacy" (agent/openclaw.privacy.example.json5).
+  models: {
+    providers: {
+      ollama: {
+        models: [
+          {
+            id: "qwen3.5:9b",
+            name: "qwen3.5:9b",
+            input: ["text", "image"],
+            // Small context + short keep-alive: the model unloads soon after, like the worker's.
+            params: { num_ctx: 8192, keep_alive: "2m" },
+          },
+        ],
+      },
+    },
+  },
+  tools: {
+    media: {
+      models: [
+        { provider: "ollama", model: "qwen3.5:9b", capabilities: ["image"], timeoutSeconds: 180 },
+      ],
+      image: { preferredModel: "ollama/qwen3.5:9b" },
+    },
+  },
+
+  // Tier-2 cart fallback: the agent's browser attaches to each member's running Chromium (the
+  // LaunchAgents from `make install-chromium`) and never launches its own. Ports = profiles.json.
+  browser: {
+    profiles: {
+      "pandabase-<member1>": { cdpUrl: "http://127.0.0.1:9222", attachOnly: true },
+      "pandabase-<member2>": { cdpUrl: "http://127.0.0.1:9223", attachOnly: true },
+    },
+  },
+}

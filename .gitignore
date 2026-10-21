@@ -48,3 +48,6 @@ __pycache__/
 .next-e2e/
 playwright-report/
 test-results/
+# Mac Mini ops (make secrets / README): real OpenClaw patches with ids filled in
+/agent/openclaw.pandabase.json5
+/agent/openclaw.privacy.json5

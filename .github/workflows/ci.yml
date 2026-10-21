@@ -109,8 +109,25 @@ jobs:
       - run: uv run pytest
 
   worker-image:
-    # The worker's Docker image (python slim + ffmpeg, non-root) builds.
+    # The worker's Docker image (python slim + ffmpeg, non-root) builds, through the compose file
+    # the Mac Mini uses (PLAN M8 acceptance: docker compose config + build).
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - run: docker build -t pandabase-worker worker
+      - run: docker compose config --quiet
+      - run: docker compose build
+
+  ops:
+    # Mac Mini ops (PLAN M8): shellcheck, compose file, make dry runs, smoke helpers' ruff/mypy.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
+        with:
+          version: "0.13.3"
+          enable-cache: true
+          cache-dependency-glob: |
+            worker/uv.lock
+            agent/tools/uv.lock
+      - run: (cd worker && uv sync --locked) && (cd agent/tools && uv sync --locked)
+      - run: make ops-check

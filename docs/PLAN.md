@@ -36,10 +36,10 @@ contracts.
 | M2 Schema & seed | done | #3 |
 | M3 Domain logic | done | #4 |
 | M4 API & contracts | done | #5 |
-| M5 Web UI & auth | in review | #10 |
-| M6 Python worker | in review | #8 |
-| M7 Agent skill pack & tools | in review | |
-| M8 Ops, compose, README | todo | |
+| M5 Web UI & auth | done | #10 |
+| M6 Python worker | done | #8 |
+| M7 Agent skill pack & tools | done | #9 |
+| M8 Ops, compose, README | in review | |
 | M9 Continuous deployment | todo | |
 
 ---
@@ -820,7 +820,108 @@ make -n smoke backfill install-agent-skills
 Plus a fresh-eyes review: someone following README from zero has no missing step (list any manual
 steps that can't be scripted).
 
-**Notes:** —
+**Notes:**
+
+*OpenClaw docs re-read* (repo `docs/` at `193d1f9`, 2026-10-20) for the config M8 writes:
+`openclaw config set|patch` need the gateway **stopped**; `config get <path> --json` (failure
+envelope when unset); `config file --json` → `{path}`; the gateway loads `~/.openclaw/.env`
+(never overriding set vars); `automations list --all --json`, `add`, `edit <id>` (same flags),
+`--command` runs `sh -lc` inside the gateway; `tools.media.models` + `models.providers.ollama.
+models[{input: ["text","image"]}]` (OpenClaw's own Ollama-vision example, plus `OLLAMA_API_KEY=
+ollama-local`); `models.providers.*.models.*.input: ["text"]` → images are not injected into that
+model's turns; multi-agent `bindings[]` with `match.peer {kind: "channel", id}`.
+
+*Deviations / choices (DESIGN §1.2, §6, §8 "Mac Mini operations", §9, §10 #41–43 updated):*
+- **No `openclaw` compose service and no `/diagnostics` volume.** DESIGN §1 has OpenClaw native
+  (the household's existing agent: host Chromium over CDP, `~/.openclaw` state), so compose runs
+  only the worker. Diagnostics go to the repo's gitignored `diagnostics/` (macOS has no writable
+  `/diagnostics`): `make install-agent-tools` writes that path into `pandabase.config.json`, and
+  CLAUDE.md's playbook says so. The worker needs no volume (`read_only` + `/tmp` tmpfs).
+- **Secrets split:** `.env` (Mac Mini: the two machine tokens + settings, from
+  `ops/mac.env.example`) and `.env.vercel` (`AUTH_SECRET`, `CRON_SECRET`); `make vercel-env`
+  pushes all four without printing them. The repo-root `.env.example` stays the web dev template.
+- **Member bootstrap gap** (fresh-eyes finding): sign-in needs a `member` row and the UI can't
+  create one, so a new production DB was unusable. Added `pnpm db:add-member` (`db/src/
+  add-member.ts` + test; touches M2's `db/`, called out in the PR).
+- **Skills env** goes to `~/.openclaw/.env` (and `PATH` via a `pandabase-tools` symlink in
+  `BIN_DIR`, default `~/.local/bin`) rather than `skills.entries.*.env`, so the token isn't in
+  `openclaw.json`. The job-replies command automation runs `scripts/ops/agent-run.sh`, which reads
+  the token from `.env`, so it isn't in OpenClaw's automation DB either (no `--command-env`).
+- **Cron:** receipt sweeps are generated per member from `receipt_sweep` (daily 21:00, weekly
+  Sun 21:00) instead of the example's fixed names; the other jobs come from `cron.example.json`.
+  `OPENCLAW_AGENT=<id>` adds `--agent` (for the privacy option A agent).
+- **Gateway config** (Discord channel policy, Ollama media model, attach-only browser profiles)
+  is a reviewed `openclaw config patch` file, `agent/openclaw.pandabase.example.json5`, not a
+  script: it touches the family agent's config and arrays in a patch replace existing lists.
+- **Ollama host env** persists through a LaunchAgent (`make install-ollama-env`):
+  `launchctl setenv` doesn't survive a reboot.
+- **Smoke** differs from the M5–M7 lists where a check would change data: `jobs replies` runs
+  only when no replies are pending (it marks jobs notified); the M6 end-to-end job is opt-in
+  (`SMOKE_E2E=1`), uses a blank Trash Cam photo (an empty detection list → one Trash Cam review,
+  no inventory effect) and marks itself notified; the tier-1 cart check is opt-in
+  (`SMOKE_CART=1` + ASINs), refuses ASINs already in the cart, and deletes what it added. Added
+  checks: Ollama host settings, loopback-only CDP listener (`lsof`), worker container running.
+  Job completion is read from `/api/jobs/notifications` (there's no job GET route; `model`/
+  `prompt_version` aren't in the agent contract, so the check reports status + summary).
+- `make update` = `git pull --ff-only` (refuses local edits to tracked files) → `uv sync --locked`
+  (tools) → `docker compose up -d --build --remove-orphans`, printing the before/after sha.
+- New CI job `ops` (`make ops-check`: shellcheck, `docker compose config`, `make -n` of the ops
+  targets, ruff/mypy of the two smoke helpers), also part of `make check`. `worker-image` now
+  builds through `docker compose build`.
+- **R2 lifecycle:** none in v1 (photos/keyframes kept forever). R2 rules filter by prefix, not
+  extension, so v1.1 video should use its own prefix (e.g. `media/video/`) for the 90-day rule.
+
+*Photo privacy — decided (owner, 2026-10-21): option C with a local reply model.*
+`tools.media.models` → local `ollama/qwen3.5:9b` is in the base patch. Residual risk
+(OpenClaw-documented): a photo whose local description fails is delivered natively to an
+image-capable reply model. The owner will run OpenClaw's reply model locally on Ollama, so that
+fallback stays on the Mac and there's no residual risk, provided no cloud model is configured as
+a fallback (no cloud provider keys). Consequences: the reply model shares Ollama with the VLM, so
+with `OLLAMA_MAX_LOADED_MODELS=1` a photo swaps models (raise it to 2 if both fit); and a small
+local model may struggle with tier-2 cart browsing, so watch the first Saturday builds. Option A
+(`agent/openclaw.privacy.example.json5`) and B stay documented in README *Photo privacy* for a
+cloud reply model.
+
+*Acceptance (local, 2026-10-20):* `docker compose config` ✓; `make -n smoke backfill
+install-agent-skills` ✓; `docker compose build` ✗ **in this sandbox only**: Docker Hub HEAD
+requests are rate-limited (429; the base image was pulled through `mirror.gcr.io` instead), and
+inside the build PyPI fails TLS behind the sandbox proxy and `deb.debian.org` is blocked — the
+same limits M6 hit. CI's `worker-image` job runs `docker compose build`. `make check` ✓
+(incl. the new `ops-check`; db tests 95 incl. `add-member.test.ts`).
+Scripts were exercised against stubs (`openclaw`, `launchctl`, a fake `pandabase-tools`, a fake
+Ollama HTTP server): `make secrets` twice (second run keeps everything), install-agent-tools /
+-skills / -cron / -chromium / -ollama-env twice each (second run is a no-op; cron edits by name),
+`make backfill` (resume, busy-lock wait, completion), `make smoke` against a local `next dev`
+(api ✓, replies → `NO_REPLY` ✓, wrong token → ✗ "invalid token", CDP attach to a headless
+Chromium on 127.0.0.1:9222 ✓ up to Amazon being unreachable here), `vlm_check.py` on the host
+against the fake Ollama (✓, and ✗ when unreachable).
+
+*Not verifiable here (verify on the Mac Mini; the first `make smoke` covers most):* the JSON shape
+of `openclaw automations list --json` (the script accepts an array or `{jobs|automations: […]}`);
+whether a `#pandabase` peer binding also routes its threads (README says to check); whether a
+text-only model still receives Discord attachment paths (option A's verify step); Amazon's cart
+Delete control and the Whole Foods cart URL in `cart_check.py` (overridable with
+`SMOKE_WF_CART_URL`; a failed delete is reported with the ASIN to remove by hand); `vercel env
+ls` output parsing; launchd/plutil on real macOS.
+
+*Fresh-eyes pass over README (from zero):* found and fixed — no way to create members (→
+`db:add-member`); `/diagnostics` not writable on macOS; gateway `PATH` may lack `~/.local/bin`
+(→ `BIN_DIR` hint); private-repo clone auth; Ollama env lost on reboot (→ LaunchAgent); auto-login
+needed for the LaunchAgents/Chromium after a power cut; the OpenClaw patch hardcodes the VLM name;
+Discord Message Content Intent. Remaining manual steps are listed in README *Manual steps that
+can't be scripted*.
+
+*For M9:*
+- `make update` → `scripts/ops/update.sh` is the procedure to wrap; it needs a clean tracked tree
+  and prints the before/after sha (rollback = checkout + `make up`). It uses `--build`: switch to
+  `docker compose pull && up -d` once the image comes from GHCR.
+- Compose `image:` is already `${PANDABASE_WORKER_IMAGE:-pandabase-worker}:${PANDABASE_WORKER_TAG:-local}`;
+  set the default to `ghcr.io/willchan/pandabase-worker` / `main` and move `build: ./worker` into
+  an override file.
+- Health check inputs: `make smoke SMOKE_ONLY="api worker"` is a quick post-deploy check (agent
+  token round trip + container running); the worker heartbeat telemetry (M6) needs a read path.
+- `scripts/ops/lib.sh` has `run`/`DRY_RUN`, `env_get`/`env_set` and the agent env loader to reuse.
+- Every new script: add it to `ops-check`'s shellcheck glob (scripts/deploy/ is not covered yet).
 
 ---
 

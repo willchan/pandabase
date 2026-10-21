@@ -16,6 +16,7 @@
     "check": "drizzle-kit check",
     "migrate": "tsx src/migrate.ts",
     "migrate:prod": "tsx src/migrate.ts --prod",
+    "add-member": "tsx src/add-member.ts",
     "seed": "tsx src/seed.ts",
     "reset": "tsx src/reset.ts",
     "rebuild-state": "tsx src/rebuild-state.ts"

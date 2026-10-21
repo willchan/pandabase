@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  PandaBase: Ollama memory settings for the Mac Mini (DESIGN §1.2, README "Memory budget").
+  The Ollama app reads its environment from launchd, and `launchctl setenv` doesn't survive a
+  reboot, so this sets them again at every login. Installed by `make install-ollama-env`.
+  If OpenClaw's own reply model also runs on this Ollama, raise MAX_LOADED_MODELS to 2.
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.pandabase.ollama-env</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/sh</string>
+    <string>-c</string>
+    <string>/bin/launchctl setenv OLLAMA_NUM_PARALLEL 1; /bin/launchctl setenv OLLAMA_MAX_LOADED_MODELS 1</string>
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+</dict>
+</plist>
