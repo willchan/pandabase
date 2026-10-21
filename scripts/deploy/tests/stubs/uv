@@ -1,0 +1,2 @@
+#!/usr/bin/env bash
+printf 'uv %s\n' "$*" >>"$STUB/calls"

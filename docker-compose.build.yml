@@ -1,0 +1,11 @@
+# Local build of the worker instead of the GHCR image (CI's worker-image job, `make up-local`):
+#   docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
+# Not named docker-compose.override.yml on purpose: compose would load that automatically, and
+# the Mac Mini must run the image CI published.
+services:
+  worker:
+    build:
+      context: ./worker
+      args:
+        GIT_SHA: ${GIT_SHA:-}
+    image: pandabase-worker:local

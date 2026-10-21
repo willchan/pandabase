@@ -2586,6 +2586,64 @@
           "expires_at"
         ],
         "type": "object"
+      },
+      "WorkerHealthResponse": {
+        "properties": {
+          "heartbeat": {
+            "properties": {
+              "at": {
+                "format": "date-time",
+                "type": "string"
+              },
+              "ollama_ok": {
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              },
+              "sha": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "text_model": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "version": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "vlm_model": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "at",
+              "version",
+              "sha",
+              "vlm_model",
+              "text_model",
+              "ollama_ok"
+            ],
+            "type": [
+              "object",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "heartbeat"
+        ],
+        "type": "object"
       }
     },
     "securitySchemes": {
@@ -3807,6 +3865,82 @@
           }
         ],
         "summary": "Agent-observed prices for candidate products",
+        "x-scopes": [
+          "agent"
+        ]
+      }
+    },
+    "/api/health/worker": {
+      "get": {
+        "operationId": "getWorkerHealth",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerHealthResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Wrong scope, or unknown actor_discord_id"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict (e.g. invalid cycle transition, stale job attempt)"
+          }
+        },
+        "security": [
+          {
+            "agent": []
+          }
+        ],
+        "summary": "Latest worker heartbeat (time, version, build sha, models, ollama_ok) or null",
         "x-scopes": [
           "agent"
         ]

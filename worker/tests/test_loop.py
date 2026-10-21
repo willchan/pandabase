@@ -9,9 +9,10 @@ from datetime import timedelta
 
 import httpx
 import pytest
-from conftest import Rig, fixture, receipt_image
+from conftest import API, TOKEN, Rig, fixture, receipt_image
 from PIL import Image
 
+from pandabase_worker.config import Settings
 from pandabase_worker.main import install_signal_handlers
 
 MERGE_INPUT = {
@@ -307,6 +308,7 @@ def test_heartbeat_at_startup_and_every_ten_minutes(rig: Rig) -> None:
     assert len(beats) == 2
     assert beats[0] == {
         "version": "0.0.0",
+        "sha": None,  # local build: no PANDABASE_BUILD_SHA
         "vlm_model": "qwen3.5:9b",
         "text_model": "qwen3.5:4b",
         "ollama_ok": None,  # not checked yet
@@ -316,3 +318,10 @@ def test_heartbeat_at_startup_and_every_ten_minutes(rig: Rig) -> None:
     now[0] += 600
     rig.worker.heartbeat()
     assert rig.engine.metrics("worker_heartbeat")[-1]["ollama_ok"] is False
+
+
+def test_heartbeat_reports_the_image_build_sha() -> None:
+    # The deploy health check (scripts/deploy/mac-update.sh) waits for a heartbeat from this sha.
+    env = {"PANDABASE_API_URL": API, "WORKER_API_TOKEN": TOKEN, "PANDABASE_BUILD_SHA": "abc123"}
+    assert Settings.from_env(env).build_sha == "abc123"
+    assert Settings.from_env({**env, "PANDABASE_BUILD_SHA": ""}).build_sha is None

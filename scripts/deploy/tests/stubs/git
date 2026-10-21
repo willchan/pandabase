@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# git stub: HEAD in $STUB/head, origin/main's first-parent history (oldest first) in $STUB/commits.
+printf 'git %s\n' "$*" >>"$STUB/calls"
+head="$(cat "$STUB/head")"
+origin="$(tail -1 "$STUB/commits")"
+case "$1" in
+  status) cat "$STUB/dirty" 2>/dev/null; exit 0 ;;
+  fetch) [ -f "$STUB/fetch-fails" ] && { echo "fatal: unable to access" >&2; exit 128; }; exit 0 ;;
+  rev-parse)
+    shift
+    case "$*" in
+      "--abbrev-ref HEAD") cat "$STUB/branch" 2>/dev/null || echo main ;;
+      "HEAD") echo "$head" ;;
+      "--short HEAD") echo "${head:0:7}" ;;
+      "origin/main") echo "$origin" ;;
+      --verify*) s="${2%^\{commit\}}"; grep -x "$s" "$STUB/commits" || { echo "fatal: bad revision" >&2; exit 128; } ;;
+      *) echo "git stub: rev-parse $*" >&2; exit 2 ;;
+    esac
+    ;;
+  rev-list)
+    # rev-list --first-parent --max-count=N HEAD..origin/main → newer than HEAD, newest first
+    max="${3#--max-count=}"
+    awk -v h="$head" -v max="$max" 'found { l[n++] = $0 } $0 == h { found = 1 }
+      END { for (i = n - 1; i >= 0 && n - i <= max; i--) print l[i] }' "$STUB/commits"
+    ;;
+  merge | reset) echo "${@: -1}" >"$STUB/head" ;;
+  *) echo "git stub: $*" >&2; exit 2 ;;
+esac

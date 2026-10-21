@@ -1,6 +1,7 @@
 # Thin wrappers over pnpm/uv. Targets marked "stub" are filled in by the milestone named.
 .PHONY: install dev lint typecheck test check py-check db-reset db-seed db-check contracts contracts-check \
-	secrets vercel-env up down logs update install-agent-tools install-agent-skills install-agent-cron \
+	secrets vercel-env up up-local down logs update update-pause update-resume update-status rollback \
+	install-update-timer deploy-test migrations-check install-agent-tools install-agent-skills install-agent-cron \
 	install-chromium install-ollama-env backfill smoke ops-check
 
 PY_PROJECTS := worker agent/tools
@@ -63,8 +64,13 @@ secrets:
 vercel-env:
 	scripts/ops/vercel-env.sh
 
+# The worker image CI published (PANDABASE_WORKER_TAG in .env; `make update` pins it).
 up:
-	docker compose up -d --build
+	docker compose up -d
+
+# Build ./worker locally instead (docker-compose.build.yml).
+up-local:
+	docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
 
 down:
 	docker compose down
@@ -72,9 +78,26 @@ down:
 logs:
 	docker compose logs -f --tail=200 worker
 
-# Manual update: git pull --ff-only, uv sync, docker compose up -d --build (M9 wraps this).
+# Continuous deployment (PLAN M9): newest green main → pull → health check → rollback on failure.
+# The launchd timer (install-update-timer) runs it every 15 min; DRY_RUN=1 prints instead.
 update:
-	scripts/ops/update.sh
+	scripts/deploy/mac-update.sh
+
+update-pause:
+	scripts/deploy/mac-update.sh pause
+
+update-resume:
+	scripts/deploy/mac-update.sh resume
+
+update-status:
+	scripts/deploy/mac-update.sh status
+
+# Roll back by hand (TO=<sha>, default: the sha before the last update); pauses auto-update.
+rollback:
+	scripts/deploy/mac-update.sh rollback $(TO)
+
+install-update-timer:
+	scripts/ops/install-update-timer.sh
 
 # uv sync agent/tools, link pandabase-tools into BIN_DIR, create agent configs from examples.
 install-agent-tools:
@@ -104,11 +127,24 @@ backfill:
 smoke:
 	scripts/smoke/run.sh
 
-# Ops scripts lint clean, compose file valid, smoke helpers pass the projects' ruff/mypy (CI: ops).
-ops-check:
-	shellcheck -x scripts/ops/*.sh scripts/smoke/*.sh
+# Deploy scripts' tests (git/docker/network stubbed) and the backward-compatible-migration check.
+deploy-test:
+	bats scripts/deploy/tests
+
+MIGRATIONS_BASE ?= origin/main
+migrations-check:
+	scripts/deploy/check-migrations.sh --base $(MIGRATIONS_BASE)
+
+# Ops scripts lint clean, compose files and plists valid, workflows lint clean, deploy tests pass,
+# smoke helpers pass the projects' ruff/mypy (CI: ops).
+ops-check: deploy-test migrations-check
+	shellcheck -x scripts/ops/*.sh scripts/smoke/*.sh scripts/deploy/*.sh
+	actionlint .github/workflows/*.yml
 	docker compose config --quiet
-	$(MAKE) -s -n smoke backfill install-agent-skills update >/dev/null
+	docker compose -f docker-compose.yml -f docker-compose.build.yml config --quiet
+	xmllint --noout ops/launchd/*.plist
+	python3 -c 'import plistlib, sys; [plistlib.load(open(f, "rb")) for f in sys.argv[1:]]' ops/launchd/*.plist
+	$(MAKE) -s -n smoke backfill install-agent-skills update install-update-timer >/dev/null
 	cd agent/tools && uv run ruff check --config pyproject.toml ../../scripts/smoke/cart_check.py && \
 	  uv run ruff format --check --config pyproject.toml ../../scripts/smoke/cart_check.py && \
 	  uv run mypy ../../scripts/smoke/cart_check.py

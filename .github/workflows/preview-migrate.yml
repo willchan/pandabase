@@ -1,0 +1,43 @@
+name: Preview migrate
+
+# Migrate the shared Turso `pandabase-preview` DB for PRs that add migrations (PLAN M9). Vercel's
+# Git integration builds the preview in parallel; that's safe because nothing touches the DB at
+# build time (API routes are never prerendered, DESIGN §3) — the preview needs the schema only
+# when it serves requests, a minute after this finishes. Migrations are additive (CLAUDE.md), so
+# a PR that never merges leaves only unused columns/tables behind; reset the preview DB if it drifts.
+
+on:
+  pull_request:
+    paths: [db/migrations/**]
+
+concurrency:
+  group: preview-migrate
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  migrate-preview:
+    # Secrets aren't available to fork PRs; this household repo has none.
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    environment: preview
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Migrate pandabase-preview
+        run: |
+          if [ -z "$TURSO_DATABASE_URL" ] || [ -z "$TURSO_AUTH_TOKEN" ]; then
+            echo "::notice::preview environment has no TURSO_* secrets yet (README); skipping"
+            exit 0
+          fi
+          pnpm db:migrate:prod
+        env:
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}

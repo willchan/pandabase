@@ -75,7 +75,9 @@ docker build -t pandabase-worker worker   # worker image (CI job worker-image)
 (cd agent/tools && uv run pandabase-tools --help)   # agent CLI used by the skills (JSON on stdout)
 (cd agent/tools && uv run pytest tests/test_skills.py)   # skill frontmatter + every command a skill names parses
 make check                   # everything CI runs
-make ops-check               # shellcheck scripts/, docker compose config, make dry runs, smoke helpers' ruff/mypy
+make ops-check               # shellcheck, actionlint, compose/plists, deploy bats tests, migration check, smoke ruff/mypy
+bats scripts/deploy/tests    # Mac Mini updater + migration check (git/docker/network stubbed)
+scripts/deploy/check-migrations.sh --base origin/main   # new migrations must not DROP/RENAME (unless marked)
 ```
 
 Mac Mini ops (README has the order; every script is idempotent and honours `DRY_RUN=1`):
@@ -83,8 +85,10 @@ Mac Mini ops (README has the order; every script is idempotent and honours `DRY_
 ```
 make secrets                 # .env + .env.vercel: generate missing tokens (never prints values)
 make vercel-env              # add those secrets to the linked Vercel project
-make up / make logs / make down          # worker via docker compose
-make update                  # git pull --ff-only, uv sync (tools), docker compose up -d --build
+make up / make logs / make down          # worker via docker compose (GHCR image; make up-local builds ./worker)
+make update                  # CD: newest green main → pull → health check → auto-rollback (DRY_RUN=1 prints)
+make update-status / update-pause / update-resume / rollback [TO=sha]
+make install-update-timer    # launchd: make update every 15 min (needs docker login ghcr.io)
 make install-agent-tools     # agent/tools venv, pandabase-tools on PATH, configs from examples
 make install-agent-skills    # skills.load.extraDirs += agent/skills (backs up openclaw.json)
 make install-agent-cron      # OpenClaw automations (list, then edit or add)

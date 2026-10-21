@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# docker stub: images in $STUB/published exist in GHCR; the worker runs unless $STUB/worker-down.
+printf 'docker %s\n' "$*" >>"$STUB/calls"
+case "$1 $2" in
+  "manifest inspect") grep -qx "${3##*:}" "$STUB/published" 2>/dev/null ;;
+  "compose ps") [ -f "$STUB/worker-down" ] || echo worker ;;
+  "compose pull") [ ! -f "$STUB/pull-fails" ] ;;
+  "compose up") exit 0 ;;
+  *) echo "docker stub: $*" >&2; exit 2 ;;
+esac

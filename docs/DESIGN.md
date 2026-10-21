@@ -281,6 +281,7 @@ All routes under `/web/app/api`. Payloads defined once as **Zod schemas** in `we
 | `POST /api/jobs/claim` | worker | Lease next queued job (+ presigned media GET and keyframe PUT URLs); `{job: null}` when empty |
 | `POST /api/jobs/complete` | worker | Result or failure for the claimed attempt (`attempt` echoed; stale → 409) |
 | `POST /api/telemetry` | agent, worker | Telemetry events (batched) |
+| `GET /api/health/worker` | agent | Latest `worker_heartbeat`: `{heartbeat: {at, version, sha, vlm_model, text_model, ollama_ok} \| null}` (worker-sourced rows only). The Mac Mini deploy health check (§8) waits for one from the new image's `sha` |
 | `GET /api/diagnostics/weekly?week=` | agent | Rendered Markdown + JSONL extracts |
 | `GET /api/cron/maintenance` | cron | Expire review items, shelf-life discards, release stale leases, purge idempotency/telemetry, open an overdue cycle, weekly merge suggestions (§4.5) |
 
@@ -738,12 +739,16 @@ errors, complete}` (stored for ad-hoc queries; no report section). The worker's 
 `vlm_parse_failure` also carry `job_id`, `job_type`, `attempt`, `repaired` and per-type fields
 (receipts `lines`, `discount_lines`, `date_fallback`, `store_missing`; Trash Cam `detections`,
 `top_confidence`; merges `items`, `suggestions`, `dropped`), all copied into the `vlm` extract.
-Worker health metrics: `worker_heartbeat {version, vlm_model,
-text_model, ollama_ok}` (at startup and every 10 min; `ollama_ok` null until first checked; the
-report's worker-health table reads it),
+Worker health metrics: `worker_heartbeat {version, sha, vlm_model,
+text_model, ollama_ok}` (at startup and every 10 min; `sha` = the image's `PANDABASE_BUILD_SHA`,
+null for local builds; `ollama_ok` null until first checked; the report's worker-health table and
+`GET /api/health/worker` read it),
 `worker_ollama_unavailable {reason,
 missing_models}`, `worker_job_failed {job_id, job_type, attempt, error}`, `worker_lease_lost`,
-`worker_complete_error {error}`.
+`worker_complete_error {error}`. Deploys (§8): `deploy {component: migrate|web|worker_image|mac_mini,
+sha, outcome, previous_sha?, reason?, run_url?, host?}` — posted with the agent token by
+`deploy.yml` (outcome = the job status) and by the Mac Mini updater (`success`, `rolled_back`,
+`rollback_failed`, `manual_rollback`).
 
 **Weekly report** — rendered by the app (`web/lib/diagnostics/`), written by the agent to
 `/diagnostics/YYYY-Www.md` with extracts in `/diagnostics/YYYY-Www/*.jsonl`. Fixed sections, each
@@ -762,13 +767,15 @@ missing_models}`, `worker_job_failed {job_id, job_type, attempt, error}`, `worke
 6. Cart injection (tier-1 success, tier-2 fallbacks, failures with selector/error)
 7. UX friction (expired items, answered reviews by kind/outcome with median age, clarifying
    questions, slow routes)
-8. Data appendix (extract paths, keyframe R2 keys)
+8. Deploys (per component: deploys, succeeded, failed/rolled back; Mac Mini rollbacks; every
+   `deploy` row with its sha and reason)
+9. Data appendix (extract paths, keyframe R2 keys)
 
 `GET /api/diagnostics/weekly?week=` (default: the last complete household-TZ ISO week) returns
 `{week, markdown, extracts:[{name, jsonl}]}`; extracts are `velocity`, `receipt_lines`, `vlm`,
 `product_choice`, `cart_injection`, `ux` (`.jsonl`), always present. The summary ranks findings
 (cart failures and tier-1 rate below 90% first, then paper exact-alias rate below 70%, totals-check
-failures, server errors and worker silence (no heartbeat, or a gap), then Ollama unreachable, overbuys, estimate error, pending lines, failed jobs, overrides,
+failures, server errors, failed Mac Mini rollbacks and worker silence (no heartbeat, or a gap), then Ollama unreachable, failed or rolled-back deploys, overbuys, estimate error, pending lines, failed jobs, overrides,
 then expired reviews, slow routes over `diagnostics.slowRouteMs` and merge suggestions mostly
 rejected (≥ 5 answered, < 50% accepted)) and keeps the top 3.
 
@@ -786,17 +793,58 @@ Timestamps stored UTC; `HOUSEHOLD_TZ=America/Los_Angeles` defines "today" and sc
 
 ### Continuous deployment (M9)
 
-- **Web:** GitHub Actions `deploy.yml`, after CI passes on `main`: migrate Turso production →
-  `vercel deploy --prod`. Vercel's own production auto-deploy is off so code never ships before its
-  migration. Previews stay on Vercel's Git integration against `pandabase-preview`.
+- **Web:** `.github/workflows/deploy.yml` runs on `workflow_run` of CI completing on `main`
+  (only `success`, only `push` events from this repo), in the GitHub environment `production`
+  and one concurrency group `deploy-production` (no cancel: deploys queue in order and never
+  overlap): **migrate** (`pnpm db:migrate:prod`) → **deploy-web** (`vercel deploy --prod`,
+  remote build with the project's settings, `VERCEL_TOKEN`/`VERCEL_ORG_ID`/`VERCEL_PROJECT_ID`)
+  → **publish-worker** (buildx, `linux/arm64`, `ghcr.io/willchan/pandabase-worker:{sha,main}`,
+  `GIT_SHA` build arg; `packages: write` in that job only). Every job checks out the CI run's
+  `head_sha`, workflows default to `contents: read`, third-party actions are pinned to a major,
+  and secrets only reach the CLI that needs them (`emit-deploy.sh` and the updater hand tokens
+  and webhook URLs to `curl -K -` on stdin). Each job ends with `deploy` telemetry
+  (`scripts/deploy/emit-deploy.sh`, never fails the job). Vercel's production auto-deploy is off
+  (`web/vercel.json` `git.deploymentEnabled.main: false`) so code never ships before its migration.
+- **Previews:** Vercel's Git integration builds PRs against `pandabase-preview`;
+  `preview-migrate.yml` migrates that DB (GitHub environment `preview`) for PRs that touch
+  `db/migrations/`. The two run in parallel, which is fine because nothing touches the DB at
+  build time (API routes are never prerendered, §3): the preview needs the schema only when it
+  serves requests.
 - **Migrations are backward-compatible** (expand → contract): the previous release must run on the
-  new schema, so a failed deploy after a successful migration leaves production working.
-- **Mac Mini — pull, never push:** CI publishes the worker image to GHCR on green `main`. A `launchd`
-  timer runs `make update` every 15 min: newer green sha → `git pull` (OpenClaw loads the skills
-  straight from the repo via `skills.load.extraDirs`, so they update too) → `uv sync` → `docker compose pull && up -d` → health check → automatic rollback to the
-  previous sha/image on failure, with one `#pandabase` post. No inbound ports; no self-hosted runner.
-- **Quiet windows:** no Mac Mini updates Fri 17:30–19:00 or Sat 09:30–12:00 (household TZ), around
-  the nudge and cart build.
+  new schema, so a failed deploy after a successful migration leaves production working. CI's ops
+  job runs `scripts/deploy/check-migrations.sh`: a migration *added* by the PR that contains
+  `DROP TABLE`, `DROP COLUMN` or `RENAME` (comments ignored; Drizzle's SQLite table rebuild
+  included) fails unless the file has `-- contract-migration: <reason>` or the PR the
+  `contract-migration` label.
+- **Mac Mini — pull, never push:** `ops/launchd/com.pandabase.update.plist` (a LaunchAgent, so
+  Docker's keychain credentials work; installed by `make install-update-timer`) runs
+  `scripts/deploy/mac-update.sh` (= `make update`) every 15 min:
+  1. take the lock (`.deploy/update.lock`, `mkdir`-atomic with the owner's pid; a dead pid's lock
+     is taken over), exit if paused (`.deploy/paused`) or inside a quiet window; require a clean
+     checkout on `main`;
+  2. `git fetch`; target = the newest first-parent commit in `HEAD..origin/main` (≤ 20) whose
+     `ghcr.io/…:<sha>` exists (`docker manifest inspect` with a `read:packages` token) and which
+     isn't in `.deploy/bad-shas`. The image exists only if CI passed and migrate + web deploy
+     succeeded, so it is the green signal; older green commits deploy while the newest is red;
+  3. record previous sha + image tag (`.deploy/last-deploy`) → `git merge --ff-only` → `uv sync
+     --locked` (tools; OpenClaw loads skills straight from the repo via `skills.load.extraDirs`)
+     → `PANDABASE_WORKER_TAG=<sha>` in `.env` → `docker compose pull worker && up -d`;
+  4. health check, retried every 10 s for 120 s: worker container running, `GET
+     /api/health/worker` shows a heartbeat with `sha` = target sent within the last minute of the
+     switch, and `GET /api/grocery/cycle/current` succeeds with the agent token;
+  5. on failure (or if a switch step fails): add the sha to `bad-shas`, `git reset --keep` to the
+     previous sha, restore its tag without pulling (a moving tag like `main` would fetch the new
+     image), `up -d`, health-check again (heartbeat sha only when the old tag is a sha), post once
+     to `#pandabase` via `DEPLOY_DISCORD_WEBHOOK_URL`, emit `deploy` (`rolled_back` or
+     `rollback_failed`). A bad sha is never retried; the next newer green commit deploys normally.
+  No inbound ports; no self-hosted runner. `make update-pause|update-resume|update-status`,
+  `make rollback [TO=<sha>]` (also pauses). `DRY_RUN=1` decides (the fetch and image checks run)
+  and prints the rest. Tests: `bats scripts/deploy/tests` with git, docker, uv, curl, sleep and
+  `pandabase-tools` stubbed.
+- **Quiet windows:** no Mac Mini updates Fri 17:30–19:00 or Sat 09:30–12:00 (`HOUSEHOLD_TZ` wall
+  clock, so they follow DST), around the nudge and cart build. `UPDATE_QUIET_WINDOWS` overrides
+  (`"<ISO weekday> HHMM-HHMM;…"`). The web deploy has no quiet window: it is atomic on Vercel and
+  migrations are backward-compatible.
 - Every deploy emits `deploy {component, sha, outcome}` telemetry; the weekly report has a *Deploys*
   section.
 
@@ -806,7 +854,11 @@ Timestamps stored UTC; `HOUSEHOLD_TZ=America/Los_Angeles` defines "today" and sc
 `DEV_AUTH_BYPASS`. Worker: `PANDABASE_API_URL`, `WORKER_API_TOKEN`, `OLLAMA_URL`
 (`http://host.docker.internal:11434`), `OLLAMA_VLM_MODEL` (`qwen3.5:9b`), `OLLAMA_TEXT_MODEL`
 (`qwen3.5:4b`), `POLL_INTERVAL_SECONDS` (10), `HOUSEHOLD_TZ`, `PROMPTS_DIR` (set by the image).
-Agent tools: `PANDABASE_API_URL`, `AGENT_API_TOKEN`, `PANDABASE_CONFIG`.
+Agent tools: `PANDABASE_API_URL`, `AGENT_API_TOKEN`, `PANDABASE_CONFIG`. Mac Mini updater (`.env`):
+`PANDABASE_WORKER_TAG` (written by it), `DEPLOY_DISCORD_WEBHOOK_URL`; worker image:
+`PANDABASE_BUILD_SHA` (from the `GIT_SHA` build arg). GitHub environment `production`: secrets
+`TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN`, `VERCEL_TOKEN`, `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID`,
+`AGENT_API_TOKEN`, variable `PANDABASE_API_URL`; environment `preview`: preview `TURSO_*`.
 
 ### Mac Mini operations (M8)
 
@@ -820,8 +872,8 @@ Setup is the README checklist; every step is a `make` target over an idempotent 
 - **Compose** (`docker-compose.yml`) runs only the worker: `env_file: .env` (optional, so
   `docker compose config` works on a fresh checkout), `host.docker.internal:host-gateway`,
   `stop_grace_period: 5m`, read-only root + `/tmp` tmpfs, no ports or volumes, all capabilities
-  dropped. The image is `${PANDABASE_WORKER_IMAGE:-pandabase-worker}:${PANDABASE_WORKER_TAG:-local}`
-  built from `./worker` (M9 points it at GHCR). OpenClaw stays native (it is the household's
+  dropped. The image is `${PANDABASE_WORKER_IMAGE:-ghcr.io/willchan/pandabase-worker}:${PANDABASE_WORKER_TAG:-main}`
+  (M9); `docker-compose.build.yml` builds `./worker` locally instead (`make up-local`, CI). OpenClaw stays native (it is the household's
   existing agent, drives host Chromium over CDP and reads `~/.openclaw`), so there is no
   `openclaw` compose service; `/diagnostics` is the repo's gitignored `diagnostics/`, written by
   the native agent (macOS has no writable `/diagnostics`), so the worker needs no volume.
@@ -840,8 +892,8 @@ Setup is the README checklist; every step is a `make` target over an idempotent 
 - **First run:** `pnpm db:add-member` upserts a member by email (the UI edits members but can't
   create them, and sign-in requires a member row), keeping exactly one cart account.
 - **`make backfill`** repeats `receipts sweep --backfill` per member until `complete` (waits on a
-  busy profile lock), then calls `POST /api/catalog/merge-suggestions/run` once, like the skill. **`make update`** = `git pull --ff-only` → `uv sync` (tools) →
-  `docker compose up -d --build`, printing the before/after sha (M9 wraps it).
+  busy profile lock), then calls `POST /api/catalog/merge-suggestions/run` once, like the skill. **`make update`** is the M9 updater
+  (*Continuous deployment* above); M8's manual `scripts/ops/update.sh` is gone.
 - **`make smoke`** (`scripts/smoke/run.sh`): env, agent-token round trip, worker running, models
   pulled, Ollama host settings, the worker image's VLM path on a synthetic receipt
   (`scripts/smoke/vlm_check.py`, < 60s), `jobs replies` → `NO_REPLY` (skipped while replies are
@@ -858,14 +910,16 @@ Setup is the README checklist; every step is a `make` target over an idempotent 
                   components/ui), proxy.ts (sign-in gate), e2e/ (Playwright)
 /db             @pandabase/db: Drizzle schema, migrations, seed   pnpm workspace
 /contracts      openapi.json (generated by scripts/gen-contracts.ts)
-/scripts        repo-level scripts: contract generation; ops/ (Mac Mini make targets), smoke/
+/scripts        repo-level scripts: contract generation; ops/ (Mac Mini make targets), smoke/,
+                  deploy/ (Mac Mini updater, migration check, deploy telemetry; tests/ = bats)
 /ops            Mac Mini templates: mac.env.example, launchd/ plists
 /worker         Python worker (uv) + Dockerfile + prompts/
 /agent/skills   OpenClaw SKILL.md folders
 /agent/tools    Python tools (uv)
 /diagnostics    gitignored; written by the agent on the Mac Mini
 /docs           PRD, DESIGN, ROADMAP, PLAN
-docker-compose.yml, Makefile, CLAUDE.md, README.md, .github/workflows/ci.yml
+docker-compose.yml (+ docker-compose.build.yml), Makefile, CLAUDE.md, README.md,
+.github/workflows/{ci,deploy,preview-migrate}.yml
 ```
 
 ## 10. Key decisions & rationale
@@ -901,7 +955,7 @@ docker-compose.yml, Makefile, CLAUDE.md, README.md, .github/workflows/ci.yml
 | 27 | One route table (`web/lib/contracts/routes.ts`) drives handlers and the OpenAPI document; orchestration in `web/lib/services` | Scopes, idempotency and contracts can't drift between code and docs; server actions (M5) reuse the same services |
 | 28 | Snake_case wire format; Pydantic models generated from OpenAPI 3.1 with nullable unions flattened | Python clients read naturally; generated models stay plain (`str \| None`, no wrapper root models) |
 | 29 | Text purchases become manual receipts | One `applyReceipt` path, so velocity, overbuy and product stats learn from "bought milk" too |
-| 30 | CD: one workflow migrates Turso then deploys Vercel; migrations backward-compatible | Code never ships ahead of its schema; a half-failed deploy can't break production |
+| 30 | CD: one workflow (`workflow_run` after CI on `main`, environment `production`, one concurrency group) migrates Turso, then `vercel deploy --prod`, then publishes the worker image; migrations backward-compatible, enforced for new migrations by a CI check with an explicit `contract-migration` opt-out | Code never ships ahead of its schema; a half-failed deploy can't break production; the check is cheap and the opt-out keeps the later "contract" PR possible |
 | 31 | Mac Mini updates are pulled by a `launchd` timer with health check, rollback and quiet windows | No inbound ports or self-hosted runner on a home machine; never disrupt the Friday nudge or Saturday build |
 | 32 | Worker VLM `qwen3.5:9b` (Q4), text `qwen3.5:4b`, Ollama JSON-schema output + one repair turn | Best OCR-capable vision model that fits ~8GB next to OpenClaw's model; one family keeps prompts portable; schema-constrained output makes repair rare and bounded |
 | 33 | One `pandabase-tools` CLI for every skill; generic `api get/post` plus composite browser commands | One binary to allowlist in OpenClaw's exec policy; skills can't drift from the contracts (tests parse every command a skill names) |
@@ -915,3 +969,6 @@ docker-compose.yml, Makefile, CLAUDE.md, README.md, .github/workflows/ci.yml
 | 41 | Compose runs only the worker; OpenClaw, Ollama and Chromium stay native | OpenClaw is the household's existing native agent (host Chromium over CDP, `~/.openclaw` state); Ollama needs Metal; a containerized OpenClaw would be a second agent to keep in sync |
 | 42 | Members are bootstrapped with `pnpm db:add-member`, not the UI | Sign-in requires a member row, so the first member can't be created from inside the app; two members don't justify an admin flow |
 | 43 | Inbound photos: local `tools.media.models` description always; the native-delivery fallback is made safe by a local reply model (our choice) or, with a cloud reply model, a text-only PandaBase agent | Keeps §10 #10 without forcing a model change on the family agent; the fallback is OpenClaw behavior we can't turn off by config |
+| 44 | The Mac Mini's "green" signal is the GHCR image `:<sha>` existing, not the GitHub checks API | deploy.yml pushes it only after CI, the migration and the web deploy succeeded, so it also orders the Mac after the web app; one `read:packages` token (needed to pull anyway) instead of a second token |
+| 45 | Deploy health = a heartbeat carrying the new image's build sha (`GET /api/health/worker`) + an agent-token round trip; a failed sha is remembered and never retried | Proves the *new* worker reached the API (not just that a container runs); remembering bad shas stops a rollback loop every 15 min and keeps the Discord alert to one post |
+| 46 | PR previews keep Vercel's Git integration; a parallel GitHub job migrates the shared preview DB | Nothing reads the DB at build time, so no ordering is needed; reusing Vercel previews avoids a second deploy path |

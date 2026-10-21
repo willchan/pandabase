@@ -39,6 +39,8 @@ class Settings:
     poll_interval_seconds: float = 10.0
     household_tz: str = "America/Los_Angeles"
     prompts_dir: Path = PROMPTS_DIR
+    # Git sha the image was built from (Dockerfile `GIT_SHA`); the deploy health check matches it.
+    build_sha: str | None = None
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> Settings:
@@ -55,4 +57,5 @@ class Settings:
             poll_interval_seconds=float(e.get("POLL_INTERVAL_SECONDS") or 10),
             household_tz=e.get("HOUSEHOLD_TZ") or cls.household_tz,
             prompts_dir=Path(e["PROMPTS_DIR"]) if e.get("PROMPTS_DIR") else PROMPTS_DIR,
+            build_sha=e.get("PANDABASE_BUILD_SHA") or None,
         )

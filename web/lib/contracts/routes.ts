@@ -263,6 +263,14 @@ export const ROUTES = {
     body: platform.TelemetryRequest,
     response: platform.TelemetryResponse,
   }),
+  workerHealth: route({
+    operationId: "getWorkerHealth",
+    method: "GET",
+    path: "/api/health/worker",
+    summary: "Latest worker heartbeat (time, version, build sha, models, ollama_ok) or null",
+    scopes: agent,
+    response: platform.WorkerHealthResponse,
+  }),
   diagnosticsWeekly: route({
     operationId: "getWeeklyDiagnostics",
     method: "GET",

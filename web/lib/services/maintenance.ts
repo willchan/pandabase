@@ -11,13 +11,14 @@ import {
   systemTelemetry,
   type Db,
 } from "@pandabase/db";
-import { eq, inArray, isNotNull, lt } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, lt } from "drizzle-orm";
 import type { z } from "zod";
-import type { MaintenanceResponse } from "../contracts";
+import type { MaintenanceResponse, WorkerHealthResponse } from "../contracts";
 import { isOpenOverdue } from "../domain/cycle";
 import { shelfLifeDiscards } from "../domain/inventory";
 import { dueExpiries } from "../domain/review";
 import { addDaysToInstant } from "../domain/time";
+import { asRecord } from "../repo/db";
 import { awayPeriods, loadEstimates, refreshInventoryState } from "../repo/inventory";
 import { emitTelemetry } from "../telemetry";
 import { openCycle } from "./cycles";
@@ -170,4 +171,29 @@ export async function ingestTelemetry(
     await db.insert(systemTelemetry).values(rows.slice(i, i + 100));
   }
   return rows.length;
+}
+
+/** The worker's latest `worker_heartbeat` (`GET /api/health/worker`, the deploy health check). */
+export async function workerHealth(db: Db): Promise<z.infer<typeof WorkerHealthResponse>> {
+  const [row] = await db
+    .select({ at: systemTelemetry.createdAt, payload: systemTelemetry.payload })
+    .from(systemTelemetry)
+    .where(
+      and(eq(systemTelemetry.source, "worker"), eq(systemTelemetry.metricType, "worker_heartbeat")),
+    )
+    .orderBy(desc(systemTelemetry.createdAt), desc(systemTelemetry.id))
+    .limit(1);
+  if (!row) return { heartbeat: null };
+  const p = asRecord(row.payload);
+  const str = (v: unknown) => (typeof v === "string" ? v : null);
+  return {
+    heartbeat: {
+      at: row.at,
+      version: str(p.version),
+      sha: str(p.sha),
+      vlm_model: str(p.vlm_model),
+      text_model: str(p.text_model),
+      ollama_ok: typeof p.ollama_ok === "boolean" ? p.ollama_ok : null,
+    },
+  };
 }

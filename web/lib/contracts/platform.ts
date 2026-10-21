@@ -22,6 +22,26 @@ export const TelemetryResponse = named(
   z.object({ accepted: z.number().int() }),
 );
 
+/** The worker's latest `worker_heartbeat` (DESIGN §7), read by the Mac Mini deploy health check. */
+export const WorkerHealthResponse = named(
+  "WorkerHealthResponse",
+  z.object({
+    heartbeat: z
+      .object({
+        /** When the worker sent it (the worker's clock, i.e. the Mac Mini's). */
+        at: Timestamp,
+        version: z.string().nullable(),
+        /** Git sha the worker image was built from (`PANDABASE_BUILD_SHA`); null for local builds. */
+        sha: z.string().nullable(),
+        vlm_model: z.string().nullable(),
+        text_model: z.string().nullable(),
+        /** null until the worker has checked Ollama once. */
+        ollama_ok: z.boolean().nullable(),
+      })
+      .nullable(),
+  }),
+);
+
 export const DiagnosticsQuery = named(
   "DiagnosticsQuery",
   z.object({

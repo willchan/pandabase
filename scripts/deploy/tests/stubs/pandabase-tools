@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# pandabase-tools stub: the worker reports the image tag compose runs (PANDABASE_WORKER_TAG in
+# the repo .env) unless that sha is listed in $STUB/broken, in which case the last healthy one.
+printf 'tools %s\n' "$*" >>"$STUB/calls"
+root="$(cd "$(dirname "$STUB")/root" && pwd)"
+case "$1 $2 $3" in
+  "api get /api/health/worker")
+    tag="$(awk -F= '$1 == "PANDABASE_WORKER_TAG" { v = $2 } END { print v }' "$root/.env")"
+    if grep -qx "$tag" "$STUB/broken" 2>/dev/null; then
+      tag="$(cat "$STUB/last-healthy" 2>/dev/null)"
+    else
+      echo "$tag" >"$STUB/last-healthy"
+    fi
+    printf '{"heartbeat":{"at":"2026-10-21T19:00:30.000Z","version":"0.0.0","sha":"%s","ollama_ok":true}}\n' "$tag"
+    ;;
+  "api get /api/grocery/cycle/current") [ -f "$STUB/api-down" ] && { echo '{"error":"invalid token"}'; exit 1; }; echo '{"cycle":null}' ;;
+  "api post /api/telemetry") printf '%s\n' "$5" >>"$STUB/telemetry" ;;
+  *) echo "tools stub: $*" >&2; exit 2 ;;
+esac

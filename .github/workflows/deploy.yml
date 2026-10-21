@@ -1,0 +1,127 @@
+name: Deploy
+
+# Production deploy after CI passes on main (PLAN M9, DESIGN §8 *Continuous deployment*):
+#   migrate (Turso prod) → deploy-web (vercel deploy --prod) → publish-worker (GHCR :<sha>, :main)
+# The Mac Mini pulls the worker itself (scripts/deploy/mac-update.sh): an image tagged with a sha
+# exists only if every step above succeeded for that sha, which is its "green" signal.
+# Vercel's own production auto-deploy is off (web/vercel.json), so code never ships before its
+# migration; migrations are backward-compatible (CLAUDE.md), so a failed web deploy after a
+# successful migration leaves production working.
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+
+# One deploy at a time, in order; a newer sha waiting replaces an older waiting one.
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  SHA: ${{ github.event.workflow_run.head_sha }}
+
+jobs:
+  migrate:
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.SHA }}
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Migrate Turso production
+        run: pnpm db:migrate:prod
+        env:
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+      - name: Deploy telemetry
+        if: always()
+        run: scripts/deploy/emit-deploy.sh migrate "$SHA" "${{ job.status }}"
+        env:
+          PANDABASE_API_URL: ${{ vars.PANDABASE_API_URL }}
+          AGENT_API_TOKEN: ${{ secrets.AGENT_API_TOKEN }}
+
+  deploy-web:
+    needs: migrate
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: ${{ vars.PANDABASE_API_URL }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.SHA }}
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+      - name: vercel deploy --prod
+        # Remote build on Vercel with the project's settings (root directory `web`) and its
+        # production env vars. The token is only ever passed to the CLI, never printed.
+        run: |
+          npx --yes vercel@65.0.0 deploy --prod --yes --token="$VERCEL_TOKEN" \
+            --meta githubCommitSha="$SHA" >"$RUNNER_TEMP/vercel-url"
+          echo "Deployed: $(cat "$RUNNER_TEMP/vercel-url")"
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+      - name: Deploy telemetry
+        if: always()
+        run: scripts/deploy/emit-deploy.sh web "$SHA" "${{ job.status }}"
+        env:
+          PANDABASE_API_URL: ${{ vars.PANDABASE_API_URL }}
+          AGENT_API_TOKEN: ${{ secrets.AGENT_API_TOKEN }}
+
+  publish-worker:
+    needs: deploy-web
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.SHA }}
+      # The Mac Mini is Apple Silicon: the image is linux/arm64 (emulated build).
+      - uses: docker/setup-qemu-action@v4
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v7
+        with:
+          context: worker
+          platforms: linux/arm64
+          push: true
+          build-args: GIT_SHA=${{ env.SHA }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ env.SHA }}
+          tags: |
+            ghcr.io/willchan/pandabase-worker:${{ env.SHA }}
+            ghcr.io/willchan/pandabase-worker:main
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Deploy telemetry
+        if: always()
+        run: scripts/deploy/emit-deploy.sh worker_image "$SHA" "${{ job.status }}"
+        env:
+          PANDABASE_API_URL: ${{ vars.PANDABASE_API_URL }}
+          AGENT_API_TOKEN: ${{ secrets.AGENT_API_TOKEN }}

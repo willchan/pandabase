@@ -100,6 +100,7 @@ ROUTES: dict[str, Route] = {
         Route("GET", "/api/jobs/notifications", c.JobNotificationsResponse),
         Route("POST", "/api/jobs/{id}/notified", c.JobResponse, c.EmptyRequest),
         Route("POST", "/api/telemetry", c.TelemetryResponse, c.TelemetryRequest),
+        Route("GET", "/api/health/worker", c.WorkerHealthResponse),
         Route("GET", "/api/diagnostics/weekly", c.DiagnosticsResponse, query=c.DiagnosticsQuery),
     )
 }
