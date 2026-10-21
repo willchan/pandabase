@@ -338,6 +338,52 @@ describe("mergeItems", () => {
     expect((await telemetry("item_merged"))[0]!.payload).toMatchObject({ eventScale: 3 });
   });
 
+  // Regression: merging an item left other pending suggestions that pointed *into* it untouched,
+  // so "Brightbrew → Kombucha" still named Kombucha after Kombucha → Eggs and its Merge button
+  // failed with "target item was merged away".
+  it("re-points pending suggestions that targeted the merged item", async () => {
+    const kombucha = await h.itemId("Kombucha");
+    const eggs = await h.itemId("Eggs");
+    const [k] = await h.db.select().from(item).where(eq(item.id, kombucha));
+    await h.db.insert(item).values({ ...k!, id: "it-brightbrew", canonicalName: "Brightbrew" });
+    const suggestion = (id: string, itemId: string, into: string) => ({
+      id,
+      kind: "merge_suggestion" as const,
+      itemId,
+      payload: { merge_into_item_id: into, confidence: 0.9 },
+      urgency: "cleanup" as const,
+      impactScore: 1,
+      defaultAction: { action: "none" },
+      expiresAt: "2026-11-20T00:00:00.000Z",
+    });
+    await h.db
+      .insert(reviewItem)
+      .values([
+        suggestion("rv-bright", "it-brightbrew", kombucha),
+        suggestion("rv-k-eggs", kombucha, eggs),
+        suggestion("rv-eggs-k", eggs, kombucha),
+      ]);
+    await mergeItems(
+      h.db,
+      { reviewId: "rv-k-eggs", itemId: kombucha, intoItemId: eggs, unitQuantity: null },
+      ctx,
+    );
+    const rows = new Map((await h.db.select().from(reviewItem)).map((r) => [r.id, r] as const));
+    expect(rows.get("rv-bright")).toMatchObject({
+      status: "pending",
+      payload: { merge_into_item_id: eggs, confidence: 0.9 },
+    });
+    // "Eggs → Kombucha" is answered by the merge itself.
+    expect(rows.get("rv-eggs-k")!.status).toBe("confirmed");
+    await mergeItems(
+      h.db,
+      { reviewId: "rv-bright", itemId: "it-brightbrew", intoItemId: eggs, unitQuantity: null },
+      ctx,
+    );
+    const [bright] = await h.db.select().from(item).where(eq(item.id, "it-brightbrew"));
+    expect(bright!.mergedIntoItemId).toBe(eggs);
+  });
+
   it("validates the target and the review", async () => {
     const r = await reviewOf("new_product");
     await expect(

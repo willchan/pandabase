@@ -4,6 +4,7 @@ import { auditJob, inventoryEvent, receipt, reviewItem, type Db } from "@pandaba
 import { and, asc, eq, inArray, isNotNull, isNull, lte } from "drizzle-orm";
 import type { z } from "zod";
 import {
+  MergeSuggestInput,
   MergeSuggestResult,
   PaperReceiptResult,
   TrashCamResult,
@@ -32,6 +33,7 @@ import { getCycle } from "../repo/cycles";
 import { asRecord, type Q } from "../repo/db";
 import { refreshInventoryState } from "../repo/inventory";
 import { emitTelemetry } from "../telemetry";
+import { applyMergeSuggestions } from "./mergeSuggest";
 import { ingestReceiptIn, newId } from "./receipts";
 import type { ServiceCtx } from "./types";
 
@@ -84,6 +86,15 @@ export async function createJob(
 ): Promise<JobT> {
   if (input.job_type !== "merge_suggest" && !input.media_r2_key) {
     throw badRequest(`${input.job_type} needs media_r2_key`);
+  }
+  if (input.job_type === "merge_suggest") {
+    const parsed = MergeSuggestInput.safeParse(input.input);
+    if (!parsed.success) {
+      throw badRequest(
+        "merge_suggest input must be a MergeSuggestInput",
+        parsed.error.issues.map((i) => ({ path: i.path.join("."), message: i.message })),
+      );
+    }
   }
   if (input.cycle_id) await getCycle(db, input.cycle_id);
   const row = {
@@ -426,29 +437,12 @@ async function applyResult(
     }
     case "merge_suggest": {
       const r = parseResult(MergeSuggestResult, result);
-      const ids: string[] = [];
-      for (const s of r.suggestions) {
-        const id = newId();
-        ids.push(id);
-        await tx.insert(reviewItem).values({
-          ...newReview("merge_suggestion", ctx.now, NO_IMPACT, ctx.config),
-          id,
-          createdAt: ctx.now,
-          updatedAt: ctx.now,
-          jobId: j.id,
-          itemId: s.item_id,
-          payload: {
-            merge_into_item_id: s.merge_into_item_id,
-            confidence: s.confidence,
-            reason: s.reason ?? null,
-          },
-        });
-      }
+      const { reviewIds, telemetry } = await applyMergeSuggestions(tx, j.id, r, ctx);
       return {
-        outcome: ids.length ? "review" : "applied",
+        outcome: reviewIds.length ? "review" : "applied",
         receiptId: null,
-        reviewIds: ids,
-        telemetry: { suggestions: ids.length },
+        reviewIds,
+        telemetry,
       };
     }
     default:

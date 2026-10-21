@@ -225,6 +225,15 @@ export const ROUTES = {
     body: EmptyRequest,
     response: jobs.JobResponse,
   }),
+  mergeSuggestionsRun: route({
+    operationId: "runMergeSuggestions",
+    method: "POST",
+    path: "/api/catalog/merge-suggestions/run",
+    summary: "Queue merge_suggest jobs for unverified items (end of a receipt backfill)",
+    scopes: agent,
+    body: jobs.MergeSuggestRunRequest,
+    response: jobs.MergeSuggestRunResponse,
+  }),
   jobsClaim: route({
     operationId: "claimJob",
     method: "POST",

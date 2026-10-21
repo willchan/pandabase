@@ -72,5 +72,15 @@ pandabase-tools receipts sweep --member <member name> --backfill
 ```
 
 Each run pages through order history (throttled ~3 s/page) and resumes where the last one
-stopped, so interruptions are fine. Handle `needs_agent_extraction` as above. Finish with one
-message: "✅ Imported N orders from the last 12 months." (plus "⚠️ M couldn't be read" if any).
+stopped, so interruptions are fine. Handle `needs_agent_extraction` as above. When the loop ends
+(and every extracted receipt is ingested), ask for merge suggestions once — the backfill created
+one unverified item per product, and the worker proposes which of them are items we already have:
+
+```sh
+pandabase-tools api post /api/catalog/merge-suggestions/run --json '{}' --actor <member discord id> --key backfill-merges:<member discord id>:<YYYY-MM-DD>
+```
+
+It is idempotent (`skipped: "already_queued"` if a run is still waiting) and its suggestions land
+in the web app's Cleanup → Merges tab; nobody has to answer them. Finish with one message:
+"✅ Imported N orders from the last 12 months." (plus "⚠️ M couldn't be read" if any, and "Suggested
+merges will appear in Cleanup → Merges." if the call returned `created: true`).

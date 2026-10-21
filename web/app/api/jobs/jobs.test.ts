@@ -1,6 +1,6 @@
 // Job lifecycle (DESIGN §5): upload URL → create → claim → lease expiry → re-claim → complete →
 // notifications → notified; retries and final failure; Trash Cam and merge-suggest results.
-import { auditJob, inventoryEvent, inventoryState, reviewItem } from "@pandabase/db";
+import { auditJob, inventoryEvent, inventoryState, item, reviewItem } from "@pandabase/db";
 import { and, eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ALEX, SAM, setup, type Harness } from "@/test/harness";
@@ -245,23 +245,78 @@ describe("job lifecycle", () => {
   });
 
   it("merge suggestions become merge_suggestion reviews", async () => {
+    const kombucha = await h.itemId("Kombucha");
+    const eggs = await h.itemId("Eggs");
     const job = await create({
       job_type: "merge_suggest",
       media_r2_key: null,
       discord_message_id: null,
+      input: {
+        items: [
+          { item_id: kombucha, name: "Kombucha" },
+          { item_id: eggs, name: "Eggs" },
+        ],
+      },
     });
     const c = (await claim())!;
     expect(c.media_url).toBeNull();
-    const kombucha = await h.itemId("Kombucha");
-    const eggs = await h.itemId("Eggs");
     const res = await complete({
       job_id: job.id,
       attempt: c.attempt,
-      result: { suggestions: [{ item_id: kombucha, merge_into_item_id: eggs, confidence: 0.3 }] },
+      result: { suggestions: [{ item_id: kombucha, merge_into_item_id: eggs, confidence: 0.9 }] },
     });
     expect(res.body).toMatchObject({ outcome: "review", review_ids: [expect.any(String)] });
     // Not from Discord → no notification.
     expect(await notifications()).toEqual([]);
+  });
+
+  // Regression: the result was turned into reviews unchecked — an unknown item id failed the whole
+  // `complete` with a 500 (review_item.item_id FK), and a self-merge or an item merged meanwhile
+  // became a review whose "Merge" button could only error.
+  it("drops merge suggestions naming an unknown, the same or a merged item", async () => {
+    const kombucha = await h.itemId("Kombucha");
+    const eggs = await h.itemId("Eggs");
+    const milk = await h.itemId("Whole Milk");
+    await h.db.update(item).set({ mergedIntoItemId: eggs }).where(eq(item.id, milk));
+    const job = await create({
+      job_type: "merge_suggest",
+      media_r2_key: null,
+      input: {
+        items: [
+          { item_id: kombucha, name: "Kombucha" },
+          { item_id: eggs, name: "Eggs" },
+        ],
+      },
+    });
+    const c = (await claim())!;
+    const res = await complete({
+      job_id: job.id,
+      attempt: c.attempt,
+      result: {
+        suggestions: [
+          { item_id: "01UNKNOWNITEM", merge_into_item_id: eggs, confidence: 0.9 },
+          { item_id: kombucha, merge_into_item_id: kombucha, confidence: 0.9 },
+          { item_id: milk, merge_into_item_id: kombucha, confidence: 0.9 },
+        ],
+      },
+    });
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ outcome: "applied", review_ids: [] });
+    const reviews = await h.db
+      .select()
+      .from(reviewItem)
+      .where(eq(reviewItem.kind, "merge_suggestion"));
+    expect(reviews).toEqual([]);
+  });
+
+  it("rejects a merge_suggest job without a valid MergeSuggestInput", async () => {
+    const res = await h.call(HANDLERS.jobsCreate.POST, "/api/jobs", {
+      body: { actor_discord_id: ALEX, job_type: "merge_suggest", input: { items: [] } },
+    });
+    expect(res).toMatchObject({
+      status: 400,
+      body: { error: "merge_suggest input must be a MergeSuggestInput" },
+    });
   });
 
   it("validates job input", async () => {

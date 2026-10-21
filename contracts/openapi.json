@@ -1517,6 +1517,11 @@
             "minimum": -9007199254740991,
             "type": "integer"
           },
+          "merge_suggest_jobs": {
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
           "opened_cycle_id": {
             "type": [
               "string",
@@ -1551,7 +1556,8 @@
           "presumed_discards",
           "purged_idempotency_keys",
           "purged_telemetry",
-          "opened_cycle_id"
+          "opened_cycle_id",
+          "merge_suggest_jobs"
         ],
         "type": "object"
       },
@@ -1564,6 +1570,48 @@
           "none"
         ],
         "type": "string"
+      },
+      "MergeSuggestInput": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/MergeSuggestItem"
+            },
+            "maxItems": 150,
+            "minItems": 2,
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
+      "MergeSuggestItem": {
+        "properties": {
+          "aliases": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 20,
+            "type": "array"
+          },
+          "item_id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          },
+          "name": {
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "item_id",
+          "name"
+        ],
+        "type": "object"
       },
       "MergeSuggestResult": {
         "properties": {
@@ -1604,6 +1652,51 @@
         },
         "required": [
           "suggestions"
+        ],
+        "type": "object"
+      },
+      "MergeSuggestRunRequest": {
+        "properties": {
+          "actor_discord_id": {
+            "maxLength": 32,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "MergeSuggestRunResponse": {
+        "properties": {
+          "candidates": {
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "created": {
+            "type": "boolean"
+          },
+          "jobs": {
+            "items": {
+              "$ref": "#/components/schemas/Job"
+            },
+            "type": "array"
+          },
+          "skipped": {
+            "enum": [
+              "already_queued",
+              "no_candidates"
+            ],
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "jobs",
+          "created",
+          "skipped",
+          "candidates"
         ],
         "type": "object"
       },
@@ -2613,6 +2706,104 @@
           }
         ],
         "summary": "Create an away period",
+        "x-scopes": [
+          "agent"
+        ]
+      }
+    },
+    "/api/catalog/merge-suggestions/run": {
+      "post": {
+        "operationId": "runMergeSuggestions",
+        "parameters": [
+          {
+            "description": "Replays the stored response for 24h (same key + route + scope).",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "maxLength": 200,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MergeSuggestRunRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MergeSuggestRunResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Wrong scope, or unknown actor_discord_id"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict (e.g. invalid cycle transition, stale job attempt)"
+          }
+        },
+        "security": [
+          {
+            "agent": []
+          }
+        ],
+        "summary": "Queue merge_suggest jobs for unverified items (end of a receipt backfill)",
         "x-scopes": [
           "agent"
         ]

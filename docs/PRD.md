@@ -76,7 +76,10 @@ A Discord **thread per cycle** in `#pandabase`, acting as a running grocery list
   immediately; strong guesses apply provisionally; weak ones wait 14 days then expire.
 - **Text purchases:** "bought milk, eggs" in Discord records a manual acquisition.
 - **Backfill:** a one-time import of the last 12 months of Amazon orders seeds the catalog and
-  consumption history so predictions are useful on day one.
+  consumption history so predictions are useful on day one. Each new product starts as an unverified item;
+  when the backfill finishes (and weekly after that, once enough new items pile up) the local model
+  suggests which are items we already have ("these 3 look like *Eggs*") in Cleanup → Merges. A
+  suggestion nobody answers expires after 30 days and changes nothing.
 
 ### 4.3 Trash Cam
 
