@@ -16,6 +16,8 @@
 5. Open a PR titled `M<N>: <title>`; body lists acceptance commands and their results.
 6. Don't edit files owned by another milestone except where your milestone says so; if you must,
    call it out in the PR.
+7. Drive the PR to green **and mergeable** following `.claude/skills/steward/SKILL.md`: check
+   mergeability before CI on every wake and after each push; a conflicted PR gets no CI.
 
 ## Dependency graph
 
