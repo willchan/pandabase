@@ -1304,6 +1304,7 @@
           },
           "media_r2_key": {
             "maxLength": 200,
+            "pattern": "^media\\/(?:[\\w-]+\\/)*[\\w-]+\\.(?:jpg|jpeg|png|webp|heic|mp4|mov)$",
             "type": [
               "string",
               "null"

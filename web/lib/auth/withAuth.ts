@@ -61,7 +61,9 @@ async function authenticate(req: Request, app: AppContext): Promise<Principal | 
     .select({ id: member.id })
     .from(member)
     .where(eq(member.email, session.email.toLowerCase()));
-  return { scope: "session", memberId: m?.id ?? null };
+  // Like the UI's NotAMember: an allowed email acts only once it has a member row.
+  if (!m) return errorResponse(403, "not a household member");
+  return { scope: "session", memberId: m.id };
 }
 
 /** Sessions have every scope except cron's (DESIGN §3.1). */
@@ -107,7 +109,9 @@ export function withAuth<P = Record<string, never>>(
       if (key && key.length > MAX_IDEMPOTENCY_KEY) {
         return errorResponse(400, "Idempotency-Key too long");
       }
-      const keyScope = `${principal.scope}:${opts.route}`;
+      // The concrete path, not the route pattern: a key reused on another cycle/job must not
+      // replay the first one's response.
+      const keyScope = `${principal.scope}:${req.method} ${new URL(req.url).pathname}`;
       if (key) {
         const [stored] = await app.db
           .select()

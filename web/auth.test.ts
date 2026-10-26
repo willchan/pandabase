@@ -31,6 +31,21 @@ describe("authConfig", () => {
     );
   });
 
+  // Security review (tier A PR): only the allowlist was checked. Google marks addresses it hasn't
+  // verified (`email_verified: false`); Auth.js recommends rejecting those.
+  it("signIn callback requires Google's email_verified", async () => {
+    const signIn = authConfig(env({ NODE_ENV: "production" })).callbacks!.signIn!;
+    const google = (email_verified: unknown) =>
+      signIn({
+        user: { email: "alex@example.com" },
+        account: { provider: "google" },
+        profile: { email: "alex@example.com", email_verified },
+      } as unknown as Parameters<typeof signIn>[0]);
+    expect(await google(true)).toBe(true);
+    expect(await google(false)).toBe(false);
+    expect(await google(undefined)).toBe(false);
+  });
+
   it.each(["production", "test", ""])(
     "DEV_AUTH_BYPASS=1 adds no dev sign-in when NODE_ENV=%j",
     (nodeEnv) => {

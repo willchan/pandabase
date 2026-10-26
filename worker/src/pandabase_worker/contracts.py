@@ -494,7 +494,13 @@ class JobCreateRequest(BaseModel):
     discord_message_id: Annotated[str | None, Field(max_length=32)] = None
     input: dict[str, Any] | None = None
     job_type: Literal["paper_receipt", "trash_cam", "merge_suggest"]
-    media_r2_key: Annotated[str | None, Field(max_length=200)] = None
+    media_r2_key: Annotated[
+        str | None,
+        Field(
+            max_length=200,
+            pattern="^media\\/(?:[\\w-]+\\/)*[\\w-]+\\.(?:jpg|jpeg|png|webp|heic|mp4|mov)$",
+        ),
+    ] = None
 
 
 class JobNotification(BaseModel):

@@ -31,7 +31,13 @@ export const JobCreateRequest = named(
   z.object({
     actor_discord_id: ActorDiscordId,
     job_type: JobType,
-    media_r2_key: z.string().max(200).nullable().optional(),
+    /** A key from `POST /api/media/upload-url` (`media/…`), never another part of the bucket. */
+    media_r2_key: z
+      .string()
+      .max(200)
+      .regex(/^media\/(?:[\w-]+\/)*[\w-]+\.(?:jpg|jpeg|png|webp|heic|mp4|mov)$/)
+      .nullable()
+      .optional(),
     discord_channel_id: z.string().max(32).nullable().optional(),
     discord_message_id: z.string().max(32).nullable().optional(),
     cycle_id: Id.nullable().optional(),
