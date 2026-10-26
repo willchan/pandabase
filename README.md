@@ -21,6 +21,10 @@ The Mac Mini makes outbound connections only. Details: [DESIGN §1](docs/DESIGN.
 
 ## Setup from zero
 
+> **No computer yet? Do Phase 1 from your phone:** [docs/SETUP-PHONE.md](docs/SETUP-PHONE.md)
+> sets up Turso, R2, Google sign-in, Vercel and the GitHub deploy from Safari and the GitHub app.
+> It covers steps 2–4, 6, 7 and 15.1–15.3 below and changes step 5; each of those steps says so.
+
 You need: a Mac Mini (Apple silicon, 32GB; macOS with a GUI login), the household's existing
 OpenClaw gateway on it with a Discord bot, a Discord server with a `#pandabase` channel, each
 member's Amazon account, a GitHub checkout of this repo, and accounts at **Turso**,
@@ -43,6 +47,8 @@ Check: `node -v` → v24, `pnpm -v` → 12, `uv --version`, `turso --version`, `
 
 ### 2. Turso (database)
 
+*Phase 1 done? Skip: it created both databases and tokens in the Turso dashboard.*
+
 ```sh
 turso auth login
 turso db create pandabase           # production
@@ -57,6 +63,8 @@ Keep the four values for step 6. They go to Vercel only (the Mac Mini never touc
 
 ### 3. Cloudflare R2 (photos and keyframes)
 
+*Phase 1 done? Skip.*
+
 1. Cloudflare dashboard → **R2** → *Create bucket* `pandabase-media` (location: automatic).
 2. R2 → *Manage API tokens* → *Create API token*: permission **Object Read & Write**, scoped to
    that bucket only. Note the **Access Key ID** and **Secret Access Key**, and your **Account
@@ -70,6 +78,8 @@ presigned links.
 
 ### 4. Google OAuth (sign-in)
 
+*Phase 1 done? Skip.*
+
 1. [Google Cloud console](https://console.cloud.google.com/) → new project `pandabase` →
    *APIs & Services* → *OAuth consent screen*: External, app name PandaBase, your email; add both
    members' Gmail addresses as **test users** (Testing mode is fine and limits who can sign in).
@@ -81,6 +91,12 @@ presigned links.
 3. Note the **Client ID** and **Client secret** for step 6.
 
 ### 5. Generate secrets
+
+*Phase 1 done? Don't generate new ones: Vercel already has yours. `cp ops/mac.env.example .env`,
+paste `AGENT_API_TOKEN`, `WORKER_API_TOKEN` and `PANDABASE_API_URL` from your password manager,
+create `.env.vercel` with `AUTH_SECRET=…` and `CRON_SECRET=…`, then run `make secrets` (it keeps
+every value already set; copy the template first, because an existing `.env` is kept as is and
+doesn't get the template's other settings). Skip `make vercel-env`.*
 
 ```sh
 make secrets
@@ -94,6 +110,8 @@ it on a laptop, copy both files to the Mac Mini's checkout over a secure channel
 your production URL (step 6).
 
 ### 6. Vercel (web app, API, cron)
+
+*Phase 1 done? Skip, except item 4 (the URL in `agent/pandabase.config.json` comes with step 9).*
 
 1. Vercel → *Add New Project* → import this repo. **Root Directory: `web`** (framework Next.js;
    pnpm is detected from the lockfile; keep "include files outside the root directory" on — the
@@ -128,6 +146,10 @@ your production URL (step 6).
 Check: `https://<domain>/sign-in` loads (signing in comes after step 7).
 
 ### 7. First run of the database
+
+*Phase 1 done? Skip: the **Bootstrap** workflow (Actions → Bootstrap → Run workflow) migrated
+both databases and added the members. It also works later from a phone, e.g. to add a missing
+Discord id: `add-member` with the member's position in the `ALLOWED_EMAILS` secret.*
 
 ```sh
 # production (needs the step-2 values in your shell; they're not in .env)
@@ -343,7 +365,10 @@ Merging to `main` deploys everything (DESIGN §8 *Continuous deployment*): GitHu
 `deploy.yml` runs after CI passes — **migrate** Turso production → **deploy-web** (`vercel deploy
 --prod`) → **publish-worker** (`ghcr.io/willchan/pandabase-worker:<sha>` and `:main`, arm64) —
 and the Mac Mini pulls the new worker, tools and skills itself every 15 min. Nothing connects
-into the home network.
+into the home network. Until the `production` environment has its secrets, every run fails at its
+first step with one error naming the missing ones (nothing is migrated or deployed).
+
+*Phase 1 done? Items 1–3 are done; start at item 4.*
 
 1. **GitHub environment `production`** (repo → *Settings → Environments → New environment*).
    Restrict *Deployment branches* to `main`. Add:
@@ -354,6 +379,7 @@ into the home network.
    | secret | `VERCEL_TOKEN` | vercel.com → *Account Settings → Tokens* (scope: your team) |
    | secret | `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID` | `web/.vercel/project.json` after `(cd web && vercel link)` (`orgId`, `projectId`) |
    | secret | `AGENT_API_TOKEN` | from `.env` — only for `deploy` telemetry (optional) |
+   | secret | `ALLOWED_EMAILS` | same as Vercel — only for the Bootstrap workflow's `add-member` |
    | variable | `PANDABASE_API_URL` | production URL (telemetry target + the environment's link) |
 
 2. **GitHub environment `preview`** with `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN` = the preview
@@ -478,8 +504,9 @@ model more often, not less.
 | `R2_*` | Cloudflare (step 3) | Vercel | presigned upload/download URLs |
 | Amazon sessions | you, by hand | each Chromium user-data dir | agent tools over CDP (never stored by PandaBase) |
 | Discord bot token, cloud model keys | OpenClaw setup | OpenClaw's own config | OpenClaw |
-| `TURSO_*` (prod), `VERCEL_TOKEN`, `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID`, `AGENT_API_TOKEN` | Turso, Vercel, `make secrets` (step 15) | GitHub environment `production` secrets | `deploy.yml` (migrate, deploy, telemetry) |
-| `TURSO_*` (preview) | `turso` (step 2) | GitHub environment `preview` secrets | `preview-migrate.yml` |
+| `TURSO_*` (prod), `VERCEL_TOKEN`, `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID`, `AGENT_API_TOKEN` | Turso, Vercel, `make secrets` (step 15) | GitHub environment `production` secrets | `deploy.yml` (migrate, deploy, telemetry); `bootstrap.yml` (`TURSO_*`) |
+| `ALLOWED_EMAILS` | you (step 6) | GitHub environment `production` (+ `preview`, optional) secret | `bootstrap.yml` `add-member` (emails never go in public run inputs) |
+| `TURSO_*` (preview) | `turso` (step 2) | GitHub environment `preview` secrets | `preview-migrate.yml`, `bootstrap.yml` |
 | `GITHUB_TOKEN` | GitHub, per run | nowhere (ephemeral) | `deploy.yml` pushes to GHCR (`packages: write` in that job only) |
 | GHCR read token (`read:packages`) | you (step 15) | macOS keychain via `docker login ghcr.io` | Mac Mini: image exists? + pull |
 | `DEPLOY_DISCORD_WEBHOOK_URL` | Discord (step 15) | `.env` | Mac Mini updater's failure post |

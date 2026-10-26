@@ -61,6 +61,7 @@ pnpm --filter web build      # next build
 pnpm db:reset && pnpm db:seed   # fresh db/dev.db (or TURSO_DATABASE_URL), migrated + seeded
 pnpm db:add-member --email E --name N [--discord ID] [--profile P] [--sweep daily|weekly|off] [--cart]
                              # upsert a member by email (first-run bootstrap; TURSO_* for prod)
+                             # no terminal: Actions → Bootstrap (bootstrap.yml; docs/SETUP-PHONE.md)
 pnpm db:generate             # after editing db/src/schema/*: new migration in db/migrations (commit it)
 pnpm db:migrate              # apply migrations; db:migrate:prod for Turso (needs TURSO_AUTH_TOKEN)
 pnpm db:rebuild-state        # recompute inventory_state from inventory_event (§4.2 projection)

@@ -37,6 +37,18 @@ jobs:
       - uses: actions/checkout@v7
         with:
           ref: ${{ env.SHA }}
+      # Before anything changes: every secret this workflow needs (migrate and deploy-web), so an
+      # unconfigured environment fails here with their names instead of half-deploying.
+      - name: Production environment is configured
+        run: >-
+          scripts/deploy/require-env.sh production
+          TURSO_DATABASE_URL TURSO_AUTH_TOKEN VERCEL_TOKEN VERCEL_ORG_ID VERCEL_PROJECT_ID
+        env:
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
       - uses: pnpm/action-setup@v6
       - uses: actions/setup-node@v7
         with:

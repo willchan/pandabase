@@ -1040,3 +1040,19 @@ honouring the project's Root Directory `web`; GHCR auth through Docker Desktop's
 LaunchAgent; `docker manifest inspect` against a private GHCR package; the arm64 image on the
 Mac. The first merge after setup is the end-to-end test: watch the Actions run, then
 `make update-status` / the log on the Mac.
+
+*Follow-up: phone-only cloud setup (2026-10-26).* `deploy.yml` failed at *Migrate Turso
+production* on every merge because the `production` environment had no secrets. Added:
+`docs/SETUP-PHONE.md` (Phase 1 from an iPhone: Turso, R2, Google, Vercel, GitHub environments;
+Mac Mini = Phase 2, README); a `migrate` preflight (`scripts/deploy/require-env.sh`) that names
+every missing secret before anything changes; `.github/workflows/bootstrap.yml` +
+`scripts/deploy/bootstrap.sh` (`workflow_dispatch`: `migrate` / `add-member` per environment,
+validated, dry-run mode) so README step 7 needs no terminal. The repo is **public**, so run
+logs are too: `add-member` takes the member's position in an `ALLOWED_EMAILS` environment secret
+instead of an email input (new optional secret in `production`/`preview`), and masks every
+address and the Discord id. Tests: `scripts/deploy/tests/bootstrap.bats` (validation, exact
+`pnpm` argv via a stub, masking, dry run, deploy preflight covers every secret `deploy.yml`
+uses). `make secrets` was checked: it keeps every non-empty value, but keeps an existing `.env`
+file as is (no template merge), so Phase 2 copies the template before pasting tokens.
+*Not verifiable here:* the provider dashboards' exact labels (listed at the end of the guide);
+whether dispatch inputs show publicly on the run page; that a re-run reads current secrets.

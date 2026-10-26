@@ -805,6 +805,18 @@ Timestamps stored UTC; `HOUSEHOLD_TZ=America/Los_Angeles` defines "today" and sc
   and webhook URLs to `curl -K -` on stdin). Each job ends with `deploy` telemetry
   (`scripts/deploy/emit-deploy.sh`, never fails the job). Vercel's production auto-deploy is off
   (`web/vercel.json` `git.deploymentEnabled.main: false`) so code never ships before its migration.
+  `migrate` starts with a preflight (`scripts/deploy/require-env.sh`) that fails with one error
+  naming every empty secret that `migrate` and `deploy-web` need, so an unconfigured environment
+  fails before anything changes instead of at the first tool that needs a secret.
+- **Bootstrap (no terminal):** `.github/workflows/bootstrap.yml` (`workflow_dispatch`, runnable
+  from the GitHub mobile app; `docs/SETUP-PHONE.md`) runs `pnpm db:migrate:prod` or
+  `pnpm db:add-member` in the `production` or `preview` environment via
+  `scripts/deploy/bootstrap.sh`, which validates every input (dry-run mode: validate only) before
+  installing anything. The repo is public, so its logs are: the member's email is never an input
+  but the N-th address of the environment's `ALLOWED_EMAILS` secret, every address and the
+  Discord id are masked before a step prints them, and the job has `contents: read` only. Its
+  concurrency group is per target, not `deploy-production` (a queued bootstrap must not replace a
+  pending deploy).
 - **Previews:** Vercel's Git integration builds PRs against `pandabase-preview`;
   `preview-migrate.yml` migrates that DB (GitHub environment `preview`) for PRs that touch
   `db/migrations/`. The two run in parallel, which is fine because nothing touches the DB at
@@ -858,7 +870,8 @@ Agent tools: `PANDABASE_API_URL`, `AGENT_API_TOKEN`, `PANDABASE_CONFIG`. Mac Min
 `PANDABASE_WORKER_TAG` (written by it), `DEPLOY_DISCORD_WEBHOOK_URL`; worker image:
 `PANDABASE_BUILD_SHA` (from the `GIT_SHA` build arg). GitHub environment `production`: secrets
 `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN`, `VERCEL_TOKEN`, `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID`,
-`AGENT_API_TOKEN`, variable `PANDABASE_API_URL`; environment `preview`: preview `TURSO_*`.
+`AGENT_API_TOKEN`, `ALLOWED_EMAILS` (bootstrap only), variable `PANDABASE_API_URL`; environment
+`preview`: preview `TURSO_*` (+ `ALLOWED_EMAILS`, optional).
 
 ### Mac Mini operations (M8)
 
