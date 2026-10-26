@@ -226,8 +226,10 @@ All routes under `/web/app/api`. Payloads defined once as **Zod schemas** in `we
 ### 3.1 Auth
 
 - **Session** (Auth.js v5, Google, JWT sessions; config in `web/auth.ts`): `signIn` callback
-  rejects emails not in `ALLOWED_EMAILS`. Session users have every scope except `cron`; an API
-  request with a session is re-checked against the allowlist and acts as the member with that email.
+  rejects emails not in `ALLOWED_EMAILS` and Google accounts whose address Google hasn't verified
+  (`email_verified`). Session users have every scope except `cron`; an API request with a session is
+  re-checked against the allowlist and acts as the member with that email (an allowed email without
+  a `member` row → 403 `not a household member`, like the UI's NotAMember).
 - **Bearer tokens:** `AGENT_API_TOKEN` (scope `agent`), `WORKER_API_TOKEN` (scope `worker`),
   `CRON_SECRET` (scope `cron`). Constant-time compare (SHA-256 then `timingSafeEqual`); an unset
   secret never matches. A bearer header wins over a session. One `withAuth(scopes, handler)`
@@ -237,7 +239,8 @@ All routes under `/web/app/api`. Payloads defined once as **Zod schemas** in `we
   reject) → 400. Events record `actor_member_id` and `actor_system` (`agent` for the agent acting
   for a member, `worker`, `cron`); session writes record only the member.
 - **Idempotency:** mutating routes (every POST except `/api/jobs/claim`, which hands out leases)
-  honor `Idempotency-Key` (≤ 200 chars). The key is scoped to `{principal scope}:{METHOD path}`;
+  honor `Idempotency-Key` (≤ 200 chars). The key is scoped to `{principal scope}:{METHOD path}`
+  with the request's concrete path (`/api/grocery/cycle/<id>/status`, not the route pattern);
   responses with status < 500 are stored and replayed verbatim with `Idempotent-Replayed: true`
   for 24h. Manual receipts and text purchases also use the key as their dedupe key.
 - **Dev:** `DEV_AUTH_BYPASS=1` works only when `NODE_ENV=development`: API routes act as the first
@@ -266,8 +269,8 @@ All routes under `/web/app/api`. Payloads defined once as **Zod schemas** in `we
 | `POST /api/grocery/price-quotes` | agent | Agent-observed prices for candidates |
 | `GET /api/grocery/cycle/{id}/cart` | agent | Final cart lines (product chosen, reason text) after quotes |
 | `POST /api/grocery/cycle/{id}/cart-result` | agent | Per-line injection outcome (tier1/tier2/failed), vendors, order ids; an open/building cycle becomes `ready` |
-| `GET /api/items/lookup?q=` | agent | "Do we have X?" — matches + estimate + confidence text |
-| `POST /api/inventory/events` | agent | Counts (`observed`), `critical` flags, `consumed` ("we're out"), `discarded`, `moved` ("froze the chicken"), text purchases (`acquired` → a manual receipt through `applyReceipt`) |
+| `GET /api/items/lookup?q=` | agent | "Do we have X?" — matches + estimate + confidence text. Each match has `match` (`confident`: the top hit, score ≥ `lookup.confidentScore` 0.9 and ≥ `lookup.confidentLead` 0.1 ahead of the next — the skills act on its `item_id`; else `possible`) and `confidence` (the *estimate's*: high only after a recent count) |
+| `POST /api/inventory/events` | agent | Counts (`observed`), `critical` flags, `consumed` ("we're out"), `discarded`, `moved` ("froze the chicken"), text purchases (`acquired` → a manual receipt through `applyReceipt`). `discarded` / `moved` without a `quantity` take everything estimated at `location` |
 | `GET /api/freezer/aging?limit=` | agent | Oldest freezer stock |
 | `POST /api/away-periods` | agent | Create away period (re-projects `inventory_state`) |
 | `POST /api/products/{id}/reject` | agent | "Never buy X": stance `rejected` + `reject` preference event |
@@ -275,7 +278,7 @@ All routes under `/web/app/api`. Payloads defined once as **Zod schemas** in `we
 | `POST /api/receipts/ingest` | agent | Digital/manual receipt JSON → resolve, apply, EMA |
 | `POST /api/catalog/merge-suggestions/run` | agent | Queue `merge_suggest` jobs over the unverified catalog (§4.5); the receipt-scraper skill calls it once at the end of a backfill. Idempotent: while one is queued/claimed it returns those (`skipped: already_queued`); `no_candidates` when nothing is unverified |
 | `POST /api/media/upload-url` | agent | R2 presigned PUT for a new media key |
-| `POST /api/jobs` | agent | Create audit job |
+| `POST /api/jobs` | agent | Create audit job (`media_r2_key` must be a `media/…` key from upload-url) |
 | `GET /api/jobs/notifications` | agent | Completed/failed jobs not yet replied to in Discord |
 | `POST /api/jobs/{id}/notified` | agent | Mark reply sent |
 | `POST /api/jobs/claim` | worker | Lease next queued job (+ presigned media GET and keyframe PUT URLs); `{job: null}` when empty |
@@ -611,8 +614,10 @@ one per pair, and posts `MergeSuggestResult`; the app then applies §4.5's rules
 unit_price, line_total}], subtotal, tax, total}`. The worker converts money to cents, runs the
 totals check (`|Σ line_total − subtotal| ≤ 2¢`) and posts contract `PaperReceiptResult`
 (`{store, date, lines:[{raw_text, qty, unit_price_cents, line_total_cents}], subtotal_cents,
-tax_cents, total_cents, totals_check}`). Lines with a negative amount (discounts, coupons) count
-toward the totals check but are not posted (money fields are ≥ 0 and they aren't purchases). An
+tax_cents, total_cents, discount_cents?, totals_check}`). Lines with a negative amount (discounts,
+coupons) count toward the totals check but are not posted (money fields are ≥ 0 and they aren't
+purchases); their sum goes in `discount_cents` (positive; omitted when none), which the app's own
+check subtracts. An
 unreadable date falls back to today in `HOUSEHOLD_TZ`, an unreadable store to `UNKNOWN` (vendor
 `unknown`); both are flagged in `vlm_inference`. The receipt row's `totals_check` is the app's own exact
 check; the worker's is kept in `job_finished` telemetry. Trash Cam posts `TrashCamResult`
@@ -851,7 +856,8 @@ Timestamps stored UTC; `HOUSEHOLD_TZ=America/Los_Angeles` defines "today" and sc
 **Env vars** — web: `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN`, `AUTH_SECRET`, `AUTH_GOOGLE_ID`,
 `AUTH_GOOGLE_SECRET`, `ALLOWED_EMAILS`, `AGENT_API_TOKEN`, `WORKER_API_TOKEN`, `CRON_SECRET`,
 `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET`, `HOUSEHOLD_TZ`,
-`DEV_AUTH_BYPASS`. Worker: `PANDABASE_API_URL`, `WORKER_API_TOKEN`, `OLLAMA_URL`
+`DEV_AUTH_BYPASS`, `R2_ENDPOINT` (optional S3 origin override; only the system test's local R2 stub
+sets it). Worker: `PANDABASE_API_URL`, `WORKER_API_TOKEN`, `OLLAMA_URL`
 (`http://host.docker.internal:11434`), `OLLAMA_VLM_MODEL` (`qwen3.5:9b`), `OLLAMA_TEXT_MODEL`
 (`qwen3.5:4b`), `POLL_INTERVAL_SECONDS` (10), `HOUSEHOLD_TZ`, `PROMPTS_DIR` (set by the image).
 Agent tools: `PANDABASE_API_URL`, `AGENT_API_TOKEN`, `PANDABASE_CONFIG`. Mac Mini updater (`.env`):
@@ -972,3 +978,5 @@ docker-compose.yml (+ docker-compose.build.yml), Makefile, CLAUDE.md, README.md,
 | 44 | The Mac Mini's "green" signal is the GHCR image `:<sha>` existing, not the GitHub checks API | deploy.yml pushes it only after CI, the migration and the web deploy succeeded, so it also orders the Mac after the web app; one `read:packages` token (needed to pull anyway) instead of a second token |
 | 45 | Deploy health = a heartbeat carrying the new image's build sha (`GET /api/health/worker`) + an agent-token round trip; a failed sha is remembered and never retried | Proves the *new* worker reached the API (not just that a container runs); remembering bad shas stops a rollback loop every 15 min and keeps the Discord alert to one post |
 | 46 | PR previews keep Vercel's Git integration; a parallel GitHub job migrates the shared preview DB | Nothing reads the DB at build time, so no ordering is needed; reusing Vercel previews avoids a second deploy path |
+| 47 | Cross-component behavior is tested by a deterministic system test (tier A) on every PR; the real OpenClaw agent is evaluated nightly on a local model (tier B) and reports a pass rate instead of gating | Each milestone tested against contracts in isolation, so the bugs were at the seams; an LLM in the loop is too slow and non-deterministic to gate merges ([TESTING.md](TESTING.md)) |
+| 48 | Name resolution in the skills uses the lookup's `match` (name score + lead), not `confidence` | `confidence` describes the stock estimate; acting only on "high" made almost every list edit and text purchase fall back to free text |
