@@ -38,6 +38,8 @@ export interface PaperReceiptResult {
   }[];
   subtotalCents: number | null;
   totalCents: number | null;
+  /** Discount lines the worker didn't post (positive cents). */
+  discountCents?: number | null;
 }
 
 const STORE_NOISE = new Set(["the", "market", "markets", "store", "stores", "inc", "co", "llc"]);
@@ -64,6 +66,7 @@ export function paperReceiptInput(result: PaperReceiptResult, tz: string): Recei
     acquiredAt: zonedToUtc(result.date, 12, 0, tz),
     subtotalCents: result.subtotalCents,
     totalCents: result.totalCents,
+    discountCents: result.discountCents ?? null,
     lines: result.lines.map((l) => ({
       rawText: l.rawText,
       asin: null,

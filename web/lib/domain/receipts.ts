@@ -77,6 +77,8 @@ export interface ReceiptInput {
   acquiredAt: string;
   subtotalCents: number | null;
   totalCents: number | null;
+  /** Paper: discount/coupon lines read but not posted (positive cents; the totals check adds them). */
+  discountCents?: number | null;
   /** Required for `manual` receipts (dedupe key). */
   idempotencyKey?: string | null;
   lines: readonly ReceiptLineInput[];
@@ -236,12 +238,15 @@ export function receiptDedupeKey(r: ReceiptInput, tz: string): string {
   }
 }
 
-/** Line totals (fee lines included) vs the subtotal, to the cent; n/a when any total is missing. */
+/**
+ * Line totals (fee lines included, unposted discounts subtracted) vs the subtotal, to the cent;
+ * n/a when any total is missing.
+ */
 export function totalsCheck(
-  r: Pick<ReceiptInput, "subtotalCents" | "lines">,
+  r: Pick<ReceiptInput, "subtotalCents" | "lines" | "discountCents">,
 ): "pass" | "fail" | "n/a" {
   if (r.subtotalCents === null || r.lines.some((l) => l.lineTotalCents === null)) return "n/a";
-  const sum = r.lines.reduce((s, l) => s + l.lineTotalCents!, 0);
+  const sum = r.lines.reduce((s, l) => s + l.lineTotalCents!, 0) - (r.discountCents ?? 0);
   return sum === r.subtotalCents ? "pass" : "fail";
 }
 

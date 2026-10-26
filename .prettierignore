@@ -9,5 +9,6 @@ worker/
 agent/
 diagnostics/
 .next-e2e/
+.next-system/
 playwright-report/
 test-results/

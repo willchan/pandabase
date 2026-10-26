@@ -69,6 +69,7 @@ def to_result(raw: VlmReceipt, today: date) -> tuple[PaperReceiptResult, dict[st
     lines: list[Line] = []
     all_totals: list[int | None] = []
     discounts = 0
+    discount_cents = 0
     for vl in raw.lines:
         text = vl.raw_text.strip()
         if not text:
@@ -76,9 +77,10 @@ def to_result(raw: VlmReceipt, today: date) -> tuple[PaperReceiptResult, dict[st
         total = cents(vl.line_total)
         all_totals.append(total)
         # Discount/coupon lines (negative) count toward the totals check but aren't purchases,
-        # and the contract's money fields are ≥ 0.
+        # and the contract's money fields are ≥ 0: their sum goes in `discount_cents`.
         if total is not None and total < 0:
             discounts += 1
+            discount_cents -= total
             continue
         unit = cents(vl.unit_price)
         lines.append(
@@ -104,6 +106,7 @@ def to_result(raw: VlmReceipt, today: date) -> tuple[PaperReceiptResult, dict[st
         subtotal_cents=nonneg(subtotal),
         tax_cents=nonneg(cents(raw.tax)),
         total_cents=nonneg(cents(raw.total)),
+        discount_cents=discount_cents or None,
         totals_check=check,
     )
     telemetry: dict[str, object] = {

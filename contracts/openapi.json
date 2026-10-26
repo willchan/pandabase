@@ -1437,6 +1437,13 @@
             "minLength": 1,
             "type": "string"
           },
+          "match": {
+            "enum": [
+              "confident",
+              "possible"
+            ],
+            "type": "string"
+          },
           "name": {
             "type": "string"
           },
@@ -1464,6 +1471,7 @@
           "item_id",
           "name",
           "score",
+          "match",
           "base_unit",
           "on_hand",
           "status",
@@ -1714,6 +1722,14 @@
           "date": {
             "format": "date",
             "type": "string"
+          },
+          "discount_cents": {
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
           },
           "lines": {
             "items": {

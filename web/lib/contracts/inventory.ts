@@ -18,7 +18,10 @@ export const InventoryEventInput = named(
     kind: z.enum(["observed", "critical", "consumed", "discarded", "moved", "acquired"]),
     /** Defaults to the item's default location. */
     location: Location.optional(),
-    /** Base units (purchase units for `acquired`). */
+    /**
+     * Base units (purchase units for `acquired`). Omitted on `discarded` / `moved`: everything
+     * estimated at `location` ("threw out the spinach", "froze the chicken").
+     */
     quantity: z.number().min(0).nullable().optional(),
     to_location: Location.optional(),
     /** Defaults to now. */
@@ -63,10 +66,16 @@ export const LookupMatch = named(
     item_id: Id,
     name: z.string(),
     score: z.number(),
+    /**
+     * `confident`: the words name this item (top hit, clear lead) — act on `item_id`.
+     * `possible`: treat the words as free text or ask once. Not the estimate's `confidence`.
+     */
+    match: z.enum(["confident", "possible"]),
     base_unit: z.string(),
     on_hand: z.number(),
     status: InventoryStatus,
     runout_at: Timestamp.nullable(),
+    /** How sure the stock estimate is (high = counted recently); says nothing about the name. */
     confidence: z.enum(["high", "medium", "low"]),
     /** Ready-to-post answer, e.g. "~2 milk (bought Oct 12, unverified) → probably fine". */
     text: z.string(),

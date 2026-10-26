@@ -66,6 +66,41 @@ jobs:
             web/test-results
           retention-days: 7
 
+  e2e-system:
+    # Tier A system test (docs/TESTING.md): State Engine (next build/start) + worker (fake
+    # Ollama/R2) + pandabase-tools running the skills' commands + Playwright, on a seeded SQLite db.
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - uses: astral-sh/setup-uv@v7
+        with:
+          version: "0.13.3"
+          enable-cache: true
+          cache-dependency-glob: |
+            worker/uv.lock
+            agent/tools/uv.lock
+      - run: pnpm install --frozen-lockfile
+      - run: (cd worker && uv sync --locked) && (cd agent/tools && uv sync --locked)
+      - name: Install Chromium for Playwright (Python)
+        working-directory: agent/tools
+        run: uv run playwright install --with-deps chromium
+      - run: make system-lint
+      - run: make e2e-system
+        env:
+          SYSTEM_KEEP: ${{ runner.temp }}/e2e-system
+      - if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: e2e-system
+          path: ${{ runner.temp }}/e2e-system
+          retention-days: 7
+
   contracts:
     # Zod contracts → openapi.json → Pydantic models must be committed and up to date.
     runs-on: ubuntu-latest

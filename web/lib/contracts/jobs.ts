@@ -98,6 +98,11 @@ export const PaperReceiptResult = named(
     subtotal_cents: Cents.nullable(),
     tax_cents: Cents.nullable(),
     total_cents: Cents.nullable(),
+    /**
+     * Σ of the discount/coupon lines the worker read but doesn't post (they aren't purchases),
+     * as a positive amount; the app's totals check subtracts it. Optional: older workers omit it.
+     */
+    discount_cents: Cents.nullable().optional(),
     /** Worker's check: |Σ line_total − subtotal| ≤ 2¢. */
     totals_check: z.enum(["pass", "fail", "n/a"]),
   }),

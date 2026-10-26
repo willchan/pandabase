@@ -120,6 +120,7 @@ class LookupMatch(BaseModel):
     by_location: list[ByLocationItem]
     confidence: Literal["high", "medium", "low"]
     item_id: Annotated[str, Field(max_length=64, min_length=1)]
+    match: Literal["confident", "possible"]
     name: str
     on_hand: float
     runout_at: AwareDatetime | None
@@ -178,6 +179,7 @@ class Line(BaseModel):
 
 class PaperReceiptResult(BaseModel):
     date: date_aliased
+    discount_cents: Annotated[int | None, Field(ge=0, le=9007199254740991)] = None
     lines: Annotated[list[Line], Field(max_length=300)]
     store: Annotated[str, Field(min_length=1)]
     subtotal_cents: Annotated[int | None, Field(ge=0, le=9007199254740991)]
