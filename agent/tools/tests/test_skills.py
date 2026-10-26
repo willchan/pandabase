@@ -60,8 +60,16 @@ def commands(name: str) -> list[str]:
     _, body = frontmatter(SKILLS / name / "SKILL.md")
     found = re.findall(r"`(pandabase-tools [^`]+)`", body)
     for block in re.findall(r"```sh\n(.*?)```", body, re.S):
-        found += [ln.strip() for ln in block.splitlines() if ln.startswith("pandabase-tools ")]
+        found += [
+            ln.strip() for ln in block.splitlines() if ln.lstrip().startswith("pandabase-tools ")
+        ]
     return found
+
+
+def test_commands_in_indented_blocks_are_checked() -> None:
+    """Regression (system test, tier A): a ```sh block inside a list item is indented, and its
+    commands (`receipts ingest`) were never extracted, so they could drift unnoticed."""
+    assert any(c.startswith("pandabase-tools receipts ingest") for c in commands(NAMES[2]))
 
 
 def argv_of(cmd: str) -> list[str]:

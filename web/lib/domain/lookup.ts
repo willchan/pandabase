@@ -23,6 +23,23 @@ export function searchItems(
     .map(({ id, score }) => ({ id, score }));
 }
 
+export type NameMatch = "confident" | "possible";
+
+/**
+ * Per hit (best first): `confident` when it is the top hit, scores ≥ `lookup.confidentScore` and
+ * leads the next hit by ≥ `lookup.confidentLead` — the agent may act on it ("skip bananas");
+ * otherwise `possible` (free text, or one clarifying question). Independent of the estimate's
+ * confidence.
+ */
+export function nameMatch(hits: readonly { score: number }[], config: Config): NameMatch[] {
+  const [top, next] = hits;
+  const confident =
+    top !== undefined &&
+    top.score >= config.lookup.confidentScore &&
+    (next === undefined || top.score - next.score >= config.lookup.confidentLead);
+  return hits.map((_, i) => (i === 0 && confident ? "confident" : "possible"));
+}
+
 export type LookupConfidence = "high" | "medium" | "low";
 
 export interface LookupInput {

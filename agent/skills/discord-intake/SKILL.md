@@ -65,7 +65,8 @@ replies to the photo with the job summary). Don't poll for results yourself. If 
 ## Text purchases and inventory changes
 
 Resolve item names with `pandabase-tools api get /api/items/lookup -q q=<words>` (use
-`matches[0].item_id` when `confidence` is `high` or it's the only match). Then:
+`matches[0].item_id` when its `match` is `confident`; `confidence` is about the stock estimate,
+not the name). Then:
 
 | They say | Events (`pandabase-tools api post /api/inventory/events --json '{"events": [...]}' --actor <sender id> --key discord:<message id>`) |
 |---|---|

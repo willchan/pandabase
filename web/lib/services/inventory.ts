@@ -23,7 +23,7 @@ import type {
   ProductRejectResponse,
 } from "../contracts";
 import { projectInventory } from "../domain/inventory";
-import { lookupAnswer, searchItems } from "../domain/lookup";
+import { lookupAnswer, nameMatch, searchItems } from "../domain/lookup";
 import { rejectProduct } from "../domain/productChoice";
 import { badRequest } from "../http";
 import { canonicalItems, getItem, getProduct, toCandidate } from "../repo/catalog";
@@ -97,6 +97,14 @@ export async function recordInventoryEvents(
         }
         return e.quantity;
       };
+      // "froze the chicken" / "threw out the spinach": no quantity = all of it at `location`
+      // (the current estimate there, as of the events already written in this request).
+      const allHere = async () => {
+        if (e.quantity !== null && e.quantity !== undefined) return e.quantity;
+        const est = (await loadEstimates(tx, ctx.now, ctx.config, [it.id])).get(it.id);
+        const here = est?.estimate.byLocation.find((l) => l.location === location)?.onHand ?? 0;
+        return round(Math.max(0, here));
+      };
       switch (e.kind) {
         case "observed":
           Object.assign(row, { kind: "observed", quantity: qty() });
@@ -109,13 +117,17 @@ export async function recordInventoryEvents(
           Object.assign(row, { kind: "consumed", quantity: 0, statusOverride: "consumed" });
           break;
         case "discarded":
-          Object.assign(row, { kind: "discarded", quantity: qty() });
+          Object.assign(row, { kind: "discarded", quantity: await allHere() });
           break;
         case "moved":
           if (!e.to_location || e.to_location === location) {
             throw badRequest("moved needs a to_location different from location");
           }
-          Object.assign(row, { kind: "moved", quantity: qty(), toLocation: e.to_location });
+          Object.assign(row, {
+            kind: "moved",
+            quantity: await allHere(),
+            toLocation: e.to_location,
+          });
           break;
       }
       await tx.insert(inventoryEvent).values(row);
@@ -218,9 +230,10 @@ export async function lookupItems(
     ctx.config,
     hits.map((h) => h.id),
   );
+  const match = nameMatch(hits, ctx.config);
   return {
     query,
-    matches: hits.flatMap((h) => {
+    matches: hits.flatMap((h, i) => {
       const e = estimates.get(h.id);
       if (!e) return [];
       const answer = lookupAnswer({
@@ -236,6 +249,7 @@ export async function lookupItems(
           item_id: h.id,
           name: e.item.canonicalName,
           score: round(h.score),
+          match: match[i]!,
           base_unit: e.item.baseUnit,
           on_hand: round(e.estimate.onHand),
           status: e.estimate.status,

@@ -72,8 +72,8 @@ Map each reply in the cycle thread to one call. Resolve item names first:
 pandabase-tools api get /api/items/lookup -q q=<item words>
 ```
 
-Use `matches[0].item_id` when its `confidence` is `high` or it's the only match; otherwise treat
-the words as free text. `C` = the current cycle id.
+Use `matches[0].item_id` when its `match` is `confident`; otherwise treat the words as free text
+(`confidence` is about the stock estimate, not the name). `C` = the current cycle id.
 
 | They say | Call |
 |---|---|

@@ -51,6 +51,10 @@ export const DEFAULT_CONFIG = {
     /** Token-set score a canonical name needs to be returned. */
     minScore: 0.6,
     maxResults: 5,
+    /** The top hit names the item (`match: confident`) at this score… */
+    confidentScore: 0.9,
+    /** …and this far ahead of the runner-up ("milk" → Whole Milk vs Oat Milk is a tie). */
+    confidentLead: 0.1,
     /** A count this recent makes the answer high-confidence. */
     freshVerifiedDays: 7,
   },

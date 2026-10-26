@@ -57,6 +57,15 @@ describe("session auth", () => {
     expect((await call("cycleCurrent", "session")).status).toBe(403);
   });
 
+  // Security review (tier A PR): pages already send an allowed email without a member row to
+  // NotAMember, but the API let it act with every non-cron scope, attributed to nobody.
+  it("an allowed email without a member row may not call the API", async () => {
+    vi.stubEnv("ALLOWED_EMAILS", "alex@example.com,sam@example.com,new@example.com");
+    h.session.email = "new@example.com";
+    const res = await call("cycleCurrent", "session");
+    expect(res).toMatchObject({ status: 403, body: { error: "not a household member" } });
+  });
+
   it("DEV_AUTH_BYPASS works only in development", async () => {
     vi.stubEnv("DEV_AUTH_BYPASS", "1");
     vi.stubEnv("NODE_ENV", "production");
@@ -97,6 +106,18 @@ describe("actor resolution", () => {
 });
 
 describe("validation", () => {
+  // Security review (tier A PR): any string ≤ 200 chars was accepted, so the agent token could
+  // have the worker fetch (and the app presign) any key in the bucket.
+  it.each(["keyframes/01JOB/0.jpg", "media/../keyframes/x.jpg", "media/x.txt", "/media/x.jpg"])(
+    "jobs only take an uploaded media/ key (%s → 400)",
+    async (key) => {
+      const res = await h.call(HANDLERS.jobsCreate.POST, "/api/jobs", {
+        body: { actor_discord_id: ALEX, job_type: "trash_cam", media_r2_key: key },
+      });
+      expect(res.status).toBe(400);
+    },
+  );
+
   it("rejects invalid JSON and contract violations with 400 + issue paths", async () => {
     const bad = await h.call(HANDLERS.jobsCreate.POST, "/api/jobs", { body: "{nope" });
     expect(bad).toMatchObject({ status: 400, body: { error: "body is not valid JSON" } });
@@ -148,6 +169,27 @@ describe("idempotency", () => {
     });
     expect(other.status).toBe(200);
     expect(await h.db.select().from(idempotencyKey)).toHaveLength(2);
+  });
+
+  // Security review (tier A PR): keys were scoped to the route *pattern*, so a key reused on
+  // another cycle's /overrides replayed the first cycle's answer and wrote nothing.
+  it("keys are scoped per path, not per route pattern", async () => {
+    const headers = { "idempotency-key": "k-4" };
+    const status = (id: string) =>
+      h.call(HANDLERS.cycleStatus.POST, `/api/grocery/cycle/${id}/status`, {
+        params: { id },
+        body: { status: "nudged" },
+        headers,
+      });
+    const first = await status("does-not-exist");
+    expect(first.status).toBe(404);
+    const cur = await h.call<{ cycle: { id: string } }>(
+      HANDLERS.cycleCurrent.GET,
+      "/api/grocery/cycle/current",
+    );
+    const real = await status(cur.body.cycle.id);
+    expect(real.status).toBe(200);
+    expect(real.headers.get("idempotent-replayed")).toBeNull();
   });
 
   it("GET routes and the worker claim ignore the header", async () => {

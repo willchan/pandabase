@@ -345,11 +345,11 @@ def price_checks(
             if cand.id in seen or cand.stance == "rejected":
                 continue
             seen.add(cand.id)
-            if len(seen) > cfg.max_price_checks:
-                return quotes
-            if not cand.asin:
+            if not cand.asin:  # nothing to open: doesn't count against the page budget
                 tel.emit("price_lookup_failed", product_id=cand.id, error="no_asin")
                 continue
+            if opened >= cfg.max_price_checks:
+                return quotes
             if opened:
                 sleep(cfg.page_delay_seconds)
             opened += 1

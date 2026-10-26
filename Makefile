@@ -2,7 +2,7 @@
 .PHONY: install dev lint typecheck test check py-check db-reset db-seed db-check contracts contracts-check \
 	secrets vercel-env up up-local down logs update update-pause update-resume update-status rollback \
 	install-update-timer deploy-test migrations-check install-agent-tools install-agent-skills install-agent-cron \
-	install-chromium install-ollama-env backfill smoke ops-check
+	install-chromium install-ollama-env backfill smoke ops-check e2e-system system-lint eval-agent
 
 PY_PROJECTS := worker agent/tools
 
@@ -27,8 +27,27 @@ py-check:
 	  (cd $$p && uv run ruff check && uv run ruff format --check && uv run mypy . && uv run pytest) || exit 1; \
 	done
 
+# The system test's Python (tests/system) passes agent/tools' ruff + strict mypy.
+system-lint:
+	cd agent/tools && uv run ruff check --config pyproject.toml ../../tests/system && \
+	  uv run ruff format --check --config pyproject.toml ../../tests/system && \
+	  uv run mypy --config-file pyproject.toml ../../tests/system
+
+# Tier A system test (docs/TESTING.md): next build + start, the real worker against fake
+# Ollama/R2, the real pandabase-tools running the skills' commands, Playwright for the web UI.
+# SYSTEM_BUILD=0 reuses web/.next-system; SYSTEM_KEEP=<dir> keeps the db and logs.
+e2e-system:
+	cd agent/tools && uv run pytest -c ../../tests/system/pytest.ini ../../tests/system
+
+# Tier B (docs/TESTING.md): the real OpenClaw agent + our skills on a local Ollama model against
+# the tier A stack; reports a pass rate. Skips without `openclaw` on PATH or EVAL_MODEL pulled.
+# EVAL_MODEL (qwen3.5:4b), EVAL_OLLAMA_URL, EVAL_MIN_PASS_RATE (0), EVAL_REPORT_DIR.
+eval-agent:
+	cd agent/tools && uv run pytest -c ../../tests/system/pytest.ini -o python_files=eval_*.py -rs \
+	  ../../tests/system
+
 # Everything CI runs.
-check: lint typecheck test py-check db-check contracts-check ops-check
+check: lint typecheck test py-check system-lint db-check contracts-check ops-check
 	pnpm --filter web build
 
 db-reset:

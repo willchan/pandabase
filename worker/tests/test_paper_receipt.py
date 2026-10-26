@@ -68,6 +68,16 @@ def test_discount_lines_are_not_posted_as_purchases() -> None:
     assert telemetry["discount_lines"] == 1
 
 
+def test_dropped_discounts_are_reported_for_the_apps_totals_check() -> None:
+    """Regression (system test, tier A): without the dropped coupon the State Engine's exact
+    check failed every discounted receipt ("totals don't add up")."""
+    result, _ = to_result(receipt([5.00, -1.00, -0.25], 3.75), TODAY)
+    assert result.discount_cents == 125
+    assert sum(ln.line_total_cents or 0 for ln in result.lines) - 125 == result.subtotal_cents
+    plain, _ = to_result(receipt([5.00], 5.00), TODAY)
+    assert plain.discount_cents is None
+
+
 def test_fallbacks_for_unreadable_fields() -> None:
     raw = VlmReceipt(
         store="  ",

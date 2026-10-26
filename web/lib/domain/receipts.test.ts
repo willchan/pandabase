@@ -608,6 +608,15 @@ describe("dedupe key and totals", () => {
       totalsCheck({ subtotalCents, lines: totals.map((t) => line("x", { lineTotalCents: t })) }),
     ).toBe(out);
   });
+
+  // Regression (system test, tier A): the worker doesn't post coupon lines (money fields are
+  // ≥ 0), so a receipt with a $1 coupon read "totals don't add up" in Cleanup although it did.
+  it("counts the discounts the worker dropped (paper receipts)", () => {
+    const lines = [line("x", { lineTotalCents: 500 }), line("y", { lineTotalCents: 300 })];
+    expect(totalsCheck({ subtotalCents: 700, lines, discountCents: 100 })).toBe("pass");
+    expect(totalsCheck({ subtotalCents: 700, lines })).toBe("fail");
+    expect(totalsCheck({ subtotalCents: 800, lines, discountCents: null })).toBe("pass");
+  });
 });
 
 describe("resolveReceiptReview", () => {

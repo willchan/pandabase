@@ -12,10 +12,16 @@ export interface R2Config {
   accessKeyId: string;
   secretAccessKey: string;
   bucket: string;
+  /** S3 endpoint origin; default `https://{accountId}.r2.cloudflarestorage.com` (`R2_ENDPOINT`
+   * points the system tests at a local stub). */
+  endpoint?: string;
 }
 
 export function createR2Presigner(cfg: R2Config): Presigner {
-  const endpoint = `https://${cfg.accountId}.r2.cloudflarestorage.com`;
+  const endpoint = (cfg.endpoint || `https://${cfg.accountId}.r2.cloudflarestorage.com`).replace(
+    /\/+$/,
+    "",
+  );
   return {
     async presign(method, key, expiresIn) {
       const url = new URL(
@@ -55,7 +61,7 @@ export function r2FromEnv(env: NodeJS.ProcessEnv = process.env): Presigner {
       },
     };
   }
-  return createR2Presigner(cfg);
+  return createR2Presigner({ ...cfg, endpoint: env.R2_ENDPOINT || undefined });
 }
 
 /** `media/{yyyy}/{mm}/{id}.{ext}` (DESIGN §5 step 2). */
