@@ -46,6 +46,7 @@ __pycache__/
 
 # playwright (web e2e)
 .next-e2e/
+.next-system/
 playwright-report/
 test-results/
 # Mac Mini ops (make secrets / README): real OpenClaw patches with ids filled in

@@ -1,6 +1,6 @@
 // Job lifecycle (DESIGN §5): upload URL → create → claim → lease expiry → re-claim → complete →
 // notifications → notified; retries and final failure; Trash Cam and merge-suggest results.
-import { auditJob, inventoryEvent, inventoryState, item, reviewItem } from "@pandabase/db";
+import { auditJob, inventoryEvent, inventoryState, item, receipt, reviewItem } from "@pandabase/db";
 import { and, eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ALEX, SAM, setup, type Harness } from "@/test/harness";
@@ -170,6 +170,34 @@ describe("job lifecycle", () => {
     );
     expect(marked.body.job.notified_at).toBe(h.now());
     expect(await notifications()).toEqual([]);
+  });
+
+  // Regression (system test, tier A): M6's fixture receipt has a $1 coupon the worker doesn't
+  // post; the receipt row said totals_check "fail" ("totals don't add up" in Cleanup).
+  it("a paper receipt's dropped discounts count toward the app's totals check", async () => {
+    const job = await create({ job_type: "paper_receipt", media_r2_key: "media/2026/10/r.jpg" });
+    const c = (await claim())!;
+    const done = await complete({
+      job_id: job.id,
+      attempt: c.attempt,
+      prompt_version: "paper_receipt.v1",
+      result: {
+        store: "SYNTHETIC FOODS MARKET",
+        date: "2026-10-18",
+        lines: [
+          { raw_text: "WHOLE MILK 1GAL", qty: null, unit_price_cents: null, line_total_cents: 429 },
+          { raw_text: "SOURDOUGH BREAD", qty: null, unit_price_cents: null, line_total_cents: 599 },
+        ],
+        subtotal_cents: 928,
+        tax_cents: 0,
+        total_cents: 928,
+        discount_cents: 100,
+        totals_check: "pass",
+      },
+    });
+    expect(done.status).toBe(200);
+    const [row] = await h.db.select().from(receipt).where(eq(receipt.jobId, job.id));
+    expect(row!.totalsCheck).toBe("pass");
   });
 
   it("failures retry until the third attempt, then fail with a failed_job review", async () => {

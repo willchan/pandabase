@@ -150,12 +150,12 @@ export function buildSeed(opts: SeedOptions = {}): Rows {
     systemTelemetry: [],
   };
 
-  // The last shop is the Saturday before `now`; weeks run back from there.
-  const nowDow = new Date(nowMs).getUTCDay();
+  // The last shop is the Saturday before `now`'s household-local date; weeks run back from there.
+  const today = new Date(localDate(nowMs)); // UTC midnight of the local date
   const lastShopDay = Date.UTC(
-    new Date(nowMs).getUTCFullYear(),
-    new Date(nowMs).getUTCMonth(),
-    new Date(nowMs).getUTCDate() - ((nowDow + 1) % 7 || 7),
+    today.getUTCFullYear(),
+    today.getUTCMonth(),
+    today.getUTCDate() - ((today.getUTCDay() + 1) % 7 || 7),
   );
   const firstShopDay = lastShopDay - (WEEKS - 1) * 7 * DAY;
   const startMs = firstShopDay - 14 * DAY;
@@ -585,13 +585,18 @@ export function buildSeed(opts: SeedOptions = {}): Rows {
     source: "manual",
     actorMemberId: sam.id,
   });
-  ev(byName("Chicken Thighs"), lastShopDay + 20 * 3_600_000 + DAY, {
-    kind: "moved",
-    quantity: 1.5,
-    toLocation: "freezer",
-    source: "manual",
-    actorMemberId: alex.id,
-  });
+  // Sunday 13:00 PT after the shop, or 2h ago when seeded before that.
+  ev(
+    byName("Chicken Thighs"),
+    Math.min(lastShopDay + 20 * 3_600_000 + DAY, nowMs - 2 * 3_600_000),
+    {
+      kind: "moved",
+      quantity: 1.5,
+      toLocation: "freezer",
+      source: "manual",
+      actorMemberId: alex.id,
+    },
+  );
   ev(byName("Baby Spinach"), nowMs - 6 * 3_600_000, {
     kind: "presumed_discarded",
     quantity: 2,
@@ -756,10 +761,13 @@ export function buildSeed(opts: SeedOptions = {}): Rows {
   }
 
   // --- the open cycle -------------------------------------------------------------------------
-  const openMs = lastShopDay + 2 * DAY + 16 * 3_600_000; // Monday 09:00 PT
+  // Monday 09:00 PT, or 5h ago when that is still ahead (seeded on a Sunday): the overrides and
+  // price quotes below follow within 4h.
+  const openMs = Math.min(lastShopDay + 2 * DAY + 16 * 3_600_000, nowMs - 5 * 3_600_000);
   const openCycle = {
     ...stamp(openMs),
-    weekLabel: isoWeekLabel(new Date(nowMs)),
+    // The week of its own shop (the next Saturday), as `weekLabelToOpen` labels it.
+    weekLabel: isoWeekLabel(new Date(lastShopDay + 7 * DAY)),
     discordThreadId: "400000000000000999",
     status: "open" as const,
     openedAt: iso(openMs),

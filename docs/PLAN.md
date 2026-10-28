@@ -42,7 +42,7 @@ contracts.
 | M6 Python worker | done | #8 |
 | M7 Agent skill pack & tools | done | #9 |
 | M8 Ops, compose, README | done | #11 |
-| M9 Continuous deployment | in review | |
+| M9 Continuous deployment | done | #14 |
 
 ---
 
@@ -1056,3 +1056,28 @@ uses). `make secrets` was checked: it keeps every non-empty value, but keeps an 
 file as is (no template merge), so Phase 2 copies the template before pasting tokens.
 *Not verifiable here:* the provider dashboards' exact labels (listed at the end of the guide);
 whether dispatch inputs show publicly on the run page; that a re-run reads current secrets.
+
+---
+
+## After M9 — System tests & hardening
+
+Not a milestone: one PR ("System end-to-end tests (tier A), OpenClaw eval plan, security review",
+branch `claude/system-e2e`). Details, the bugs found and the security review are in
+[TESTING.md](TESTING.md).
+
+**Notes:**
+
+- Tier A (`make e2e-system`, CI `e2e-system`) runs a household week through every component; agent
+  steps run the commands the skills name, so **editing a SKILL.md command can break it** — update
+  `tests/system/test_week.py` in the same PR. The API has no clock override; the steps work
+  relative to the seed's `now`.
+- Contract changes (contracts regenerated): `LookupMatch.match`, `PaperReceiptResult.discount_cents`
+  (optional), `JobCreateRequest.media_r2_key` pattern (`media/…`). Behavior: `moved`/`discarded`
+  without a quantity take all at the location; idempotency keys are scoped to the concrete path; a
+  session needs a member row; Google sign-in needs `email_verified`; `R2_ENDPOINT` (tests only).
+  Touched M2 (seed), M4/M5 (web), M6 (worker), M7 (skills, tools, `test_skills.py`).
+- Tier B (`make eval-agent`, `agent-eval.yml`) was built from OpenClaw's docs but **not run** here
+  (no Ollama registry access, Node 22): the first `workflow_dispatch` run verifies it.
+- Follow-ups: resumed `cart build` repeats price checks; WF candidates without an ASIN are flagged
+  for price checks the tools can't do; idempotency check-then-store race (TESTING.md accepted risk
+  2); a tier-A CDP driver test via `--host-resolver-rules` + a local TLS server.

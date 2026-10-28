@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_CONFIG } from "../config";
-import { lookupAnswer, searchItems, type LookupInput } from "./lookup";
+import { lookupAnswer, nameMatch, searchItems, type LookupInput } from "./lookup";
 
 const config = DEFAULT_CONFIG;
 const now = "2026-10-20T16:00:00.000Z";
@@ -21,6 +21,23 @@ describe("searchItems", () => {
   it("caps results", () => {
     const many = Array.from({ length: 9 }, (_, i) => ({ id: `m${i}`, canonicalName: "Milk" }));
     expect(searchItems("milk", many, config)).toHaveLength(config.lookup.maxResults);
+  });
+});
+
+// Regression (system test, tier A): the skills resolved "oat milk" / "bananas" to an item only
+// when the lookup's `confidence` was `high`, but that is the *estimate's* confidence (high only
+// after a recent count) — so list edits and text purchases almost always fell back to free text.
+describe("nameMatch — is the top hit the item the words name?", () => {
+  const hits = (q: string) => searchItems(q, items, config);
+  it("is confident for a clear winner, regardless of stock confidence", () => {
+    expect(nameMatch(hits("oat milk"), config)).toEqual(["confident", "possible"]);
+    expect(nameMatch(hits("eggs"), config)).toEqual(["confident"]);
+    expect(nameMatch(hits("toilet paper rolls"), config)).toEqual(["confident"]);
+  });
+  it("is only possible when two items tie or the score is weak", () => {
+    expect(nameMatch(hits("milk"), config)).toEqual(["possible", "possible"]);
+    expect(nameMatch(hits("egs"), config)).toEqual(["possible"]); // 0.86: a typo, not a name
+    expect(nameMatch([], config)).toEqual([]);
   });
 });
 

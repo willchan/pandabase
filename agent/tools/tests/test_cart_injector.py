@@ -276,3 +276,37 @@ def test_price_checks_quote_candidates_and_log_failures(no_sleep: Callable[[floa
     quotes = price_checks(FakeDriver(pages), preds, CartConfig(), tel, no_sleep)
     assert [(q.product_id, q.price_cents) for q in quotes] == [("P1", 479), ("P5", 749)]
     assert [m["error"] for m in tel.metrics("price_lookup_failed")] == ["no_price", "no_asin"]
+
+
+def test_no_asin_candidates_dont_use_up_the_price_check_budget(
+    no_sleep: Callable[[float], None],
+) -> None:
+    """Regression (system test, tier A): Whole Foods candidates without an ASIN were counted
+    against `max_price_checks` before being skipped, so they could starve the Amazon ones."""
+    cands = [product(f"W{n}", None, "wholefoods") for n in range(3)] + [product("P1", "B0SYNTH001")]
+    preds = c.PredictionsResponse.model_validate(
+        {
+            "cycle_id": "C1",
+            "generated_at": "2026-10-24T17:00:00Z",
+            "needs_price_check_item_ids": ["I-eggs"],
+            "skipped_item_ids": [],
+            "lines": [
+                {
+                    "item_id": "I-eggs",
+                    "name": "Eggs",
+                    "free_text": None,
+                    "base_unit": "egg",
+                    "quantity": 1,
+                    "reason": "runout",
+                    "overrides": [],
+                    "product": None,
+                    "needs_price_check": True,
+                    "choice_reason": None,
+                    "candidates": cands,
+                }
+            ],
+        }
+    )
+    driver = FakeDriver(lambda url: (url, "product_jsonld.html"))
+    quotes = price_checks(driver, preds, CartConfig(max_price_checks=1), Telemetry(), no_sleep)
+    assert [q.product_id for q in quotes] == ["P1"]

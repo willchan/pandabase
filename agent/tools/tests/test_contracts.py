@@ -12,6 +12,7 @@ def test_lookup_response_parses() -> None:
                     "item_id": "01ITEM",
                     "name": "Eggs",
                     "score": 1,
+                    "match": "confident",
                     "base_unit": "egg",
                     "on_hand": 4.2,
                     "status": "stocked",

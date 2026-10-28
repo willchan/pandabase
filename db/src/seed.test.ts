@@ -37,6 +37,32 @@ describe("seed", () => {
     ).toBeGreaterThanOrEqual(3);
   });
 
+  // Regression (system test, tier A): e2e/system suites seed relative to the real clock. Seeded
+  // on a Sunday evening PT (already Monday in UTC), the open cycle was labelled with the *UTC*
+  // ISO week and opened "Monday 09:00" — in the future.
+  it("seeded at any hour of any weekday, nothing happens after now and the week is local", () => {
+    for (let h = 0; h < 7 * 24; h += 5) {
+      const now = new Date(Date.parse("2026-10-19T07:30:00.000Z") + h * 3_600_000).toISOString();
+      const r = buildSeed({ now });
+      const open = r.groceryCycle.find((c) => c.status === "open")!;
+      expect(open.openedAt! <= now, `opened_at ${open.openedAt} > now ${now}`).toBe(true);
+      const local = new Date(
+        new Intl.DateTimeFormat("en-CA", { timeZone: "America/Los_Angeles" }).format(
+          Date.parse(now),
+        ),
+      );
+      // The household-local week of the coming Saturday shop (today, on a Saturday).
+      const shop = local.getTime() + ((6 - local.getUTCDay() + 7) % 7) * 86_400_000;
+      expect(open.weekLabel, now).toBe(isoWeekLabel(new Date(shop)));
+      expect(new Set(r.groceryCycle.map((c) => c.weekLabel)).size).toBe(r.groceryCycle.length);
+      for (const [table, list] of Object.entries(r)) {
+        for (const row of list as { createdAt?: string }[]) {
+          if (row.createdAt) expect(row.createdAt <= now, `${table} at ${now}`).toBe(true);
+        }
+      }
+    }
+  });
+
   it("uses only synthetic identities", () => {
     for (const m of rows.member) expect(m.email).toMatch(/@example\.com$/);
   });

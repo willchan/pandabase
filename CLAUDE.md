@@ -11,6 +11,7 @@ authenticated HTTP API.
 | [docs/PRD.md](docs/PRD.md) | You need to know *what* the product does and *why* |
 | [docs/DESIGN.md](docs/DESIGN.md) | You're changing architecture, schema, API, algorithms, or agent behavior |
 | [docs/PLAN.md](docs/PLAN.md) | You're executing a build milestone — follow its *Session protocol* |
+| [docs/TESTING.md](docs/TESTING.md) | You're testing across components (system test, agent eval) or touching auth/security |
 | [docs/ROADMAP.md](docs/ROADMAP.md) | You're tempted to build chores, video audits, or freezer features — they're deferred |
 
 Read only the sections your task needs.
@@ -77,6 +78,10 @@ docker build -t pandabase-worker worker   # worker image (CI job worker-image)
 (cd worker && uv run python -m pandabase_worker)   # run the worker (env: PANDABASE_API_URL, WORKER_API_TOKEN, OLLAMA_URL)
 (cd agent/tools && uv run pandabase-tools --help)   # agent CLI used by the skills (JSON on stdout)
 (cd agent/tools && uv run pytest tests/test_skills.py)   # skill frontmatter + every command a skill names parses
+make e2e-system              # tier A system test: next start + worker + fake Ollama/R2 + tools + Playwright (~1 min)
+                             # SYSTEM_BUILD=0 reuses web/.next-system; SYSTEM_KEEP=<dir> keeps db + logs
+make system-lint             # ruff + strict mypy for tests/system (part of make check)
+make eval-agent              # tier B: real OpenClaw + skills on local Ollama (EVAL_MODEL); skips if unavailable
 make check                   # everything CI runs
 make ops-check               # shellcheck, actionlint, compose/plists, deploy bats tests, migration check, smoke ruff/mypy
 bats scripts/deploy/tests    # Mac Mini updater + migration check (git/docker/network stubbed)

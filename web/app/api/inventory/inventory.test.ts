@@ -101,7 +101,8 @@ describe("inventory events", () => {
       .from(inventoryEvent)
       .where(eq(inventoryEvent.id, res.body.event_ids[0]!));
     expect(flag).toMatchObject({ kind: "observed", quantity: null, statusOverride: "critical" });
-    expect((await post([{ item_id: milk, kind: "discarded" }])).status).toBe(400);
+    // No quantity = everything at that location (see the regression test below).
+    expect((await post([{ item_id: milk, kind: "discarded" }])).status).toBe(200);
   });
 
   it("moving stock to the freezer shows up in freezer aging", async () => {
@@ -129,6 +130,26 @@ describe("inventory events", () => {
       { query: { limit: "1" } },
     );
     expect(limited.body.items).toHaveLength(1);
+  });
+
+  // Regression (system test, tier A): discord-intake sends "froze the chicken" / "threw out the
+  // spinach" without a quantity (people don't say how much), and the API answered 400.
+  it("moved / discarded without a quantity take everything at that location", async () => {
+    const pb = await h.itemId("Peanut Butter"); // pantry
+    await post([{ item_id: pb, kind: "observed", quantity: 3 }]);
+    h.advance(60_000);
+    const moved = await post([{ item_id: pb, kind: "moved", to_location: "freezer" }]);
+    expect(moved.status).toBe(200);
+    const [ev] = await h.db
+      .select()
+      .from(inventoryEvent)
+      .where(eq(inventoryEvent.id, moved.body.event_ids[0]!));
+    expect(ev).toMatchObject({ kind: "moved", location: "pantry", toLocation: "freezer" });
+    expect(ev!.quantity).toBeCloseTo(3, 2); // minus a minute of estimated use
+    h.advance(60_000);
+    const tossed = await post([{ item_id: pb, kind: "discarded", location: "freezer" }]);
+    expect(tossed.status).toBe(200);
+    expect(tossed.body.estimates[0]!.on_hand).toBe(0);
   });
 
   it("text purchases become a manual receipt (EMA, stats) — idempotent with the key", async () => {

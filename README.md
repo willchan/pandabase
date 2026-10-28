@@ -548,4 +548,4 @@ model more often, not less.
 
 See [CLAUDE.md](CLAUDE.md) for every command. Quick start: `pnpm install`,
 `pnpm db:reset && pnpm db:seed`, `pnpm dev` (local DB, `DEV_AUTH_BYPASS=1` in `web/.env.local`),
-`make check` before pushing.
+`make check` before pushing. Test tiers (system test, agent eval, live): [docs/TESTING.md](docs/TESTING.md).

@@ -372,6 +372,7 @@ async function applyResult(
           })),
           subtotalCents: r.subtotal_cents,
           totalCents: r.total_cents,
+          discountCents: r.discount_cents ?? null,
         },
         ctx.config.householdTz,
       );

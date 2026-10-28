@@ -84,6 +84,10 @@ You need two databases: `pandabase` (production) and `pandabase-preview`
    **New Database**).
 3. Name: `pandabase`. Group/location: the default, or the region nearest
    you (e.g. US West). → **Create**.
+   If it offers a choice of engine, keep the default (**libSQL**). Don't
+   pick the new Rust engine (*Turso Database* / `tursodb`): on Turso Cloud
+   it's an early preview, and PandaBase is built and tested on libSQL
+   (`@libsql/client`, Drizzle's libSQL driver and migrations).
 4. Open the database. Copy its **URL** (starts with `libsql://`) and save
    it as *prod `TURSO_DATABASE_URL`*.
 5. On the same page: **Create Token** (sometimes under **⋯** or
@@ -543,6 +547,9 @@ match. Specifically:
   Token*) and whether it offers expiry and access level. Turso's docs
   describe tokens via the CLI and API; the dashboard has the same
   feature. Default expiry is *never*.
+- **Turso engine:** whether the create screen shows an engine choice at
+  all. Turso's docs say Turso Cloud runs on libSQL and the Rust engine is
+  an opt-in preview (`turso db create --tursodb`).
 - **Vercel:** whether the import screen's first deployment runs at all
   with `deploymentEnabled.main: false` (either is fine); where the Team ID
   sits on a Hobby account; the token's expiry choices.

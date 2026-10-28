@@ -1,0 +1,72 @@
+name: Agent eval
+
+# Tier B (docs/TESTING.md): the real OpenClaw agent with our skills, on a local Ollama model on the
+# runner's CPU, against the tier A stack. Scripted household messages; asserts API state, reports
+# a pass rate in the job summary. Never gates merges: opt-in (manual) and nightly only. No secrets:
+# the model runs on the runner, and the stack uses throwaway tokens and synthetic data.
+
+on:
+  workflow_dispatch:
+    inputs:
+      model:
+        description: Ollama model (tool-calling capable; CPU runner, so keep it small)
+        default: qwen3.5:4b
+      openclaw:
+        description: openclaw npm version
+        default: 2026.10.7
+      min_pass_rate:
+        description: Fail the run below this pass rate (0–1)
+        default: "0"
+  schedule:
+    - cron: "17 9 * * *" # 02:17 PT, after the day's merges
+
+concurrency:
+  group: agent-eval
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  eval:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    env:
+      EVAL_MODEL: ${{ inputs.model || 'qwen3.5:4b' }}
+      OPENCLAW_VERSION: ${{ inputs.openclaw || '2026.10.7' }}
+      EVAL_MIN_PASS_RATE: ${{ inputs.min_pass_rate || '0' }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - uses: astral-sh/setup-uv@v7
+        with:
+          version: "0.13.3"
+          enable-cache: true
+          cache-dependency-glob: |
+            worker/uv.lock
+            agent/tools/uv.lock
+      - run: pnpm install --frozen-lockfile
+      - run: (cd worker && uv sync --locked) && (cd agent/tools && uv sync --locked)
+      - name: Install OpenClaw (skips the eval if it fails)
+        continue-on-error: true
+        run: npm install -g "openclaw@$OPENCLAW_VERSION" && openclaw --version
+      - name: Install Ollama and pull the model (skips the eval if it fails)
+        continue-on-error: true
+        run: |
+          curl -fsSL https://ollama.com/install.sh | sh # starts the ollama systemd service
+          for _ in $(seq 30); do curl -fsS http://127.0.0.1:11434/api/tags >/dev/null && break; sleep 1; done
+          ollama pull "$EVAL_MODEL"
+      - run: make eval-agent
+        env:
+          EVAL_REPORT_DIR: ${{ runner.temp }}/agent-eval
+      - if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: agent-eval
+          path: ${{ runner.temp }}/agent-eval
+          if-no-files-found: ignore
+          retention-days: 30

@@ -30,8 +30,11 @@ export function authConfig(env: NodeJS.ProcessEnv = process.env): NextAuthConfig
     session: { strategy: "jwt" },
     pages: { signIn: "/sign-in", error: "/sign-in" },
     callbacks: {
-      // Rejected Google accounts land on /sign-in?error=AccessDenied.
-      signIn: ({ user }) => isAllowedEmail(user.email, env),
+      // Rejected Google accounts land on /sign-in?error=AccessDenied. Google must have verified
+      // the address (the dev provider only exists in development and checks the allowlist).
+      signIn: ({ user, account, profile }) =>
+        isAllowedEmail(user.email, env) &&
+        (account?.provider !== "google" || profile?.email_verified === true),
     },
   };
 }
