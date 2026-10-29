@@ -11,6 +11,7 @@ let h: Harness;
 beforeEach(async () => {
   h = await setup();
   session.email = "alex@example.com";
+  session.name = null;
 });
 afterEach(() => h.close());
 
@@ -32,11 +33,32 @@ describe("currentMember (pages and server actions)", () => {
     expect(await redirectOf(currentMember())).toBe("/sign-in");
   });
 
-  it("signed out → /sign-in; allowed but not a member → NotAMember", async () => {
+  it("signed out → /sign-in", async () => {
     session.email = null;
     expect(await redirectOf(currentMember())).toBe("/sign-in");
-    vi.stubEnv("ALLOWED_EMAILS", "new@example.com");
-    session.email = "new@example.com";
-    expect(await redirectOf(currentMember())).toBe("/sign-in?error=NotAMember");
+  });
+
+  it("creates the member on an allowed email's first visit, once", async () => {
+    vi.stubEnv("ALLOWED_EMAILS", "alex@example.com,New@Example.com");
+    session.email = "New@Example.com";
+    session.name = "Liza Example";
+    const first = await currentMember();
+    expect(first.member).toMatchObject({
+      email: "new@example.com",
+      displayName: "Liza",
+      discordUserId: null,
+      amazonSweep: "off",
+      isCartAccount: false,
+    });
+    expect(first.ctx.actor.memberId).toBe(first.member.id);
+    const again = await currentMember();
+    expect(again.member.id).toBe(first.member.id);
+  });
+
+  it("names a new member after the email when Google sends no name", async () => {
+    vi.stubEnv("ALLOWED_EMAILS", "noname@example.com");
+    session.email = "noname@example.com";
+    session.name = null;
+    expect((await currentMember()).member.displayName).toBe("noname");
   });
 });

@@ -112,7 +112,7 @@ estimate with an honest confidence hint: "~2 milk (bought Oct 12, unverified) �
 | **Cleanup** | Tabs: receipts (photo beside the lines, one dropdown per line, one confirm), merges (suggested merges and new products), unverified items, jobs (failed jobs and unsure Trash Cam photos) — sorted by impact on this week's cart, with expiry shown. (Long-term HITL.) |
 | **Pantry** | Estimated inventory by location; item detail with products, thresholds, EMA history, event log. |
 | **Insights** | Visual view of the diagnostics metrics. |
-| **Settings** | Away periods, members ↔ Discord IDs, cart account, default thresholds. |
+| **Settings** | Away periods, members ↔ Discord IDs, cart account, default thresholds. A person on the allowlist becomes a member the first time they sign in. |
 
 Every page answers "what needs me?" first. Machine guesses are labelled *provisional* /
 *unverified* and perishables show a use-by date, without prompting. "We're out", "running low" and

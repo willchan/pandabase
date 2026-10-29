@@ -148,8 +148,8 @@ Check: `https://<domain>/sign-in` loads (signing in comes after step 7).
 ### 7. First run of the database
 
 *Phase 1 done? Skip: the **Bootstrap** workflow (Actions → Bootstrap → Run workflow) migrated
-both databases and added the members. It also works later from a phone, e.g. to add a missing
-Discord id: `add-member` with the member's position in the `ALLOWED_EMAILS` secret.*
+both databases (members are created on first sign-in). Its `add-member` also works later from a
+phone, e.g. to set a Chromium profile: the member's position in the `ALLOWED_EMAILS` secret.*
 
 ```sh
 # production (needs the step-2 values in your shell; they're not in .env)
@@ -157,7 +157,8 @@ TURSO_DATABASE_URL=libsql://pandabase-… TURSO_AUTH_TOKEN=… pnpm db:migrate:p
 # preview
 TURSO_DATABASE_URL=libsql://pandabase-preview-… TURSO_AUTH_TOKEN=… pnpm db:migrate:prod
 
-# one member row per allowed email (sign-in needs it); exactly one cart account
+# optional: members are created on first sign-in (then edited in Settings); add-member sets fields
+# up front, incl. the Chromium profile Settings doesn't edit; exactly one cart account
 TURSO_DATABASE_URL=… TURSO_AUTH_TOKEN=… pnpm db:add-member --email will@example.com --name Will \
   --discord <discord user id> --profile will --sweep daily --cart
 TURSO_DATABASE_URL=… TURSO_AUTH_TOKEN=… pnpm db:add-member --email partner@example.com \
@@ -168,7 +169,8 @@ TURSO_DATABASE_URL=… TURSO_AUTH_TOKEN=… pnpm db:add-member --email partner@e
 Settings → Advanced → Developer Mode, then right-click a member → *Copy User ID*. Never run
 `db:seed` against Turso — it's the synthetic dev household.
 
-Check: both members can sign in; *Settings* shows them with their Discord ids and the cart account.
+Check: both members can sign in; *Settings* shows them (set Discord ids and the cart account
+there if you skipped `db:add-member`).
 
 ### 8. Mac Mini: base
 

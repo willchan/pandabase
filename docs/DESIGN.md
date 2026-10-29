@@ -229,7 +229,8 @@ All routes under `/web/app/api`. Payloads defined once as **Zod schemas** in `we
   rejects emails not in `ALLOWED_EMAILS` and Google accounts whose address Google hasn't verified
   (`email_verified`). Session users have every scope except `cron`; an API request with a session is
   re-checked against the allowlist and acts as the member with that email (an allowed email without
-  a `member` row → 403 `not a household member`, like the UI's NotAMember).
+  a `member` row → 403 `not a household member`: the row is created by the UI, below, so a session
+  can't act through the API before its first page view).
 - **Bearer tokens:** `AGENT_API_TOKEN` (scope `agent`), `WORKER_API_TOKEN` (scope `worker`),
   `CRON_SECRET` (scope `cron`). Constant-time compare (SHA-256 then `timingSafeEqual`); an unset
   secret never matches. A bearer header wins over a session. One `withAuth(scopes, handler)`
@@ -249,8 +250,11 @@ All routes under `/web/app/api`. Payloads defined once as **Zod schemas** in `we
   absent under `production`/`test`). The e2e suite uses it against `next dev`.
 - **UI gate:** `web/proxy.ts` (Next 16's renamed middleware) redirects every non-API path without a
   session to `/sign-in?callbackUrl=…`; pages and actions then resolve the member through
-  `currentMember()` (allowlist re-checked; an allowed email with no `member` row →
-  `/sign-in?error=NotAMember`). Rejected Google accounts land on `/sign-in?error=AccessDenied`.
+  `currentMember()` (allowlist re-checked). An allowed email with no `member` row gets one on its
+  first visit (`ensureMember` in `services/settings.ts`: display name = first word of the Google
+  name, else the email's local part; no Discord id, sweep `off`, not the cart account — all
+  edited in Settings; concurrent first requests insert once via the unique email). Rejected Google
+  accounts land on `/sign-in?error=AccessDenied`.
 - **Cron:** `/api/cron/maintenance` requires `Authorization: Bearer ${CRON_SECRET}` (Vercel Cron,
   `web/vercel.json`, daily 11:17 UTC).
 - **Latency middleware:** every request logs `api_request {route, method, status, latencyMs,
@@ -908,8 +912,9 @@ Setup is the README checklist; every step is a `make` target over an idempotent 
 - **launchd:** one Chromium LaunchAgent per profile (`ops/launchd/com.pandabase.chromium.plist.template`,
   loopback-only DevTools port, `KeepAlive`), and `com.pandabase.ollama-env` re-applying
   `OLLAMA_NUM_PARALLEL=1` / `OLLAMA_MAX_LOADED_MODELS=1` at login.
-- **First run:** `pnpm db:add-member` upserts a member by email (the UI edits members but can't
-  create them, and sign-in requires a member row), keeping exactly one cart account.
+- **First run:** members are created on first sign-in (§3.1). `pnpm db:add-member` (or the
+  Bootstrap workflow) still upserts a member by email, e.g. to set the Chromium profile, which
+  Settings doesn't edit, keeping exactly one cart account.
 - **`make backfill`** repeats `receipts sweep --backfill` per member until `complete` (waits on a
   busy profile lock), then calls `POST /api/catalog/merge-suggestions/run` once, like the skill. **`make update`** is the M9 updater
   (*Continuous deployment* above); M8's manual `scripts/ops/update.sh` is gone.
@@ -986,7 +991,7 @@ docker-compose.yml (+ docker-compose.build.yml), Makefile, CLAUDE.md, README.md,
 | 39 | Dev sign-in is an Auth.js credentials provider registered only under `NODE_ENV=development` + `DEV_AUTH_BYPASS=1` | The real session/proxy path is exercised in dev and e2e (the gate is testable), and the bypass can't exist in a production build |
 | 40 | Suggested merges are queued by the State Engine (agent route at backfill end + weekly cron), with a typed `MergeSuggestInput` | The worker can't read the catalog; the app owns which items are asked about, dedupes answers and never blocks on them (30-day no-op default) |
 | 41 | Compose runs only the worker; OpenClaw, Ollama and Chromium stay native | OpenClaw is the household's existing native agent (host Chromium over CDP, `~/.openclaw` state); Ollama needs Metal; a containerized OpenClaw would be a second agent to keep in sync |
-| 42 | Members are bootstrapped with `pnpm db:add-member`, not the UI | Sign-in requires a member row, so the first member can't be created from inside the app; two members don't justify an admin flow |
+| 42 | Members are created on their first sign-in, for emails in `ALLOWED_EMAILS` (was: bootstrapped with `pnpm db:add-member`) | The allowlist already decides who may sign in, so a separate creation step added a terminal/workflow chore without adding a check; the allowlist stays an env var (a redeploy to change), so a bug or stolen session can't add a person. `db:add-member` remains for fields Settings doesn't edit |
 | 43 | Inbound photos: local `tools.media.models` description always; the native-delivery fallback is made safe by a local reply model (our choice) or, with a cloud reply model, a text-only PandaBase agent | Keeps §10 #10 without forcing a model change on the family agent; the fallback is OpenClaw behavior we can't turn off by config |
 | 44 | The Mac Mini's "green" signal is the GHCR image `:<sha>` existing, not the GitHub checks API | deploy.yml pushes it only after CI, the migration and the web deploy succeeded, so it also orders the Mac after the web app; one `read:packages` token (needed to pull anyway) instead of a second token |
 | 45 | Deploy health = a heartbeat carrying the new image's build sha (`GET /api/health/worker`) + an agent-token round trip; a failed sha is remembered and never retried | Proves the *new* worker reached the API (not just that a container runs); remembering bad shas stops a rollback loop every 15 min and keeps the Discord alert to one post |

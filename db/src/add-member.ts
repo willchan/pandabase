@@ -1,7 +1,7 @@
 // `pnpm db:add-member --email … --name … [--discord ID] [--profile NAME] [--sweep daily|weekly|off]
-// [--cart]`: create or update a household member by email (PLAN M8). The web UI can edit members
-// but not create them, and sign-in needs a member row for every allowed email, so a fresh
-// production database is bootstrapped with this. Idempotent: re-running updates the same row.
+// [--cart]`: create or update a household member by email (PLAN M8). Sign-in creates members for
+// allowed emails (DESIGN §3.1); this sets fields up front, including the Chromium profile, which
+// Settings doesn't edit. Idempotent: re-running updates the same row.
 import { pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
 import { eq, ne } from "drizzle-orm";
