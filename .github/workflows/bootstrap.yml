@@ -1,0 +1,117 @@
+name: Bootstrap
+
+# First-run database steps without a terminal (docs/SETUP-PHONE.md): migrate a Turso database,
+# or add / update a household member (`pnpm db:add-member`), using the chosen GitHub
+# environment's TURSO_* secrets. Run it from the GitHub app: Actions → Bootstrap → Run workflow.
+# Both actions are idempotent. Inputs are validated by scripts/deploy/bootstrap.sh (dry run:
+# validate only). This repo is public, so its run logs are too: no email is ever an input (the
+# member is picked by position in the environment's ALLOWED_EMAILS secret), and the Discord id is
+# masked before any step's env could print it.
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "migrate = create/update tables; add-member = add or update one member"
+        type: choice
+        options: [migrate, add-member]
+        default: migrate
+      target:
+        description: "Which database (GitHub environment)"
+        type: choice
+        options: [production, preview]
+        default: production
+      member:
+        description: "add-member: which address in the ALLOWED_EMAILS secret (1 = first)"
+        type: choice
+        options: ["1", "2", "3", "4"]
+        default: "1"
+      name:
+        description: "add-member: display name"
+        type: string
+      discord:
+        description: "add-member: Discord user id (digits; optional)"
+        type: string
+      profile:
+        description: "add-member: Chromium profile name, e.g. will (optional)"
+        type: string
+      sweep:
+        description: "add-member: Amazon receipt sweep (keep = leave as is)"
+        type: choice
+        options: [keep, daily, weekly, off]
+        default: keep
+      cart:
+        description: "add-member: this member's Amazon account fills the cart"
+        type: boolean
+        default: false
+      dry_run:
+        description: "Only validate the inputs; change nothing"
+        type: boolean
+        default: false
+
+# Not deploy.yml's group: a queued bootstrap must never replace a pending deploy.
+concurrency:
+  group: bootstrap-${{ inputs.target }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  bootstrap:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.target }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Mask the Discord id
+        run: |
+          id="$(jq -r '.inputs.discord // "" | gsub("\\s"; "")' "$GITHUB_EVENT_PATH")"
+          if [ -n "$id" ]; then echo "::add-mask::$id"; fi
+      # Validate before installing anything, so a typo fails in seconds.
+      - name: Validate inputs
+        run: scripts/deploy/bootstrap.sh
+        env:
+          DRY_RUN: "1"
+          BOOTSTRAP_ACTION: ${{ inputs.action }}
+          BOOTSTRAP_TARGET: ${{ inputs.target }}
+          MEMBER_INDEX: ${{ inputs.member }}
+          ALLOWED_EMAILS: ${{ secrets.ALLOWED_EMAILS }}
+          MEMBER_NAME: ${{ inputs.name }}
+          MEMBER_DISCORD: ${{ inputs.discord }}
+          MEMBER_PROFILE: ${{ inputs.profile }}
+          MEMBER_SWEEP: ${{ inputs.sweep }}
+          MEMBER_CART: ${{ inputs.cart }}
+      - name: Environment is configured
+        if: ${{ !inputs.dry_run }}
+        run: scripts/deploy/require-env.sh "$TARGET" TURSO_DATABASE_URL TURSO_AUTH_TOKEN
+        env:
+          TARGET: ${{ inputs.target }}
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+      - if: ${{ !inputs.dry_run }}
+        uses: pnpm/action-setup@v6
+      - if: ${{ !inputs.dry_run }}
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - if: ${{ !inputs.dry_run }}
+        run: pnpm install --frozen-lockfile
+      - name: Run ${{ inputs.action }} on ${{ inputs.target }}
+        if: ${{ !inputs.dry_run }}
+        run: scripts/deploy/bootstrap.sh
+        env:
+          BOOTSTRAP_ACTION: ${{ inputs.action }}
+          BOOTSTRAP_TARGET: ${{ inputs.target }}
+          MEMBER_INDEX: ${{ inputs.member }}
+          ALLOWED_EMAILS: ${{ secrets.ALLOWED_EMAILS }}
+          MEMBER_NAME: ${{ inputs.name }}
+          MEMBER_DISCORD: ${{ inputs.discord }}
+          MEMBER_PROFILE: ${{ inputs.profile }}
+          MEMBER_SWEEP: ${{ inputs.sweep }}
+          MEMBER_CART: ${{ inputs.cart }}
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
