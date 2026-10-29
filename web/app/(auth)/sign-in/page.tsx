@@ -14,7 +14,6 @@ export const metadata: Metadata = { title: "Sign in" };
 
 const ERRORS: Record<string, string> = {
   AccessDenied: "That Google account isn't on this household's list.",
-  NotAMember: "You're allowed in, but there's no household member with that email yet.",
   CredentialsSignin: "That email isn't on the allowed list.",
 };
 
@@ -46,7 +45,7 @@ async function SignInOptions({ searchParams }: Pick<PageProps<"/sign-in">, "sear
   // Only same-site paths.
   const redirectTo = back?.startsWith("/") && !back.startsWith("//") ? back : "/";
   const session = await auth();
-  if (session?.user?.email && error !== "NotAMember") redirect(redirectTo);
+  if (session?.user?.email) redirect(redirectTo);
   const devEmails = devBypassEnabled()
     ? (process.env.ALLOWED_EMAILS ?? "")
         .split(",")

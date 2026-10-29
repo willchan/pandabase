@@ -40,6 +40,29 @@ export async function updateMember(
   });
 }
 
+/**
+ * The member for an allowed email, created on first sign-in (DESIGN §3.1, §10 #42). Callers have
+ * checked `ALLOWED_EMAILS`; the name is the first word of the Google profile name (else the
+ * email's local part) and is editable in Settings. Racing first requests insert once (unique
+ * email). New members get the schema defaults: no Discord id, sweep `off`, not the cart account.
+ */
+export async function ensureMember(
+  db: Db,
+  input: { email: string; name?: string | null },
+  ctx: Pick<ServiceCtx, "now">,
+): Promise<typeof member.$inferSelect> {
+  const email = input.email.trim().toLowerCase();
+  const [existing] = await db.select().from(member).where(eq(member.email, email));
+  if (existing) return existing;
+  const displayName = (input.name?.trim().split(/\s+/)[0] || email.split("@")[0]!).slice(0, 60);
+  await db
+    .insert(member)
+    .values({ email, displayName, createdAt: ctx.now, updatedAt: ctx.now })
+    .onConflictDoNothing({ target: member.email });
+  const [created] = await db.select().from(member).where(eq(member.email, email));
+  return created!;
+}
+
 /** Exactly one cart account (DESIGN §2.1): clear the others, then set this one. */
 export async function setCartAccount(
   db: Db,

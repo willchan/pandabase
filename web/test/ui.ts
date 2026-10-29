@@ -4,11 +4,15 @@
 //   vi.mock("next/cache", async (o) => ({ ...(await o<object>()), refresh: vi.fn() }));
 import { vi } from "vitest";
 
-export const session: { email: string | null } = { email: "alex@example.com" };
+/** The signed-in Google user; `name` is the profile name (null when Google sends none). */
+export const session: { email: string | null; name?: string | null } = {
+  email: "alex@example.com",
+};
 
 /** Factories for the test file's own `vi.mock` calls (mocks must be declared in the test file). */
 export const authMock = {
-  auth: async () => (session.email ? { user: { email: session.email } } : null),
+  auth: async () =>
+    session.email ? { user: { email: session.email, name: session.name ?? null } } : null,
   signIn: vi.fn(),
   signOut: vi.fn(),
 };

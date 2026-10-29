@@ -1081,3 +1081,9 @@ branch `claude/system-e2e`). Details, the bugs found and the security review are
 - Follow-ups: resumed `cart build` repeats price checks; WF candidates without an ASIN are flagged
   for price checks the tools can't do; idempotency check-then-store race (TESTING.md accepted risk
   2); a tier-A CDP driver test via `--host-resolver-rules` + a local TLS server.
+- **Members on first sign-in (follow-up PR):** `currentMember()` creates the `member` row for an
+  allowed email on its first page view (`ensureMember`; DESIGN §3.1, §10 #42), replacing the
+  `NotAMember` dead end. The API still answers 403 `not a household member` for a session without
+  a row (the security-review rule; in practice the first page view comes first). New members need
+  their Discord id, sweep and cart account set in Settings; `db:add-member` / Bootstrap stay for
+  the Chromium profile.

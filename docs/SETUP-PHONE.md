@@ -340,11 +340,17 @@ variable and the `main` rule; `preview` shows 2 secrets.
 
 ---
 
-## 8. Create the tables and the members
+## 8. Create the tables (and, optionally, the members)
 
 The **Bootstrap** workflow runs the database commands for you. It is
 safe to re-run: migrating twice changes nothing, and adding a member
 again updates that member.
+
+**Members are optional here.** Anyone in `ALLOWED_EMAILS` becomes a
+member the first time they sign in (part 10), and you set their Discord
+id, sweep and cart account in the app's **Settings**. Use `add-member`
+only to set those fields before signing in, or to set the browser
+*profile* (Settings doesn't edit it).
 
 How to run it: GitHub app → `pandabase` → **Actions** → **Bootstrap** →
 **Run workflow** (branch `main`) → fill in → **Run**. Tick **Only
@@ -385,7 +391,7 @@ full name.
    list) → **⋯** (top right) → **Copy User ID**.
 3. Paste it into the *PandaBase* note. It is 17–20 digits.
 
-**Check:** four green Bootstrap runs. The add-member logs say
+**Check:** green Bootstrap runs (two migrates, plus any add-members). The add-member logs say
 `added member ***` (or `updated` on a re-run). A red run lists every
 wrong input at once, e.g. `ALLOWED_EMAILS has only 2 address(es), not 3`.
 
@@ -429,15 +435,16 @@ listed with access. Change it to private if it isn't.
 1. Open `https://<your domain>/sign-in` on your phone → **Sign in with
    Google** → your Gmail.
 2. Your partner does the same on their phone.
-3. **Settings** in the app shows both members (and their Discord ids and
-   the cart account, if you entered them).
+3. **Settings** in the app shows both members. If you skipped
+   `add-member`, set each person's Discord id and receipt sweep there,
+   and pick the cart account.
 
 If sign-in fails:
 
 - `redirect_uri_mismatch`: part 5 step 5, the URI must match exactly.
 - *Access denied*: the email is missing from `ALLOWED_EMAILS` (part 6a;
   redeploy after changing it, by re-running the Deploy run), from Google
-  test users (part 5), or has no member (part 8).
+  test users (part 5).
 - A server error: check that Vercel has all 16 variables and that
   Bootstrap's production migrate succeeded.
 
@@ -531,8 +538,8 @@ did steps 2–4, 6, 7 and 15.1–15.3; skip them. What's left:
    Discord, photo privacy, smoke test, backfill.
 4. **Step 15.4–15.6:** GHCR read token + `docker login ghcr.io`, the
    Discord webhook, `make install-update-timer`.
-5. Any member's missing Discord id or profile: re-run **Bootstrap**
-   `add-member` (part 8).
+5. Missing Discord ids: app **Settings**. Browser profile names:
+   **Bootstrap** `add-member` (part 8).
 
 ---
 
