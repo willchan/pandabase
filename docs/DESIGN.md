@@ -818,7 +818,7 @@ Timestamps stored UTC; `HOUSEHOLD_TZ=America/Los_Angeles` defines "today" and sc
   naming every empty secret that `migrate` and `deploy-web` need, so an unconfigured environment
   fails before anything changes instead of at the first tool that needs a secret.
 - **Bootstrap (no terminal):** `.github/workflows/bootstrap.yml` (`workflow_dispatch`, runnable
-  from the GitHub mobile app; `docs/SETUP-PHONE.md`) runs `pnpm db:migrate:prod` or
+  from GitHub's web UI or mobile app; `docs/SETUP-CLOUD.md`) runs `pnpm db:migrate:prod` or
   `pnpm db:add-member` in the `production` or `preview` environment via
   `scripts/deploy/bootstrap.sh`, which validates every input (dry-run mode: validate only) before
   installing anything. The repo is public, so its logs are: the member's email is never an input
@@ -844,7 +844,7 @@ Timestamps stored UTC; `HOUSEHOLD_TZ=America/Los_Angeles` defines "today" and sc
      is taken over), exit if paused (`.deploy/paused`) or inside a quiet window; require a clean
      checkout on `main`;
   2. `git fetch`; target = the newest first-parent commit in `HEAD..origin/main` (≤ 20) whose
-     `ghcr.io/…:<sha>` exists (`docker manifest inspect` with a `read:packages` token) and which
+     `ghcr.io/…:<sha>` exists (`docker manifest inspect`; the image is public, so no token) and which
      isn't in `.deploy/bad-shas`. The image exists only if CI passed and migrate + web deploy
      succeeded, so it is the green signal; older green commits deploy while the newest is red;
   3. record previous sha + image tag (`.deploy/last-deploy`) → `git merge --ff-only` → `uv sync
@@ -993,7 +993,7 @@ docker-compose.yml (+ docker-compose.build.yml), Makefile, CLAUDE.md, README.md,
 | 41 | Compose runs only the worker; OpenClaw, Ollama and Chromium stay native | OpenClaw is the household's existing native agent (host Chromium over CDP, `~/.openclaw` state); Ollama needs Metal; a containerized OpenClaw would be a second agent to keep in sync |
 | 42 | Members are created on their first sign-in, for emails in `ALLOWED_EMAILS` (was: bootstrapped with `pnpm db:add-member`) | The allowlist already decides who may sign in, so a separate creation step added a terminal/workflow chore without adding a check; the allowlist stays an env var (a redeploy to change), so a bug or stolen session can't add a person. `db:add-member` remains for fields Settings doesn't edit |
 | 43 | Inbound photos: local `tools.media.models` description always; the native-delivery fallback is made safe by a local reply model (our choice) or, with a cloud reply model, a text-only PandaBase agent | Keeps §10 #10 without forcing a model change on the family agent; the fallback is OpenClaw behavior we can't turn off by config |
-| 44 | The Mac Mini's "green" signal is the GHCR image `:<sha>` existing, not the GitHub checks API | deploy.yml pushes it only after CI, the migration and the web deploy succeeded, so it also orders the Mac after the web app; one `read:packages` token (needed to pull anyway) instead of a second token |
+| 44 | The Mac Mini's "green" signal is the GHCR image `:<sha>` existing, not the GitHub checks API; the image is public | deploy.yml pushes it only after CI, the migration and the web deploy succeeded, so it also orders the Mac after the web app. Public like the repo it's built from (code only, no secrets), so the Mac needs no GitHub token at all |
 | 45 | Deploy health = a heartbeat carrying the new image's build sha (`GET /api/health/worker`) + an agent-token round trip; a failed sha is remembered and never retried | Proves the *new* worker reached the API (not just that a container runs); remembering bad shas stops a rollback loop every 15 min and keeps the Discord alert to one post |
 | 46 | PR previews keep Vercel's Git integration; a parallel GitHub job migrates the shared preview DB | Nothing reads the DB at build time, so no ordering is needed; reusing Vercel previews avoids a second deploy path |
 | 47 | Cross-component behavior is tested by a deterministic system test (tier A) on every PR; the real OpenClaw agent is evaluated nightly on a local model (tier B) and reports a pass rate instead of gating | Each milestone tested against contracts in isolation, so the bugs were at the seams; an LLM in the loop is too slow and non-deterministic to gate merges ([TESTING.md](TESTING.md)) |

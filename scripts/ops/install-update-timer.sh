@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # `make install-update-timer`: the launchd timer that runs `make update` every 15 min (PLAN M9,
 # ops/launchd/com.pandabase.update.plist). Idempotent: re-renders and reloads only on change.
-# Prerequisite: `docker login ghcr.io` with a read:packages token (README "Continuous deployment").
+# The GHCR image is public, so no registry login is needed (README "Continuous deployment").
 set -euo pipefail
 # shellcheck source=scripts/ops/lib.sh
 . "$(dirname "$0")/lib.sh"

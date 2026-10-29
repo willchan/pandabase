@@ -62,7 +62,7 @@ pnpm --filter web build      # next build
 pnpm db:reset && pnpm db:seed   # fresh db/dev.db (or TURSO_DATABASE_URL), migrated + seeded
 pnpm db:add-member --email E --name N [--discord ID] [--profile P] [--sweep daily|weekly|off] [--cart]
                              # upsert a member by email (sign-in also creates them; TURSO_* for prod)
-                             # no terminal: Actions → Bootstrap (bootstrap.yml; docs/SETUP-PHONE.md)
+                             # no terminal: Actions → Bootstrap (bootstrap.yml; docs/SETUP-CLOUD.md)
 pnpm db:generate             # after editing db/src/schema/*: new migration in db/migrations (commit it)
 pnpm db:migrate              # apply migrations; db:migrate:prod for Turso (needs TURSO_AUTH_TOKEN)
 pnpm db:rebuild-state        # recompute inventory_state from inventory_event (§4.2 projection)
@@ -96,7 +96,7 @@ make vercel-env              # add those secrets to the linked Vercel project
 make up / make logs / make down          # worker via docker compose (GHCR image; make up-local builds ./worker)
 make update                  # CD: newest green main → pull → health check → auto-rollback (DRY_RUN=1 prints)
 make update-status / update-pause / update-resume / rollback [TO=sha]
-make install-update-timer    # launchd: make update every 15 min (needs docker login ghcr.io)
+make install-update-timer    # launchd: make update every 15 min (GHCR image is public: no login)
 make install-agent-tools     # agent/tools venv, pandabase-tools on PATH, configs from examples
 make install-agent-skills    # skills.load.extraDirs += agent/skills (backs up openclaw.json)
 make install-agent-cron      # OpenClaw automations (list, then edit or add)

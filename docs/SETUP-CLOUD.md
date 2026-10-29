@@ -1,8 +1,8 @@
-# Phase 1: cloud setup from a phone
+# Phase 1: cloud setup
 
-This guide sets up everything PandaBase runs in the cloud, using only an
-iPhone: Safari, the GitHub app and a password manager. No computer, no
-terminal.
+This guide sets up everything PandaBase runs in the cloud, using only a
+browser and a password manager: no terminal, and nothing installed. It
+works before the Mac Mini exists.
 
 When you finish:
 
@@ -29,9 +29,6 @@ from earlier ones. Each part ends with a **Check**.
 - **One secure note** in the password manager called *PandaBase*. Every
   value this guide asks you to "save" goes there. You'll copy from it into
   Vercel and GitHub, and later into the Mac Mini's `.env`.
-- **Safari tip:** if a dashboard hides a menu on a small screen, tap
-  **aA** in the address bar → **Request Desktop Website**. Landscape
-  helps too.
 
 > **Never paste a secret into a chat (including Claude), an issue, a PR or
 > a commit.** Only into the password manager, Vercel and GitHub settings.
@@ -78,7 +75,7 @@ missing ones.
 You need two databases: `pandabase` (production) and `pandabase-preview`
 (PR previews).
 
-1. Safari → [app.turso.tech](https://app.turso.tech) → sign in with
+1. Open [app.turso.tech](https://app.turso.tech) → sign in with
    GitHub.
 2. **Databases** → **Create Database** (on a new account it may say
    **New Database**).
@@ -110,14 +107,14 @@ Docs: [Turso dashboard](https://docs.turso.tech/),
 
 ## 3. Cloudflare R2 (photo storage)
 
-1. Safari → [dash.cloudflare.com](https://dash.cloudflare.com) → menu
+1. Open [dash.cloudflare.com](https://dash.cloudflare.com) → menu
    (☰) → **R2 Object Storage**. If asked, add the R2 subscription (free
    tier; needs a card).
 2. **Create bucket** → name `pandabase-media` → location
    **Automatic** → **Create bucket**.
 3. Back on the R2 **Overview** page, find **Account Details**. Save the
    **Account ID** as `R2_ACCOUNT_ID`.
-4. Next to **API Tokens** tap **Manage** → **Create Account API token**.
+4. Next to **API Tokens** select **Manage** → **Create Account API token**.
    - Name: `pandabase`
    - Permissions: **Object Read & Write**
    - Specify bucket(s): **Apply to specific buckets only** →
@@ -142,17 +139,17 @@ Docs: [R2 API tokens](https://developers.cloudflare.com/r2/api/tokens/),
 
 Do this before Google: Google needs your Vercel address.
 
-1. Safari → [vercel.com](https://vercel.com) → sign in with GitHub.
+1. Open [vercel.com](https://vercel.com) → sign in with GitHub.
 2. **Add New…** → **Project**.
 3. Under *Import Git Repository*, connect GitHub if asked. When GitHub
    asks which repositories the Vercel app may see, choose **Only select
    repositories** → `willchan/pandabase`.
-4. Tap **Import** next to `pandabase`.
+4. **Import** next to `pandabase`.
 5. **Project Name:** `pandabase`.
-6. **Root Directory:** tap **Edit** → choose `web` → **Continue**.
+6. **Root Directory:** **Edit** → choose `web` → **Continue**.
    Framework should now read **Next.js**.
 7. Skip *Environment Variables* here (part 6 adds them per environment).
-   Tap **Deploy**.
+   Select **Deploy**.
 8. The first deployment may fail or show an error page. That's expected:
    it has no settings yet. Continue to the project dashboard.
 9. Project → **Settings** → **Domains**. Your production address is the
@@ -182,10 +179,9 @@ address.
 ## 5. Google sign-in (OAuth)
 
 Google's console moved the old *OAuth consent screen* into **Google Auth
-Platform** (sections *Branding*, *Audience*, *Clients*). Request the
-desktop site if the menu is cramped.
+Platform** (sections *Branding*, *Audience*, *Clients*).
 
-1. Safari →
+1. Open
    [console.cloud.google.com](https://console.cloud.google.com) → project
    picker (top) → **New Project** → name `pandabase` → **Create**. Make
    sure it's selected.
@@ -295,10 +291,9 @@ Docs: [environment variables](https://vercel.com/docs/environment-variables),
 
 ## 7. GitHub: environments and secrets
 
-GitHub's app can't edit settings, so use Safari:
+Open
 [github.com/willchan/pandabase](https://github.com/willchan/pandabase)
-→ **Settings** (in the tab row; request the desktop site if you don't
-see it) → **Environments**.
+→ **Settings** → **Environments**.
 
 ### 7a. `production`
 
@@ -328,10 +323,10 @@ see it) → **Environments**.
    with the **preview** values. Add `ALLOWED_EMAILS` too if you ever
    want members in the preview database.
 
-### 7c. Worker image (nothing to do yet)
+### 7c. Worker image (nothing to do)
 
-The deploy publishes `ghcr.io/willchan/pandabase-worker`. You check it
-after the first deploy ([part 9](#9-first-deploy)).
+The deploy publishes `ghcr.io/willchan/pandabase-worker`, a public image
+([part 9](#9-first-deploy)). No token or setting is needed.
 
 Docs: [deployment environments](https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-deployments/manage-environments).
 
@@ -352,7 +347,7 @@ id, sweep and cart account in the app's **Settings**. Use `add-member`
 only to set those fields before signing in, or to set the browser
 *profile* (Settings doesn't edit it).
 
-How to run it: GitHub app → `pandabase` → **Actions** → **Bootstrap** →
+How to run it: GitHub (web or mobile app) → `pandabase` → **Actions** → **Bootstrap** →
 **Run workflow** (branch `main`) → fill in → **Run**. Tick **Only
 validate the inputs** first if you want to check a member's fields
 without changing anything.
@@ -387,7 +382,7 @@ full name.
 1. Discord app → your avatar (bottom right) → **Settings** (gear) →
    **App Settings** → **Advanced** → turn on **Developer Mode**. (Older
    app versions: **Appearance** → **Advanced**.)
-2. Open the member's profile (tap their name in a channel or the member
+2. Open the member's profile (select their name in a channel or the member
    list) → **⋯** (top right) → **Copy User ID**.
 3. Paste it into the *PandaBase* note. It is 17–20 digits.
 
@@ -399,30 +394,25 @@ wrong input at once, e.g. `ALLOWED_EMAILS has only 2 address(es), not 3`.
 
 ## 9. First deploy
 
-Every merge to `main` since M9 tried to deploy and failed at the first
-step, because part 7 wasn't done. Re-run the newest one.
+Once `production` has its secrets, every merge to `main` deploys by
+itself. For the first one:
 
-1. GitHub (app or Safari) → **Actions** → **Deploy** → the newest run.
-   Its error says `GitHub environment 'production' not configured`
-   and names the missing secrets (or, from older runs, fails at
-   *Migrate Turso production*).
-2. **Re-run jobs** → **Re-run all jobs**. If the app doesn't offer it,
-   open the same run in Safari. The re-run reads the secrets as they are
-   now.
-3. Watch three jobs go green in order: **migrate** → **deploy-web** →
-   **publish-worker** (the last one takes 10–20 minutes: it builds an
-   ARM image).
+- If an earlier Deploy run failed because secrets were missing (its
+  first step says `GitHub environment 'production' not configured` and
+  names them), open it: **Actions** → **Deploy** → that run → **Re-run
+  jobs** → **Re-run all jobs**. Re-runs read the secrets as they are now,
+  but GitHub only re-runs runs younger than 30 days.
+- Otherwise, the next merge to `main` deploys (any small PR will do).
 
-GitHub only re-runs runs younger than 30 days. If there's none, any merge
-to `main` deploys (ask Claude for a tiny docs PR and merge it).
+Watch three jobs go green in order: **migrate** → **deploy-web** →
+**publish-worker** (the first build of the ARM worker image takes about
+5 minutes; later ones reuse the cache). If the first step fails, its
+message lists exactly which secrets are still missing in `production`.
 
-If the first step fails again, its message lists exactly which secrets
-are still missing in `production`.
-
-**Worker image privacy:** github.com → your avatar → **Your profile** →
-**Packages** → `pandabase-worker` → **Package settings**. Check that
-**Visibility** is **Private** and that the repository `pandabase` is
-listed with access. Change it to private if it isn't.
+**Worker image:** `ghcr.io/willchan/pandabase-worker` is **public**,
+like the repo it's built from. It holds only that code (no secrets), and
+being public means the Mac Mini pulls it without a GitHub token. Nothing
+to change.
 
 **Check:** the Deploy run is green. Vercel → **Deployments** shows a new
 **Production** deployment of the same commit. Vercel → **Settings** →
@@ -432,9 +422,9 @@ listed with access. Change it to private if it isn't.
 
 ## 10. Sign in
 
-1. Open `https://<your domain>/sign-in` on your phone → **Sign in with
+1. Open `https://<your domain>/sign-in` → **Sign in with
    Google** → your Gmail.
-2. Your partner does the same on their phone.
+2. Your partner does the same.
 3. **Settings** in the app shows both members. If you skipped
    `add-member`, set each person's Discord id and receipt sweep there,
    and pick the cart account.
@@ -507,8 +497,7 @@ environments. "Mac" is Phase 2.
 - From: Vercel → Settings → Domains (part 4)
 - To: GH prod (variable), Mac `.env`
 
-**Later, Phase 2 only:** a GitHub `read:packages` token (Mac keychain via
-`docker login ghcr.io`) and the Discord webhook URL
+**Later, Phase 2 only:** the Discord webhook URL
 (`DEPLOY_DISCORD_WEBHOOK_URL` in Mac `.env`). README step 15.
 
 The README's [Where each secret lives](../README.md#where-each-secret-lives)
@@ -536,39 +525,23 @@ did steps 2–4, 6, 7 and 15.1–15.3; skip them. What's left:
 3. **Steps 8–14:** Mac base settings, agent tools and worker, Chromium
    profiles (the names you used as *profile* in part 8), OpenClaw and
    Discord, photo privacy, smoke test, backfill.
-4. **Step 15.4–15.6:** GHCR read token + `docker login ghcr.io`, the
-   Discord webhook, `make install-update-timer`.
+4. **Step 15.5–15.6:** the Discord webhook, `make install-update-timer`
+   (15.4 needs nothing: the worker image is public).
 5. Missing Discord ids: app **Settings**. Browser profile names:
    **Bootstrap** `add-member` (part 8).
 
 ---
 
-## What this guide couldn't verify
+## Notes from the first run (October 2026)
 
-The dashboard steps were checked against each provider's docs and
-recent guides in October 2026, but not clicked through on a phone. Labels
-move; if a button has a slightly different name, look for the nearest
-match. Specifically:
+The guide was followed end to end, and every part worked as
+written. Dashboards rename buttons now and then; if a label differs,
+look for the nearest match. What the first run settled:
 
-- **Turso:** the dashboard's token button (*Create Token* vs *Generate
-  Token*) and whether it offers expiry and access level. Turso's docs
-  describe tokens via the CLI and API; the dashboard has the same
-  feature. Default expiry is *never*.
-- **Turso engine:** whether the create screen shows an engine choice at
-  all. Turso's docs say Turso Cloud runs on libSQL and the Rust engine is
-  an opt-in preview (`turso db create --tursodb`).
-- **Vercel:** whether the import screen's first deployment runs at all
-  with `deploymentEnabled.main: false` (either is fine); where the Team ID
-  sits on a Hobby account; the token's expiry choices.
-- **Google:** whether the client secret stays visible after creation.
-- **GitHub:** whether `workflow_dispatch` inputs are shown to everyone
-  on a public repo's run page (part 8 assumes they may be). Running a
-  workflow from the app is documented
-  (*Actions → Workflows*); re-running a run from the app isn't, so part 9
-  falls back to Safari. That a re-run sees secrets added after the
-  original run is how GitHub behaves in practice (secrets are read when a
-  job starts) but isn't stated in its docs; if it doesn't, merge any PR.
-- **GHCR:** GitHub's docs don't say what visibility a new container
-  package gets when a workflow first publishes it. Part 9 has you check.
-- **Apple Passwords:** the generated format (and that it can't be set to
-  64 characters).
+- **GitHub:** a container package that a workflow publishes for a
+  public repo starts out public. We kept it public (part 9).
+- **Deploy:** after part 7, a merge to `main` ran migrate → deploy-web
+  → publish-worker green on its own; no re-run was needed.
+- **Still assumed, not checked:** whether `workflow_dispatch` inputs
+  are shown to everyone on a public repo's run page. Part 8 assumes they
+  may be, so no email or secret is ever an input.

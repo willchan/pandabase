@@ -14,7 +14,7 @@ for name in "$@"; do
 done
 if [ "${#missing[@]}" -gt 0 ]; then
   list="$(printf '%s, ' "${missing[@]}")"
-  echo "::error title=GitHub environment '$environment' not configured::missing secrets: ${list%, } — add them in Settings → Environments → $environment (docs/SETUP-PHONE.md)"
+  echo "::error title=GitHub environment '$environment' not configured::missing secrets: ${list%, } — add them in Settings → Environments → $environment (docs/SETUP-CLOUD.md)"
   exit 1
 fi
 echo "environment '$environment': $# required secrets present"
