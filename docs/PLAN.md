@@ -1081,6 +1081,11 @@ branch `claude/system-e2e`). Details, the bugs found and the security review are
 - Follow-ups: resumed `cart build` repeats price checks; WF candidates without an ASIN are flagged
   for price checks the tools can't do; idempotency check-then-store race (TESTING.md accepted risk
   2); a tier-A CDP driver test via `--host-resolver-rules` + a local TLS server.
+- **Setup guide after the first real run (2026-10-29):** `docs/SETUP-PHONE.md` → `docs/SETUP-CLOUD.md`
+  (nothing in it was phone-specific; the phone notes went). The worker image stays **public**
+  (GHCR's default for a public repo's package): the Mac Mini needs no `read:packages` token or
+  `docker login`, so README step 15.4 is now "nothing to do". The guide's unverified list became
+  *Notes from the first run*.
 - **Members on first sign-in (follow-up PR):** `currentMember()` creates the `member` row for an
   allowed email on its first page view (`ensureMember`; DESIGN §3.1, §10 #42), replacing the
   `NotAMember` dead end. The API still answers 403 `not a household member` for a session without

@@ -1,8 +1,8 @@
 name: Bootstrap
 
-# First-run database steps without a terminal (docs/SETUP-PHONE.md): migrate a Turso database,
+# First-run database steps without a terminal (docs/SETUP-CLOUD.md): migrate a Turso database,
 # or add / update a household member (`pnpm db:add-member`), using the chosen GitHub
-# environment's TURSO_* secrets. Run it from the GitHub app: Actions → Bootstrap → Run workflow.
+# environment's TURSO_* secrets. Run it from GitHub (web or app): Actions → Bootstrap → Run workflow.
 # Both actions are idempotent. Inputs are validated by scripts/deploy/bootstrap.sh (dry run:
 # validate only). This repo is public, so its run logs are too: no email is ever an input (the
 # member is picked by position in the environment's ALLOWED_EMAILS secret), and the Discord id is

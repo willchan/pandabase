@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # First-run database steps without a terminal (.github/workflows/bootstrap.yml, run from the
-# GitHub app; docs/SETUP-PHONE.md). Both actions are idempotent, so re-running is safe.
+# GitHub web UI or app; docs/SETUP-CLOUD.md). Both actions are idempotent, so re-running is safe.
 #
 #   BOOTSTRAP_ACTION   migrate | add-member
 #   BOOTSTRAP_TARGET   production | preview (the GitHub environment whose TURSO_* it got)
@@ -62,7 +62,7 @@ if [ "$action" = add-member ]; then
   [ "${#name}" -le 60 ] || err "name: at most 60 characters"
   [[ "$name" != *[[:cntrl:]]* ]] || err "name: no control characters"
   [ -z "$discord" ] || [[ "$discord" =~ ^[0-9]{17,20}$ ]] ||
-    err "discord: a Discord user id is 17–20 digits (Copy User ID, docs/SETUP-PHONE.md)"
+    err "discord: a Discord user id is 17–20 digits (Copy User ID, docs/SETUP-CLOUD.md)"
   [ -z "$profile" ] || [[ "$profile" =~ ^[A-Za-z0-9_-]{1,32}$ ]] ||
     err "profile: letters, digits, - and _ only (at most 32)"
   case "$sweep" in keep | daily | weekly | off) ;; *) err "sweep must be keep, daily, weekly or off" ;; esac

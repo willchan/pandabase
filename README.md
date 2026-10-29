@@ -21,9 +21,9 @@ The Mac Mini makes outbound connections only. Details: [DESIGN §1](docs/DESIGN.
 
 ## Setup from zero
 
-> **No computer yet? Do Phase 1 from your phone:** [docs/SETUP-PHONE.md](docs/SETUP-PHONE.md)
-> sets up Turso, R2, Google sign-in, Vercel and the GitHub deploy from Safari and the GitHub app.
-> It covers steps 2–4, 6, 7 and 15.1–15.3 below and changes step 5; each of those steps says so.
+> **Cloud first, no terminal needed:** [docs/SETUP-CLOUD.md](docs/SETUP-CLOUD.md) (Phase 1) sets
+> up Turso, R2, Google sign-in, Vercel and the GitHub deploy in the browser, before the Mac Mini
+> exists. It covers steps 2–4, 6, 7 and 15.1–15.4 below and changes step 5; each step says so.
 
 You need: a Mac Mini (Apple silicon, 32GB; macOS with a GUI login), the household's existing
 OpenClaw gateway on it with a Discord bot, a Discord server with a `#pandabase` channel, each
@@ -149,7 +149,7 @@ Check: `https://<domain>/sign-in` loads (signing in comes after step 7).
 
 *Phase 1 done? Skip: the **Bootstrap** workflow (Actions → Bootstrap → Run workflow) migrated
 both databases (members are created on first sign-in). Its `add-member` also works later from a
-phone, e.g. to set a Chromium profile: the member's position in the `ALLOWED_EMAILS` secret.*
+browser, e.g. to set a Chromium profile: the member's position in the `ALLOWED_EMAILS` secret.*
 
 ```sh
 # production (needs the step-2 values in your shell; they're not in .env)
@@ -240,10 +240,9 @@ missing; both gitignored). Edit `agent/pandabase.config.json`:
 Make sure `~/.local/bin` is on your `PATH`. The OpenClaw gateway needs it too: if `openclaw
 skills check` (step 11) reports `pandabase-tools` missing, link it into a directory the gateway
 already has, e.g. `BIN_DIR=/opt/homebrew/bin make install-agent-tools`. Then start Docker
-Desktop, log in to GHCR (the worker image is private; step 15 has the token) and start the worker:
+Desktop and start the worker (the image is public, so no registry login):
 
 ```sh
-docker login ghcr.io -u <github-user>   # password: the read:packages token from step 15
 make up        # docker compose up -d — ghcr.io/willchan/pandabase-worker:main
 make logs      # expect a heartbeat; "ollama ok" once models are pulled
 ```
@@ -370,7 +369,7 @@ and the Mac Mini pulls the new worker, tools and skills itself every 15 min. Not
 into the home network. Until the `production` environment has its secrets, every run fails at its
 first step with one error naming the missing ones (nothing is migrated or deployed).
 
-*Phase 1 done? Items 1–3 are done; start at item 4.*
+*Phase 1 done? Items 1–4 are done; start at item 5.*
 
 1. **GitHub environment `production`** (repo → *Settings → Environments → New environment*).
    Restrict *Deployment branches* to `main`. Add:
@@ -389,13 +388,12 @@ first step with one error naming the missing ones (nothing is migrated or deploy
    these exist).
 3. **Vercel:** nothing more — `web/vercel.json` already turns off production auto-deploys from
    `main`. Keep the *Production Branch* = `main` (previews for every other branch).
-4. **GHCR on the Mac Mini:** GitHub → *Settings → Developer settings → Personal access tokens →
-   Tokens (classic)* → a token with only **`read:packages`**, no expiry or a reminder to rotate
-   it. Then `docker login ghcr.io -u <github-user>` and paste it; Docker Desktop keeps it in the
-   macOS keychain. The updater uses it twice: to check that `:<sha>` exists (that is its "CI
-   passed and the web deployed" signal — it never deploys a commit without it) and to pull.
-   After the first deploy run, open the package (github.com → your profile → *Packages*) and
-   check it's linked to this repo and private.
+4. **GHCR:** nothing to do. `ghcr.io/willchan/pandabase-worker` is public, like the repo it is
+   built from (it holds that code and no secrets), so the updater needs no token to check that
+   `:<sha>` exists (its "CI passed and the web deployed" signal — it never deploys a commit
+   without it) or to pull. If you ever make the package private, create a token with only
+   **`read:packages`** (GitHub → *Settings → Developer settings → Personal access tokens →
+   Tokens (classic)*) and run `docker login ghcr.io -u <github-user>` on the Mac with it.
 5. **Discord alert (optional but recommended):** `#pandabase` → *Edit Channel → Integrations →
    Webhooks → New Webhook* → copy URL into `.env` as `DEPLOY_DISCORD_WEBHOOK_URL`. A failed
    update posts there once.
@@ -510,7 +508,6 @@ model more often, not less.
 | `ALLOWED_EMAILS` | you (step 6) | GitHub environment `production` (+ `preview`, optional) secret | `bootstrap.yml` `add-member` (emails never go in public run inputs) |
 | `TURSO_*` (preview) | `turso` (step 2) | GitHub environment `preview` secrets | `preview-migrate.yml`, `bootstrap.yml` |
 | `GITHUB_TOKEN` | GitHub, per run | nowhere (ephemeral) | `deploy.yml` pushes to GHCR (`packages: write` in that job only) |
-| GHCR read token (`read:packages`) | you (step 15) | macOS keychain via `docker login ghcr.io` | Mac Mini: image exists? + pull |
 | `DEPLOY_DISCORD_WEBHOOK_URL` | Discord (step 15) | `.env` | Mac Mini updater's failure post |
 
 `.env*`, `agent/pandabase.config.json`, `agent/profiles.json`, `agent/openclaw.*.json5` and
@@ -528,8 +525,7 @@ model more often, not less.
 - Discord: Message Content Intent and the bot's channel permissions; copying ids (steps 7, 11).
 - Filling in `agent/pandabase.config.json` and the OpenClaw patch file (steps 9, 11).
 - The photo-privacy choice (step 12) and turning on `cart.wholefoods_tier1` after the cart check.
-- GitHub environments and their secrets, the Vercel token, the GHCR read token + `docker login`,
-  the Discord webhook, and checking the GHCR package is private (step 15).
+- GitHub environments and their secrets, the Vercel token and the Discord webhook (step 15).
 - Extracting orders the backfill couldn't read (ask the agent; step 14).
 
 ## Day 2

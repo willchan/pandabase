@@ -39,8 +39,8 @@ quiet_window() {
 }
 
 # True when the worker image for SHA exists in GHCR. deploy.yml pushes `:<sha>` only after CI
-# passed on main and the migration and web deploy succeeded, so this is the "green" signal. Needs
-# `docker login ghcr.io` with a read-only (read:packages) token.
+# passed on main and the migration and web deploy succeeded, so this is the "green" signal. The
+# image is public (no login); a private one needs `docker login ghcr.io` with a read:packages token.
 image_published() {
   docker manifest inspect "$GHCR_IMAGE:$1" >/dev/null 2>&1
 }
