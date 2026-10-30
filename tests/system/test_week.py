@@ -14,7 +14,9 @@ import re
 from typing import Any
 
 import httpx
+import pytest
 from conftest import ALEX, SAM, Stack, wait_for
+from fakes import FakeR2
 
 GC = "grocery-cycle"
 DI = "discord-intake"
@@ -22,6 +24,10 @@ IL = "item-lookup"
 
 # State carried between steps.
 W: dict[str, Any] = {}
+
+# Tier A''s shortened week against a deployed preview (remote mode runs only these; steps 4, 9,
+# 10, 14 and 17-19 are local only: they add coverage of the same code, not of the deployment).
+preview = pytest.mark.preview
 
 
 def lookup(stack: Stack, words: str, skill: str = GC) -> dict[str, Any]:
@@ -75,6 +81,7 @@ def finished_job(stack: Stack, job_id: str, timeout: float = 30) -> dict[str, An
     )
 
 
+@preview
 def test_00_stack_is_up(stack: Stack) -> None:
     started = stack.rows("select max(created_at) t from system_telemetry")[0]["t"] or ""
     W["t0"] = started
@@ -88,6 +95,7 @@ def test_00_stack_is_up(stack: Stack) -> None:
     assert shown["token_set"] is True and shown["api_base_url"] == stack.base_url
 
 
+@preview
 def test_01_open_cycle(stack: Stack) -> None:
     """The seeded week went to another store; §1 opens the next cycle with its thread."""
     cur = stack.skill(GC, "api get /api/grocery/cycle/current")["cycle"]
@@ -109,6 +117,7 @@ def test_01_open_cycle(stack: Stack) -> None:
     W["cycle"] = opened["cycle"]["id"]
 
 
+@preview
 def test_02_running_list_adds(stack: Stack) -> None:
     """ "add oat milk" (catalog item) and "add cake flour" (free text)."""
     c = W["cycle"]
@@ -148,6 +157,7 @@ def test_02_running_list_adds(stack: Stack) -> None:
     assert any(line.get("free_text") == "cake flour" for line in plan["lines"])
 
 
+@preview
 def test_03_skip(stack: Stack) -> None:
     """ "skip bananas" takes a planned line out; "3 eggs" sets a quantity."""
     c = W["cycle"]
@@ -193,6 +203,7 @@ def test_04_away_period(stack: Stack) -> None:
     assert [x.get("item_id") for x in after["lines"]] == [x.get("item_id") for x in before["lines"]]
 
 
+@preview
 def test_05_do_we_have(stack: Stack) -> None:
     """ "do we have oat milk?" → `matches[0].text`, read-only."""
     writes = stack.one("select count(*) n from inventory_event")["n"]
@@ -204,6 +215,7 @@ def test_05_do_we_have(stack: Stack) -> None:
     assert stack.skill(IL, "/api/items/lookup", item_words="unicorn steaks")["matches"] == []
 
 
+@preview
 def test_06_friday_nudge(stack: Stack) -> None:
     c = W["cycle"]
     out = stack.skill(GC, '"status": "nudged"', c=c)
@@ -236,12 +248,13 @@ def submit_photo(stack: Stack, caption: str, name: str) -> tuple[dict[str, Any],
     return out, msg
 
 
+@preview
 def test_07_paper_receipt_photo(stack: Stack) -> None:
     """Photo → R2 → job → worker (fake VLM) → receipt + review → reply → confirm in the web UI."""
     out, msg = submit_photo(stack, "receipt from the corner market", "receipt.png")
     assert out["job_type"] == "paper_receipt" and out["basis"] == "caption"
     key = out["media_r2_key"]
-    assert key in stack.r2.objects and stack.r2.objects[key].content_type == "image/png"
+    assert stack.r2.content_type(key) == "image/png"
     job = finished_job(stack, out["job_id"])
     assert job["status"] == "completed", job["error"]
     assert job["model"] == "qwen3.5:9b" and job["prompt_version"] == "paper_receipt.v1"
@@ -249,7 +262,7 @@ def test_07_paper_receipt_photo(stack: Stack) -> None:
     chat = stack.ollama.chats[-1]
     assert chat["keep_alive"] == "2m" and chat["think"] is False and chat["stream"] is False
     assert chat["options"]["num_ctx"] == 8192 and chat["format"]["properties"]["lines"]
-    assert f"keyframes/{out['job_id']}/0.jpg" in stack.r2.objects
+    assert stack.r2.content_type(f"keyframes/{out['job_id']}/0.jpg") is not None
     receipt = stack.one("select * from receipt where job_id = ?", out["job_id"])
     # The fixture's $1 coupon isn't a line, but the totals still add up (discount_cents).
     assert receipt["totals_check"] == "pass" and receipt["vendor"] == "syntheticfoods"
@@ -272,6 +285,7 @@ def test_07_paper_receipt_photo(stack: Stack) -> None:
     assert stack.tools(["jobs", "replies"]) == "NO_REPLY"
 
 
+@preview
 def test_07b_confirm_receipt_in_web_ui(stack: Stack) -> None:
     """Playwright against the same server: a Google-style session cookie, Cleanup → confirm."""
     from playwright.sync_api import expect, sync_playwright
@@ -285,23 +299,27 @@ def test_07b_confirm_receipt_in_web_ui(stack: Stack) -> None:
         kw = {"executable_path": exe} if os.path.exists(exe) else {}
         browser = pw.chromium.launch(**kw)  # type: ignore[arg-type]
         ctx = browser.new_context(viewport={"width": 390, "height": 844})
+        stack.bypass_browser(ctx)
         page = ctx.new_page()
         # Signed out: the proxy sends every page to /sign-in (no dev bypass in production).
-        page.goto(stack.base_url + "/cleanup")
+        page.goto(stack.web_url + "/cleanup")
         expect(page).to_have_url(re.compile(r"/sign-in\?callbackUrl=%2Fcleanup"))
         expect(page.get_by_role("button", name=re.compile("Continue as"))).to_have_count(0)
         ctx.add_cookies([stack.session_cookie("sam@example.com")])  # type: ignore[list-item]
-        page.goto(stack.base_url + "/cleanup")
+        page.goto(stack.web_url + "/cleanup")
         page.locator(f"a[href='/cleanup/receipts/{review}']").click()
         expect(page.get_by_text("Check each line against the photo")).to_be_visible()
         # The photo is a presigned R2 GET the browser loads from the (fake) bucket.
-        img = page.locator(f"img[src^='{stack.r2.url}']")
+        img = page.locator(f"img[src^='{stack.r2.url}/{stack.r2.bucket}/']")
         expect(img).to_have_count(1)
+        loaded = "i => i.complete && i.naturalWidth > 0"
+        wait_for("the receipt photo to load", lambda: img.evaluate(loaded), timeout=15)
         page.get_by_role("button", name="Confirm receipt").click()
         expect(page).to_have_url(re.compile(r"/cleanup\?done=receipt"))
         browser.close()
-    assert any(r.method == "GET" and r.status == 200 and r.key.startswith("media/")
-               for r in stack.r2.requests)  # fmt: skip
+    if isinstance(stack.r2, FakeR2):  # the fake bucket also shows which request fetched it
+        assert any(r.method == "GET" and r.status == 200 and r.key.startswith("media/")
+                   for r in stack.r2.requests)  # fmt: skip
     row = stack.one("select * from review_item where id = ?", review)
     sam = stack.one("select id from member where discord_user_id = ?", SAM)["id"]
     assert row["status"] != "pending" and row["reviewed_by_member_id"] == sam
@@ -317,6 +335,7 @@ def test_07b_confirm_receipt_in_web_ui(stack: Stack) -> None:
     assert any(x["payload"]["ok"] for x in stack.telemetry("ui_action", t))
 
 
+@preview
 def test_08_trash_cam_photo(stack: Stack) -> None:
     """ "we're out of this" + photo → Trash Cam → provisional `consumed` on the detected item."""
     out, msg = submit_photo(stack, "we're out of this", "empty.png")
@@ -373,6 +392,7 @@ def test_10_froze_the_chicken(stack: Stack) -> None:
     assert frozen["frozen_at"] and frozen["quantity"] >= ev["quantity"]
 
 
+@preview
 def test_11_saturday_build(stack: Stack) -> None:
     """`cart build` (price checks → tier 1 on synthetic Amazon) → tier 2 → `cart finish`."""
     c = W["cycle"]
@@ -423,6 +443,7 @@ def test_11_saturday_build(stack: Stack) -> None:
     }
 
 
+@preview
 def test_12_digital_receipt_closes_the_cycle(stack: Stack) -> None:
     """A synthetic Amazon order via `receipts ingest` (the agent-extraction path) closes it."""
     from datetime import UTC, datetime
@@ -476,6 +497,7 @@ def test_12_digital_receipt_closes_the_cycle(stack: Stack) -> None:
     W["new_item"] = out["new_item_ids"][0]
 
 
+@preview
 def test_13_next_cycle_opens(stack: Stack) -> None:
     assert stack.skill(GC, "api get /api/grocery/cycle/current")["cycle"] is None
     opened = stack.skill(GC, "/api/grocery/cycle/open", thread_id="400000000000000102")
@@ -513,6 +535,7 @@ def test_14_merge_suggestions(stack: Stack) -> None:
     assert chat["model"] == "qwen3.5:4b" and W["new_item"] in json.dumps(chat["messages"])
 
 
+@preview
 def test_15_maintenance_cron(stack: Stack) -> None:
     """Vercel Cron's call: only CRON_SECRET may run it."""
     assert stack.http("GET", "/api/cron/maintenance").status_code == 401
@@ -527,6 +550,7 @@ def test_15_maintenance_cron(stack: Stack) -> None:
     assert len(stack.rows("select * from grocery_cycle where status = 'open'")) == 1
 
 
+@preview
 def test_16_weekly_diagnostics(stack: Stack) -> None:
     """telemetry-aggregator: `diagnostics write` renders and writes the report + extracts."""
     out = stack.skill("telemetry-aggregator", "diagnostics write")

@@ -81,6 +81,13 @@ docker build -t pandabase-worker worker   # worker image (CI job worker-image)
 make e2e-system              # tier A system test: next start + worker + fake Ollama/R2 + tools + Playwright (~1 min)
                              # SYSTEM_BUILD=0 reuses web/.next-system; SYSTEM_KEEP=<dir> keeps db + logs
 make system-lint             # ruff + strict mypy for tests/system (part of make check)
+make preview-reset           # migrate + empty + seed TURSO_DATABASE_URL (remote only the preview DB:
+                             # PANDABASE_ALLOW_REMOTE_SEED=preview and a `preview` db name)
+make e2e-preview             # tier A′: @preview steps against SYSTEM_REMOTE_URL (env: preview tokens,
+                             # AUTH_SECRET, TURSO_*, R2_*, VERCEL_AUTOMATION_BYPASS_SECRET; preview-e2e.yml)
+make e2e-system-remote-local # the same remote code path against a local stack + bypass gate (~1 min)
+pnpm db:migrations-status    # read-only: applied migrations vs db/migrations (deploy.yml smoke)
+python3 scripts/deploy/web_smoke.py --base-url URL [--migrations F]   # read-only prod smoke
 make eval-agent              # tier B: real OpenClaw + skills on local Ollama (EVAL_MODEL); skips if unavailable
 make check                   # everything CI runs
 make ops-check               # shellcheck, actionlint, compose/plists, deploy bats tests, migration check, smoke ruff/mypy

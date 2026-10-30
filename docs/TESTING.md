@@ -13,8 +13,13 @@ the app expects. The tiers below test the seams.
 |---|---|---|---|
 | Unit / integration | each package's own suites (`make check`) | every PR | yes |
 | **A — system** | every real component together, on a fake Ollama/R2/Amazon | every PR (`e2e-system` job) | yes |
+| **A′ — preview** | tier A's shortened week against the PR's deployed Vercel preview: real Turso (preview DB), real preview R2, Vercel auth/routing; worker + tools on the runner, fake Ollama/Amazon | every same-repo PR preview (`preview-e2e.yml`, `deployment_status`) | no (not required yet) |
+| **Post-deploy smoke** | read-only checks against production after `vercel deploy --prod` | every production deploy (`deploy.yml` `smoke`) | no (fails the run, posts to Discord) |
 | **B — agent eval** | the real OpenClaw agent + our skills on a local model, against tier A | nightly + manual (`agent-eval.yml`) | no (pass rate) |
 | **C — live** | production on the Mac Mini: real Amazon, Ollama, Discord, Turso | after setup, after risky changes (`make smoke`) | no (manual) |
+
+Tier A′'s and the smoke's names avoid "staging": previews are per-PR deployments sharing one
+synthetic database, and production is only ever read.
 
 ## Tier A — deterministic system test
 
@@ -97,6 +102,107 @@ history pages (M7's fixture tests), backfill pacing.
 Noted, not changed: a resumed `cart build` repeats its price checks (duplicate `price_quote` rows,
 harmless); Whole Foods candidates without an ASIN are flagged `needs_price_check` though the tools
 can only price Amazon product pages (logged as `price_lookup_failed no_asin` every build).
+
+## Tier A′ — the week against a deployed preview
+
+`.github/workflows/preview-e2e.yml` → `make preview-reset` + `make e2e-preview` (tier A's
+harness in **remote mode**: `SYSTEM_REMOTE_URL` set). `make e2e-system-remote-local` runs the same
+remote code path against a local stack (CI's `e2e-system` job runs it after tier A).
+
+**Trigger.** Vercel's GitHub integration records each preview as a GitHub *deployment* and posts
+`deployment_status` events (`pending`, then `success`/`failure`) with environment `Preview` (or
+`Preview – <project>`) and `target_url` / `environment_url` = that deployment's own
+`https://<…>.vercel.app` URL; the job runs on `success` with an environment starting `Preview`.
+For `deployment_status`, GitHub runs the workflow file **from the deployed commit** (`GITHUB_SHA` =
+`deployment.sha`, `GITHUB_REF` = its branch), and the run's check lands on that commit — the PR's
+head. Consequences: the PR's own copy of this workflow runs (a PR can change it, like any CI
+file), and it gets the `preview` environment's secrets. So `scripts/deploy/preview-target.sh`
+runs only for **same-repo branch heads** (the branch exists here and points at the deployed sha;
+fork PRs, tags and superseded pushes skip with a notice). Pushing a branch needs write access;
+Vercel builds fork PRs only after a team member authorizes them (*Git Fork Protection*, keep it
+on); the `preview` secrets are worthless on production (SETUP-CLOUD part 6a). A
+`workflow_dispatch` takes any `https://<deployment>.vercel.app` URL (validated) as the fallback.
+*Sources* (2026-10-30): Vercel's docs on the GitHub integration and *Protection Bypass for
+Automation*, GitHub's *Events that trigger workflows* (`deployment_status`), read through search
+excerpts — this session's network policy blocked vercel.com and docs.github.com, so the first
+real run is the confirmation; the job skips rather than fails if the event shape differs.
+
+**Access.** Previews stay behind Vercel Deployment Protection. The runner sends
+`x-vercel-protection-bypass: $VERCEL_AUTOMATION_BYPASS_SECRET` (*Protection Bypass for
+Automation*): the worker and `pandabase-tools` reach the preview through a local `HeaderProxy`
+that adds the header (so neither learns about Vercel), and the browser adds it — plus
+`x-vercel-set-bypass-cookie: true`, so the cookie covers what the header can't — only on requests
+to the preview origin (never to R2). Locally, a `BypassGate` refuses requests without it, and the
+self-test fails if any got through.
+
+**Data.** The shared `pandabase-preview` DB holds synthetic data only. Each run takes the global
+concurrency group `preview-e2e` (no cancel), then `make preview-reset` = `pnpm db:reset` (migrate,
+then delete every row; the schema and other PRs' additive migrations stay) + `pnpm db:seed --force
+--now`. Both refuse a remote database unless **two signals** agree (`db/src/preview-db.ts`,
+tested): `PANDABASE_ALLOW_REMOTE_SEED=preview` *and* a database name (the host's first label)
+containing `preview` as a dash-separated word. Production's `pandabase-<org>` fails the second
+even with the first set; the seed still needs `--force` for any remote URL as before. The seed's
+members are `alex@example.com` / `sam@example.com`, which is what the preview's `ALLOWED_EMAILS`
+lists; the UI step signs in as Sam with a session cookie (`__Secure-authjs.session-token` over
+https) minted from the preview `AUTH_SECRET`. The run's photos and keyframes are deleted from
+`pandabase-media-preview` at the end (the keys recorded on the jobs it created, then checked gone);
+`preview-target.sh` refuses a bucket whose name lacks `preview`.
+
+**The shortened week** = the steps marked `@preview` in `test_week.py`: 0 (stack up, worker
+heartbeat), 1 (open cycle), 2–3 (adds, skip, qty), 5 (lookup), 6 (nudge + check-in), 7 (paper
+receipt → R2 → worker → receipt + review), 7b (confirm in the web UI, photo loaded from R2), 8
+(Trash Cam), 11 (Saturday build, synthetic Amazon), 12 (digital receipt closes the cycle), 13
+(next cycle), 15 (cron 401/403/200 with the preview `CRON_SECRET`), 16 (weekly diagnostics). The
+same functions as tier A; remote mode only swaps the fixture (`BridgeDb` reads the DB through
+`@libsql/client`, `RemoteR2` checks and deletes objects with SigV4 presigned HEAD/DELETE).
+
+**Covers beyond tier A:** the Vercel build and runtime (env vars, Node version, bundling of `/db`,
+`proxy.ts`, `__Secure-` cookies over https), Turso over the network (latency, libSQL remote
+semantics, migrations on the real engine), R2's real SigV4 and bucket permissions, Deployment
+Protection. **Doesn't cover:** steps 4, 9, 10, 14, 17–19 (no new seam), Vercel Cron's own
+scheduling (cron is called by hand), Google sign-in, the Mac Mini, real models, production data
+or config.
+
+**Skips cleanly** (a notice, green) until the `preview` environment has every secret it needs:
+`TURSO_*`, `AGENT_API_TOKEN`, `WORKER_API_TOKEN`, `CRON_SECRET`, `AUTH_SECRET`, `R2_*`,
+`VERCEL_AUTOMATION_BYPASS_SECRET` (SETUP-CLOUD part 7b).
+
+### Making it required
+
+Not required yet: watch a few green runs first. Then: GitHub → repo → **Settings → Rules →
+Rulesets** (or *Branches → Branch protection rules*) for `main` → **Require status checks to pass**
+→ add `preview-e2e` (the job name). Caveats: a required check that never reports blocks the PR,
+so only require it while every PR gets a Vercel preview, and while the `preview` environment is
+configured (a skip reports success, so that's fine); a run dropped from the queue by a newer one
+shows *cancelled* and needs a re-run.
+
+## Post-deploy smoke (production)
+
+`deploy.yml` job `smoke`, after `deploy-web` (beside `publish-worker`), in environment
+`production`. `scripts/deploy/web_smoke.py` (stdlib only; unit tests with HTTP stubbed:
+`scripts/deploy/tests/test_web_smoke.py`, part of `make ops-check`) is **read-only by
+construction**: its client sends only GET, plus one POST to `/api/telemetry` with no credentials,
+which must be refused (anything else raises before a request is made). Checks, each retried 6 × 10 s
+for propagation:
+
+| Check | Passes when |
+|---|---|
+| sign-in page | `GET /sign-in` → 200 |
+| API / health without a token | 401 |
+| unauthenticated POST | 401 |
+| worker token on an agent route | `GET /api/grocery/cycle/current` → 403 (needs `WORKER_API_TOKEN` in `production`) |
+| agent token | the same → 200 (needs `AGENT_API_TOKEN`) |
+| worker heartbeat | `GET /api/health/worker` → 200; no heartbeat is *reported*, not failed (no Mac Mini yet) |
+| cron without its secret | 401 |
+| migrations | `pnpm db:migrations-status` (one `SELECT` on Turso's `__drizzle_migrations`) matches `db/migrations` by timestamp and hash |
+
+A check whose token isn't configured is skipped with a notice. The table goes to the job summary;
+a failure fails the job, posts once to Discord if `production` has `DEPLOY_DISCORD_WEBHOOK_URL`,
+and emits `deploy {component: "web-smoke", outcome, reason: <failed checks>}` (weekly report §8;
+a failed smoke adds an Instant Rollback hint). **No automatic rollback:** the fix is Vercel's
+Instant Rollback (SETUP-CLOUD *Rolling back*). The authenticated GETs write `api_request`
+telemetry rows like any request; nothing else changes. **Doesn't cover:** sign-in itself, writes,
+the worker/Mac Mini path (M9's health check does), cron scheduling, R2.
 
 ## Tier B — OpenClaw in the loop
 
@@ -222,8 +328,10 @@ from this repository, per-job `packages: write` only where it publishes.
    DNS rebinding).
 7. **Tier-2 "never checkout" is a skill rule**: OpenClaw's browser tool has no URL denylist (M7
    Notes). Our tools enforce the guard in code; checkout still needs a human's "Place your order".
-8. **`preview-migrate.yml` runs same-repo PR code with the preview Turso secrets** (fork PRs are
-   excluded): only the preview database, which holds synthetic data. Add an environment protection
+8. **`preview-migrate.yml` and `preview-e2e.yml` run same-repo PR code with the `preview`
+   environment's secrets** (fork PRs are excluded; for `deployment_status` the PR's own copy of the
+   workflow runs): the preview database, the preview bucket and the preview tokens, all synthetic
+   or preview-only. Reset/seed refuse anything but a `preview` database (two signals). Add an environment protection
    rule if collaborators are added.
 9. **The Mac updater runs whatever `origin/main` is once its GHCR image exists**: that requires
    CI, the migration and the web deploy to have succeeded for it; GHCR push rights equal repo

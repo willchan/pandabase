@@ -308,7 +308,34 @@ describe("weekly diagnostics", () => {
       })
     ).markdown;
     expect(md2).toContain("1 Mac Mini rollback(s) failed — the worker may be down.");
-    expect(md2).toContain("Mac Mini rollbacks: 2.");
+    expect(md2).toContain("Mac Mini rollbacks: 2.");    expect(md2).not.toContain("production smoke failed");
+  });
+
+  it("reports a failed production smoke with its failed checks and the rollback hint", async () => {
+    const sha = "3333333ccccccccccccccccccccccccccccccccc";
+    await h.db.insert(systemTelemetry).values(
+      ["success", "failure"].map((outcome, i) => ({
+        id: `01S${String(i).padStart(23, "0")}`,
+        source: "agent",
+        metricType: "deploy",
+        payload: {
+          component: "web-smoke",
+          sha,
+          outcome,
+          ...(outcome === "failure" ? { reason: "agent token, cron without its secret" } : {}),
+        },
+        createdAt: `2026-10-2${i + 1}T10:00:00.000Z`,
+      })),
+    );
+    const md = (
+      await renderWeekly(h.db, "2026-W43", {
+        now: "2026-10-27T20:00:00.000Z",
+        config: DEFAULT_CONFIG,
+      })
+    ).markdown;
+    expect(md).toContain("| web-smoke | 2 | 1 | 1 |");
+    expect(md).toContain("- web-smoke 3333333: failure — agent token, cron without its secret");
+    expect(md).toContain("Vercel's Instant Rollback");
   });
 
   it("is served by GET /api/diagnostics/weekly", async () => {

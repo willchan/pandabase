@@ -1,0 +1,125 @@
+name: Preview E2E
+
+# Tier A′ (docs/TESTING.md): tier A's shortened week against a PR's real Vercel preview — real
+# Turso (preview DB), the real preview R2 bucket through the app's presigned URLs, Vercel's auth
+# and routing — with the worker (fake Ollama) and pandabase-tools running here.
+#
+# Trigger: Vercel's GitHub integration creates a GitHub deployment per preview and posts
+# `deployment_status` (environment "Preview", or "Preview – <project>"; environment_url /
+# target_url = the deployment's own https://<…>.vercel.app URL). For this event GitHub runs the
+# workflow file *from the deployed commit* (GITHUB_SHA = deployment.sha, GITHUB_REF = its branch),
+# so the check lands on the PR's head commit — and the PR's own copy of this file is what runs.
+# That's why only same-repo branch heads run (scripts/deploy/preview-target.sh): pushing a branch
+# here needs write access, and fork PRs are deployed by Vercel only after a member authorizes them
+# (keep Git Fork Protection on). workflow_dispatch is the fallback for any URL.
+#
+# Not required for merging yet (docs/TESTING.md *Making it required*). Skips with a notice until
+# the `preview` environment has its secrets (docs/SETUP-CLOUD.md).
+
+on:
+  deployment_status:
+  workflow_dispatch:
+    inputs:
+      url:
+        description: "Preview URL, e.g. https://pandabase-git-<branch>-<team>.vercel.app"
+        type: string
+        required: true
+
+# One shared preview database: runs queue, never overlap, never cancel a running one. (GitHub keeps
+# one *pending* run per group, so a burst of pushes may drop a waiting run as "cancelled"; re-run it.)
+concurrency:
+  group: preview-e2e
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+# Secrets go only to the steps that need them (not to `pnpm install`'s dependency scripts).
+jobs:
+  preview-e2e:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.deployment_status.state == 'success' &&
+       startsWith(github.event.deployment.environment, 'Preview'))
+    runs-on: ubuntu-latest
+    environment: preview
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Which preview (and is the environment configured?)
+        id: target
+        run: scripts/deploy/preview-target.sh
+        env:
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+          AGENT_API_TOKEN: ${{ secrets.AGENT_API_TOKEN }}
+          WORKER_API_TOKEN: ${{ secrets.WORKER_API_TOKEN }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          AUTH_SECRET: ${{ secrets.AUTH_SECRET }}
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+          VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
+          EVENT: ${{ github.event_name }}
+          URL_INPUT: ${{ inputs.url }}
+          DEPLOY_URL: ${{ github.event.deployment_status.environment_url || github.event.deployment_status.target_url }}
+          DEPLOY_REF: ${{ github.event.deployment.ref }}
+          DEPLOY_SHA: ${{ github.event.deployment.sha }}
+          GITHUB_TOKEN: ${{ github.token }}
+      - if: steps.target.outputs.run == 'true'
+        uses: pnpm/action-setup@v6
+      - if: steps.target.outputs.run == 'true'
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - if: steps.target.outputs.run == 'true'
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: "0.13.3"
+          enable-cache: true
+          cache-dependency-glob: |
+            worker/uv.lock
+            agent/tools/uv.lock
+      - if: steps.target.outputs.run == 'true'
+        run: pnpm install --frozen-lockfile
+      - if: steps.target.outputs.run == 'true'
+        run: (cd worker && uv sync --locked) && (cd agent/tools && uv sync --locked)
+      - name: Install Chromium for Playwright (Python)
+        if: steps.target.outputs.run == 'true'
+        working-directory: agent/tools
+        run: uv run playwright install --with-deps chromium
+      - name: Migrate, empty and seed pandabase-preview
+        # db/src/preview-db.ts refuses unless both signals say "preview" (never production).
+        if: steps.target.outputs.run == 'true'
+        run: make preview-reset
+        env:
+          PANDABASE_ALLOW_REMOTE_SEED: preview
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+      - name: Shortened week against ${{ steps.target.outputs.url }}
+        if: steps.target.outputs.run == 'true'
+        run: make e2e-preview
+        env:
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+          AGENT_API_TOKEN: ${{ secrets.AGENT_API_TOKEN }}
+          WORKER_API_TOKEN: ${{ secrets.WORKER_API_TOKEN }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          AUTH_SECRET: ${{ secrets.AUTH_SECRET }}
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+          VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
+          SYSTEM_REMOTE_URL: ${{ steps.target.outputs.url }}
+          SYSTEM_KEEP: ${{ runner.temp }}/preview-e2e
+      - if: failure() && steps.target.outputs.run == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: preview-e2e
+          path: ${{ runner.temp }}/preview-e2e
+          retention-days: 7
