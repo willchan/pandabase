@@ -13,7 +13,7 @@ the app expects. The tiers below test the seams.
 |---|---|---|---|
 | Unit / integration | each package's own suites (`make check`) | every PR | yes |
 | **A — system** | every real component together, on a fake Ollama/R2/Amazon | every PR (`e2e-system` job) | yes |
-| **A′ — preview** | tier A's shortened week against the PR's deployed Vercel preview: real Turso (preview DB), real preview R2, Vercel auth/routing; worker + tools on the runner, fake Ollama/Amazon | every same-repo PR preview (`preview-e2e.yml`, `deployment_status`) | no (not required yet) |
+| **A′ — preview** | tier A's shortened week against the PR's deployed Vercel preview: real Turso (preview DB), real preview R2, Vercel auth/routing; worker + tools on the runner, fake Ollama/Amazon | every same-repo PR preview (`preview-e2e.yml`, Vercel `repository_dispatch`) | no (not required yet) |
 | **Post-deploy smoke** | read-only checks against production after `vercel deploy --prod` | every production deploy (`deploy.yml` `smoke`) | no (fails the run, posts to Discord) |
 | **B — agent eval** | the real OpenClaw agent + our skills on a local model, against tier A | nightly + manual (`agent-eval.yml`) | no (pass rate) |
 | **C — live** | production on the Mac Mini: real Amazon, Ollama, Discord, Turso | after setup, after risky changes (`make smoke`) | no (manual) |
@@ -109,23 +109,28 @@ can only price Amazon product pages (logged as `price_lookup_failed no_asin` eve
 harness in **remote mode**: `SYSTEM_REMOTE_URL` set). `make e2e-system-remote-local` runs the same
 remote code path against a local stack (CI's `e2e-system` job runs it after tier A).
 
-**Trigger.** Vercel's GitHub integration records each preview as a GitHub *deployment* and posts
-`deployment_status` events (`pending`, then `success`/`failure`) with environment `Preview` (or
-`Preview – <project>`) and `target_url` / `environment_url` = that deployment's own
-`https://<…>.vercel.app` URL; the job runs on `success` with an environment starting `Preview`.
-For `deployment_status`, GitHub runs the workflow file **from the deployed commit** (`GITHUB_SHA` =
-`deployment.sha`, `GITHUB_REF` = its branch), and the run's check lands on that commit — the PR's
-head. Consequences: the PR's own copy of this workflow runs (a PR can change it, like any CI
-file), and it gets the `preview` environment's secrets. So `scripts/deploy/preview-target.sh`
-runs only for **same-repo branch heads** (the branch exists here and points at the deployed sha;
-fork PRs, tags and superseded pushes skip with a notice). Pushing a branch needs write access;
-Vercel builds fork PRs only after a team member authorizes them (*Git Fork Protection*, keep it
-on); the `preview` secrets are worthless on production (SETUP-CLOUD part 6a). A
-`workflow_dispatch` takes any `https://<deployment>.vercel.app` URL (validated) as the fallback.
-*Sources* (2026-10-30): Vercel's docs on the GitHub integration and *Protection Bypass for
-Automation*, GitHub's *Events that trigger workflows* (`deployment_status`), read through search
-excerpts — this session's network policy blocked vercel.com and docs.github.com, so the first
-real run is the confirmation; the job skips rather than fails if the event shape differs.
+**Trigger.** Vercel's GitHub integration sends **`repository_dispatch`** events when a
+deployment's status changes; the job runs on type `vercel.deployment.success` with
+`client_payload.environment == "preview"` (`client_payload.url`, `.git.sha`, `.git.ref` name the
+deployment). Vercel recommends these over the legacy `deployment_status` events, which this
+project doesn't send: the first version of this workflow listened for `deployment_status` on PR
+#20 and no run ever started. GitHub runs a `repository_dispatch` workflow **from the default
+branch** (`GITHUB_SHA` = `main`'s head), so (a) nothing runs until the workflow is on `main`, (b)
+the job checks out `client_payload.git.sha` only after `main`'s `preview-target.sh` has vetted it,
+and (c) the result reaches the PR as a **`Preview E2E` commit status** on that sha
+(`scripts/deploy/commit-status.sh`, `statuses: write`): pending, then success/failure, or success
+with "Skipped …". Security: the workflow definition is `main`'s, but the PR's code still runs with
+the `preview` environment's secrets, so only **same-repo branch heads** run (the branch exists here
+and points at the deployed sha; forks, tags, superseded pushes and production deployments skip).
+Pushing a branch needs write access, as does sending a forged dispatch (and either already lets you
+run code with those secrets); Vercel builds fork PRs only after a team member authorizes them
+(*Git Fork Protection*, keep it on); the `preview` secrets are worthless on production (SETUP-CLOUD
+part 6a). Branches that predate the preview tests skip with "merge main". `workflow_dispatch` takes
+any `https://<deployment>.vercel.app` URL (validated) as the fallback. *Sources* (2026-10-30):
+Vercel's docs on the GitHub integration (`repository_dispatch` events and payload, via the
+`vercel/repository-dispatch` README), *Protection Bypass for Automation*, and GitHub's events
+reference, read through search excerpts — this session's network policy blocked vercel.com and
+docs.github.com — so the first run after merge is the confirmation.
 
 **Access.** Previews stay behind Vercel Deployment Protection. The runner sends
 `x-vercel-protection-bypass: $VERCEL_AUTOMATION_BYPASS_SECRET` (*Protection Bypass for
@@ -163,7 +168,7 @@ Protection. **Doesn't cover:** steps 4, 9, 10, 14, 17–19 (no new seam), Vercel
 scheduling (cron is called by hand), Google sign-in, the Mac Mini, real models, production data
 or config.
 
-**Skips cleanly** (a notice, green) until the `preview` environment has every secret it needs:
+**Skips cleanly** (a notice, and a green "Skipped" status) until the `preview` environment has every secret it needs:
 `TURSO_*`, `AGENT_API_TOKEN`, `WORKER_API_TOKEN`, `CRON_SECRET`, `AUTH_SECRET`, `R2_*`,
 `VERCEL_AUTOMATION_BYPASS_SECRET` (SETUP-CLOUD part 7b).
 
@@ -171,7 +176,7 @@ or config.
 
 Not required yet: watch a few green runs first. Then: GitHub → repo → **Settings → Rules →
 Rulesets** (or *Branches → Branch protection rules*) for `main` → **Require status checks to pass**
-→ add `preview-e2e` (the job name). Caveats: a required check that never reports blocks the PR,
+→ add the **`Preview E2E`** status (a commit status, not a job check). Caveats: a required check that never reports blocks the PR,
 so only require it while every PR gets a Vercel preview, and while the `preview` environment is
 configured (a skip reports success, so that's fine); a run dropped from the queue by a newer one
 shows *cancelled* and needs a re-run.
@@ -329,8 +334,8 @@ from this repository, per-job `packages: write` only where it publishes.
 7. **Tier-2 "never checkout" is a skill rule**: OpenClaw's browser tool has no URL denylist (M7
    Notes). Our tools enforce the guard in code; checkout still needs a human's "Place your order".
 8. **`preview-migrate.yml` and `preview-e2e.yml` run same-repo PR code with the `preview`
-   environment's secrets** (fork PRs are excluded; for `deployment_status` the PR's own copy of the
-   workflow runs): the preview database, the preview bucket and the preview tokens, all synthetic
+   environment's secrets** (fork PRs are excluded; `preview-e2e.yml` runs `main`'s workflow, then
+   the PR's code): the preview database, the preview bucket and the preview tokens, all synthetic
    or preview-only. Reset/seed refuse anything but a `preview` database (two signals). Add an environment protection
    rule if collaborators are added.
 9. **The Mac updater runs whatever `origin/main` is once its GHCR image exists**: that requires

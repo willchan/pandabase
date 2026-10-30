@@ -84,7 +84,8 @@ make system-lint             # ruff + strict mypy for tests/system (part of make
 make preview-reset           # migrate + empty + seed TURSO_DATABASE_URL (remote only the preview DB:
                              # PANDABASE_ALLOW_REMOTE_SEED=preview and a `preview` db name)
 make e2e-preview             # tier A′: @preview steps against SYSTEM_REMOTE_URL (env: preview tokens,
-                             # AUTH_SECRET, TURSO_*, R2_*, VERCEL_AUTOMATION_BYPASS_SECRET; preview-e2e.yml)
+                             # AUTH_SECRET, TURSO_*, R2_*, VERCEL_AUTOMATION_BYPASS_SECRET; preview-e2e.yml,
+                             # on Vercel's repository_dispatch → `Preview E2E` commit status)
 make e2e-system-remote-local # the same remote code path against a local stack + bypass gate (~1 min)
 pnpm db:migrations-status    # read-only: applied migrations vs db/migrations (deploy.yml smoke)
 python3 scripts/deploy/web_smoke.py --base-url URL [--migrations F]   # read-only prod smoke

@@ -4,20 +4,24 @@ name: Preview E2E
 # Turso (preview DB), the real preview R2 bucket through the app's presigned URLs, Vercel's auth
 # and routing — with the worker (fake Ollama) and pandabase-tools running here.
 #
-# Trigger: Vercel's GitHub integration creates a GitHub deployment per preview and posts
-# `deployment_status` (environment "Preview", or "Preview – <project>"; environment_url /
-# target_url = the deployment's own https://<…>.vercel.app URL). For this event GitHub runs the
-# workflow file *from the deployed commit* (GITHUB_SHA = deployment.sha, GITHUB_REF = its branch),
-# so the check lands on the PR's head commit — and the PR's own copy of this file is what runs.
-# That's why only same-repo branch heads run (scripts/deploy/preview-target.sh): pushing a branch
-# here needs write access, and fork PRs are deployed by Vercel only after a member authorizes them
-# (keep Git Fork Protection on). workflow_dispatch is the fallback for any URL.
+# Trigger: Vercel's GitHub integration sends `repository_dispatch` events when a deployment's
+# status changes (type `vercel.deployment.success`; client_payload.environment = preview |
+# production, .url, .git.sha, .git.ref). Vercel recommends these over the legacy
+# `deployment_status`, which this project doesn't send (no run ever saw one). GitHub runs a
+# repository_dispatch workflow from the *default branch* (this file as merged; GITHUB_SHA = main's
+# head), so the job checks out client_payload.git.sha and reports on it with a "Preview E2E" commit
+# status — that's what shows on the PR. Only same-repo branch heads run
+# (scripts/deploy/preview-target.sh): the PR's code still runs here with the `preview` secrets,
+# pushing a branch needs write access, and fork PRs are deployed by Vercel only after a member
+# authorizes them (keep Git Fork Protection on). workflow_dispatch is the fallback for any URL.
+# Neither trigger runs before this file is on main.
 #
 # Not required for merging yet (docs/TESTING.md *Making it required*). Skips with a notice until
 # the `preview` environment has its secrets (docs/SETUP-CLOUD.md).
 
 on:
-  deployment_status:
+  repository_dispatch:
+    types: [vercel.deployment.success]
   workflow_dispatch:
     inputs:
       url:
@@ -33,24 +37,29 @@ concurrency:
 
 permissions:
   contents: read
+  statuses: write # the "Preview E2E" commit status on the tested commit
 
 # Secrets go only to the steps that need them (not to `pnpm install`'s dependency scripts).
 jobs:
   preview-e2e:
     if: >-
       github.event_name == 'workflow_dispatch' ||
-      (github.event.deployment_status.state == 'success' &&
-       startsWith(github.event.deployment.environment, 'Preview'))
+      github.event.client_payload.environment == 'preview'
     runs-on: ubuntu-latest
     environment: preview
     timeout-minutes: 25
+    env:
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
     steps:
+      # main's scripts decide what to test; the deployed commit is checked out only after that.
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
       - name: Which preview (and is the environment configured?)
         id: target
-        run: scripts/deploy/preview-target.sh
+        run: |
+          cp scripts/deploy/commit-status.sh "$RUNNER_TEMP/" # main's copy, kept past the PR checkout
+          scripts/deploy/preview-target.sh
         env:
           TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
           TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
@@ -65,18 +74,53 @@ jobs:
           VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
           EVENT: ${{ github.event_name }}
           URL_INPUT: ${{ inputs.url }}
-          DEPLOY_URL: ${{ github.event.deployment_status.environment_url || github.event.deployment_status.target_url }}
-          DEPLOY_REF: ${{ github.event.deployment.ref }}
-          DEPLOY_SHA: ${{ github.event.deployment.sha }}
+          DISPATCH_SHA: ${{ github.sha }}
+          DEPLOY_ENV: ${{ github.event.client_payload.environment }}
+          DEPLOY_URL: ${{ github.event.client_payload.url }}
+          DEPLOY_REF: ${{ github.event.client_payload.git.ref }}
+          DEPLOY_SHA: ${{ github.event.client_payload.git.sha }}
           GITHUB_TOKEN: ${{ github.token }}
-      - if: steps.target.outputs.run == 'true'
+      - name: Report skipped
+        if: steps.target.outputs.report == 'true' && steps.target.outputs.run != 'true'
+        run: |
+          "$RUNNER_TEMP/commit-status.sh" "$SHA" success "Skipped, the preview environment isn't fully configured (see the run)"
+        env:
+          SHA: ${{ steps.target.outputs.sha }}
+          GITHUB_TOKEN: ${{ github.token }}
+      - name: Report pending
+        if: steps.target.outputs.run == 'true'
+        run: |
+          "$RUNNER_TEMP/commit-status.sh" "$SHA" pending "Running the shortened week against the preview"
+        env:
+          SHA: ${{ steps.target.outputs.sha }}
+          GITHUB_TOKEN: ${{ github.token }}
+      - name: Check out the deployed commit
+        if: steps.target.outputs.run == 'true'
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ steps.target.outputs.sha }}
+          persist-credentials: false
+      - name: The branch has tier A′'s remote mode
+        id: branch
+        if: steps.target.outputs.run == 'true'
+        run: |
+          if [ -f tests/system/remote.py ] && grep -q '^e2e-preview:' Makefile; then
+            echo "ok=true" >>"$GITHUB_OUTPUT"
+          else
+            echo "::notice title=Preview E2E skipped::this branch predates the preview tests; merge main into it"
+            "$RUNNER_TEMP/commit-status.sh" "$SHA" success "Skipped, the branch predates the preview tests (merge main)"
+          fi
+        env:
+          SHA: ${{ steps.target.outputs.sha }}
+          GITHUB_TOKEN: ${{ github.token }}
+      - if: steps.branch.outputs.ok == 'true'
         uses: pnpm/action-setup@v6
-      - if: steps.target.outputs.run == 'true'
+      - if: steps.branch.outputs.ok == 'true'
         uses: actions/setup-node@v7
         with:
           node-version-file: .nvmrc
           cache: pnpm
-      - if: steps.target.outputs.run == 'true'
+      - if: steps.branch.outputs.ok == 'true'
         uses: astral-sh/setup-uv@v7
         with:
           version: "0.13.3"
@@ -84,24 +128,24 @@ jobs:
           cache-dependency-glob: |
             worker/uv.lock
             agent/tools/uv.lock
-      - if: steps.target.outputs.run == 'true'
+      - if: steps.branch.outputs.ok == 'true'
         run: pnpm install --frozen-lockfile
-      - if: steps.target.outputs.run == 'true'
+      - if: steps.branch.outputs.ok == 'true'
         run: (cd worker && uv sync --locked) && (cd agent/tools && uv sync --locked)
       - name: Install Chromium for Playwright (Python)
-        if: steps.target.outputs.run == 'true'
+        if: steps.branch.outputs.ok == 'true'
         working-directory: agent/tools
         run: uv run playwright install --with-deps chromium
       - name: Migrate, empty and seed pandabase-preview
         # db/src/preview-db.ts refuses unless both signals say "preview" (never production).
-        if: steps.target.outputs.run == 'true'
+        if: steps.branch.outputs.ok == 'true'
         run: make preview-reset
         env:
           PANDABASE_ALLOW_REMOTE_SEED: preview
           TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
           TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
       - name: Shortened week against ${{ steps.target.outputs.url }}
-        if: steps.target.outputs.run == 'true'
+        if: steps.branch.outputs.ok == 'true'
         run: make e2e-preview
         env:
           TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
@@ -117,9 +161,20 @@ jobs:
           VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
           SYSTEM_REMOTE_URL: ${{ steps.target.outputs.url }}
           SYSTEM_KEEP: ${{ runner.temp }}/preview-e2e
-      - if: failure() && steps.target.outputs.run == 'true'
+      - if: failure() && steps.branch.outputs.ok == 'true'
         uses: actions/upload-artifact@v7
         with:
           name: preview-e2e
           path: ${{ runner.temp }}/preview-e2e
           retention-days: 7
+      - name: Report the result
+        if: >-
+          always() && steps.target.outputs.report == 'true' &&
+          (steps.branch.outputs.ok == 'true' || steps.target.outcome == 'failure' || steps.branch.outcome == 'failure')
+        run: |
+          if [ "$JOB_STATUS" = success ]; then state=success; else state=failure; fi
+          "$RUNNER_TEMP/commit-status.sh" "$SHA" "$state" "Shortened week against the preview: $JOB_STATUS"
+        env:
+          SHA: ${{ steps.target.outputs.sha }}
+          GITHUB_TOKEN: ${{ github.token }}
+          JOB_STATUS: ${{ job.status }}

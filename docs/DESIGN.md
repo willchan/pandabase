@@ -831,10 +831,11 @@ Timestamps stored UTC; `HOUSEHOLD_TZ=America/Los_Angeles` defines "today" and sc
   `db/migrations/`. The two run in parallel, which is fine because nothing touches the DB at
   build time (API routes are never prerendered, §3): the preview needs the schema only when it
   serves requests.
-- **Preview E2E (tier A′):** `.github/workflows/preview-e2e.yml` on `deployment_status` (state
-  `success`, environment `Preview…`, as Vercel's Git integration reports each preview; the run uses
-  the deployed commit's workflow file and reports its check there) for same-repo branch heads
-  only (`scripts/deploy/preview-target.sh`), plus `workflow_dispatch` with a URL. Environment
+- **Preview E2E (tier A′):** `.github/workflows/preview-e2e.yml` on Vercel's
+  `repository_dispatch` `vercel.deployment.success` (environment `preview`; GitHub runs `main`'s
+  copy of the workflow, which checks out `client_payload.git.sha` and reports a `Preview E2E`
+  commit status on it) for same-repo branch heads only (`scripts/deploy/preview-target.sh`), plus
+  `workflow_dispatch` with a URL. Environment
   `preview`, global concurrency group `preview-e2e` (no cancel): `make preview-reset` (migrate,
   delete every row, seed relative to now — refused for any remote DB unless
   `PANDABASE_ALLOW_REMOTE_SEED=preview` *and* the database name contains `preview`,
@@ -1019,5 +1020,5 @@ docker-compose.yml (+ docker-compose.build.yml), Makefile, CLAUDE.md, README.md,
 | 46 | PR previews keep Vercel's Git integration; a parallel GitHub job migrates the shared preview DB | Nothing reads the DB at build time, so no ordering is needed; reusing Vercel previews avoids a second deploy path |
 | 47 | Cross-component behavior is tested by a deterministic system test (tier A) on every PR; the real OpenClaw agent is evaluated nightly on a local model (tier B) and reports a pass rate instead of gating | Each milestone tested against contracts in isolation, so the bugs were at the seams; an LLM in the loop is too slow and non-deterministic to gate merges ([TESTING.md](TESTING.md)) |
 | 48 | Name resolution in the skills uses the lookup's `match` (name score + lead), not `confidence` | `confidence` describes the stock estimate; acting only on "high" made almost every list edit and text purchase fall back to free text |
-| 50 | PR previews are tested end to end (tier A′) by re-running tier A's steps in a remote mode against the real deployment, triggered by Vercel's `deployment_status`, on a preview DB that each run resets — guarded by two independent "preview" signals; reported, not required yet | Tier A can't see Vercel, Turso or R2; reusing its steps keeps one test of the week; `deployment_status` waits for the real build without polling; requiring it waits until it has proven stable |
+| 50 | PR previews are tested end to end (tier A′) by re-running tier A's steps in a remote mode against the real deployment, triggered by Vercel's `repository_dispatch` (reported as a commit status), on a preview DB that each run resets — guarded by two independent "preview" signals; reported, not required yet | Tier A can't see Vercel, Turso or R2; reusing its steps keeps one test of the week; the dispatch waits for the real build without polling, and runs `main`'s workflow definition; requiring it waits until it has proven stable |
 | 51 | Production gets a read-only smoke after every web deploy that reports (job, Discord, telemetry) but never rolls back | A smoke that can write could damage the household's data; rollback has side effects (Vercel stops auto-promoting, old env vars) that a human should choose; the Mac Mini already rolls back its own worker |

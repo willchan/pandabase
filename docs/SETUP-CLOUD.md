@@ -465,8 +465,10 @@ there). The tests use a secret that skips that page.
 3. github.com/willchan/pandabase → **Settings** → **Environments** →
    **preview** → **Add environment secret** →
    `VERCEL_AUTOMATION_BYPASS_SECRET` = that value.
-4. Keep **Settings → Git → Git Fork Protection** on in Vercel (the
-   default): fork PRs then build only after you approve them.
+4. Vercel → **Settings → Git**: keep **Git Fork Protection** on (the
+   default: fork PRs build only after you approve them). If the page
+   lists **repository_dispatch events**, make sure they're on: the
+   tests start from them.
 
 The Preview E2E also needs the `preview` secrets from
 [part 7b](#7b-preview) (the preview tokens, `AUTH_SECRET` and `R2_*`).
@@ -476,9 +478,11 @@ Regenerating or deleting the bypass secret breaks it for older
 previews; update the GitHub secret right after.
 
 **Check:** push to any PR (or GitHub → **Actions** → **Preview E2E** →
-**Run workflow** with a preview's `https://….vercel.app` address). The
-PR's checks list **Preview E2E / preview-e2e**, green after about 5
-minutes.
+**Run workflow** with a preview's `https://….vercel.app` address). A
+minute after Vercel's preview is ready, the PR's checks list **Preview
+E2E** (pending, then green after about 5 minutes). Before you finish
+this part it shows *Skipped, the preview environment isn't fully
+configured*. Branches created before the tests existed say *merge main*.
 
 ### 11b. Production smoke secrets (optional)
 
