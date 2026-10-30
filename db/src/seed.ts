@@ -7,6 +7,7 @@ import { pathToFileURL } from "node:url";
 import { ulid } from "ulid";
 import { createDb, type Db } from "./client";
 import { databaseUrlFromEnv } from "./env";
+import { assertResettable, isLocalUrl, redact } from "./preview-db";
 import { rebuildInventoryState } from "./rebuild-state";
 import * as s from "./schema/index";
 import {
@@ -856,16 +857,30 @@ export async function seed(db: Db, opts: SeedOptions = {}): Promise<Rows> {
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
+  // `--force` seeds a remote database, and only one `remoteWriteRefusal` allows (the Turso
+  // preview DB with PANDABASE_ALLOW_REMOTE_SEED=preview). `--now` seeds relative to the real clock
+  // (open cycle, pending reviews current) instead of the fixed DEFAULT_SEED_NOW.
   const url = databaseUrlFromEnv();
-  if (!url.startsWith("file:") && !process.argv.includes("--force")) {
-    console.error(`Refusing to seed non-local database ${url} (pass --force to override).`);
-    process.exit(1);
+  if (!isLocalUrl(url)) {
+    if (!process.argv.includes("--force")) {
+      console.error(
+        `Refusing to seed non-local database ${redact(url)} (pass --force to override).`,
+      );
+      process.exit(1);
+    }
+    try {
+      assertResettable(url);
+    } catch (err) {
+      console.error((err as Error).message);
+      process.exit(1);
+    }
   }
   const db = createDb({ url });
-  const rows = await seed(db);
+  const now = process.argv.includes("--now") ? new Date().toISOString() : undefined;
+  const rows = await seed(db, { now });
   const counts = Object.entries(rows)
     .map(([k, v]) => `${k}=${v.length}`)
     .join(" ");
-  console.log(`seeded ${url}: ${counts}`);
+  console.log(`seeded ${redact(url)}${now ? ` at ${now}` : ""}: ${counts}`);
   db.$client.close();
 }

@@ -443,6 +443,92 @@ the site and publishes a new worker image, without you doing anything.
 
 ---
 
+## 11. Preview tests and the production smoke
+
+Two automatic checks (docs/TESTING.md): every PR's preview runs a short
+household week (**Preview E2E**), and every production deploy ends with
+read-only checks (**smoke**). Both skip, or skip the checks that need a
+missing secret, until you do this part. About 10 minutes, from a phone.
+
+### 11a. Let the tests through preview protection
+
+Vercel protects preview deployments (you get a Vercel login page
+there). The tests use a secret that skips that page.
+
+1. vercel.com → project `pandabase` → **Settings** → **Deployment
+   Protection**.
+2. **Protection Bypass for Automation** → **Add Secret** (or **Create**)
+   → leave the value empty to let Vercel generate it → **Save**. Copy the
+   value and save it in the note as `VERCEL_AUTOMATION_BYPASS_SECRET`.
+   (Vercel also gives every deployment this value as an environment
+   variable of the same name; nothing to add there.)
+3. github.com/willchan/pandabase → **Settings** → **Environments** →
+   **preview** → **Add environment secret** →
+   `VERCEL_AUTOMATION_BYPASS_SECRET` = that value.
+4. Vercel → **Settings → Git**: keep **Git Fork Protection** on (the
+   default: fork PRs build only after you approve them). If the page
+   lists **repository_dispatch events**, make sure they're on: the
+   tests start from them.
+
+The Preview E2E also needs the `preview` secrets from
+[part 7b](#7b-preview) (the preview tokens, `AUTH_SECRET` and `R2_*`).
+Until all of them exist, its run says *skipped* and stays green.
+
+Regenerating or deleting the bypass secret breaks it for older
+previews; update the GitHub secret right after.
+
+**Check:** push to any PR (or GitHub → **Actions** → **Preview E2E** →
+**Run workflow** with a preview's `https://….vercel.app` address). A
+minute after Vercel's preview is ready, the PR's checks list **Preview
+E2E** (pending, then green after about 5 minutes). Before you finish
+this part it shows *Skipped, the preview environment isn't fully
+configured*. Branches created before the tests existed say *merge main*.
+
+### 11b. Production smoke secrets (optional)
+
+The smoke needs nothing new to run; these make it check more:
+
+- `production` environment → `AGENT_API_TOKEN` (already there if you
+  added telemetry) and **`WORKER_API_TOKEN`** (the *prod* value): the
+  smoke checks that each token works only where it should.
+- `production` → **`DEPLOY_DISCORD_WEBHOOK_URL`**: the same
+  `#pandabase` webhook as the Mac Mini's (README step 15); a failed
+  smoke posts there once.
+
+**Check:** the next Deploy run shows a fourth job, **smoke**, with a
+table of checks in its summary. *worker heartbeat: no heartbeat yet* is
+expected until the Mac Mini runs.
+
+---
+
+## Rolling back production
+
+The smoke never rolls back by itself. If it fails (or the site is
+broken), from a phone:
+
+1. vercel.com → project `pandabase` → on the **Production Deployment**
+   tile, **Instant Rollback** (or **Deployments** → the previous
+   *Production* deployment → **⋯** → **Instant Rollback**).
+2. Pick the deployment to go back to → **Confirm**. It switches in
+   seconds; nothing is rebuilt.
+
+What to know:
+
+- On the Hobby plan you can roll back only to the **previous**
+  production deployment; Pro can pick any earlier one.
+- The rolled-back deployment keeps its **old environment variables and
+  cron settings**.
+- After a rollback Vercel stops promoting new production deploys on its
+  own, so the next Deploy run's `vercel deploy --prod` won't go live by
+  itself. Once a fix is merged and deployed, open that deployment →
+  **⋯** → **Promote** (or **Undo Rollback**) to go back to normal.
+- The database isn't rolled back. Migrations are backward-compatible,
+  so the older code runs on the newer schema.
+
+Docs: [Instant Rollback](https://vercel.com/docs/instant-rollback).
+
+---
+
 ## Secrets map
 
 Each value: where it comes from → where it goes. "Vercel P/Pv" means the
