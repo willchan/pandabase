@@ -25,7 +25,7 @@ from earlier ones. Each part ends with a **Check**.
   tier.
 - **A password manager** with a password generator. 1Password and
   Bitwarden let you set length and character types. Apple's Passwords app
-  works too (see [part 1](#1-the-four-random-secrets)).
+  works too (see [part 1](#1-the-random-secrets)).
 - **One secure note** in the password manager called *PandaBase*. Every
   value this guide asks you to "save" goes there. You'll copy from it into
   Vercel and GitHub, and later into the Mac Mini's `.env`.
@@ -39,7 +39,7 @@ from earlier ones. Each part ends with a **Check**.
 
 ---
 
-## 1. The four random secrets
+## 1. The random secrets
 
 PandaBase needs four random values. Nobody gives them to you; you make
 them up.
@@ -49,24 +49,32 @@ them up.
 - `AUTH_SECRET`: signs sign-in sessions
 - `CRON_SECRET`: lets Vercel Cron call the nightly job
 
-For each one:
+Make **each one twice**: a *prod* value and a *preview* value (eight in
+all). Preview deployments run the code of an unreviewed PR, so anything
+a preview knows can leak; with separate values, a leaked preview secret
+doesn't work on production.
+
+For each of the eight:
 
 1. Open your password manager's generator.
 2. Choose **64 characters, letters and digits, no symbols.**
    (1Password: *Random password* type. Bitwarden: *Password*, special
    characters off.)
-3. Save it in the *PandaBase* note under its name.
+3. Save it in the *PandaBase* note under its name, e.g. *prod
+   `AGENT_API_TOKEN`* and *preview `AGENT_API_TOKEN`*.
 
 **Apple Passwords:** its *Strong Password* is a fixed format (about 20
 characters with hyphens) and can't be set to 64. Generate two and join
 them into one value; letters, digits and hyphens are all fine here.
 
-These four never change unless you rotate them. On the Mac Mini they go
-into `.env` and `.env.vercel` ([Phase 2](#phase-2-on-the-mac-mini));
-`make secrets` keeps values that are already there and only fills in
-missing ones.
+These never change unless you rotate them. On the Mac Mini the four
+*prod* values go into `.env` and `.env.vercel`
+([Phase 2](#phase-2-on-the-mac-mini)); `make secrets` keeps values that
+are already there and only fills in missing ones. The *preview* values
+never go to the Mac.
 
-**Check:** the note has four 64-character values with the names above.
+**Check:** the note has eight 64-character values: the four names
+above, each as *prod* and *preview*.
 
 ---
 
@@ -107,31 +115,49 @@ Docs: [Turso dashboard](https://docs.turso.tech/),
 
 ## 3. Cloudflare R2 (photo storage)
 
+Two buckets: `pandabase-media` (production: the household's photos) and
+`pandabase-media-preview` (PR previews and their tests: synthetic images
+only). Each gets its own API token that can reach only its own bucket.
+
 1. Open [dash.cloudflare.com](https://dash.cloudflare.com) → menu
    (☰) → **R2 Object Storage**. If asked, add the R2 subscription (free
    tier; needs a card).
 2. **Create bucket** → name `pandabase-media` → location
    **Automatic** → **Create bucket**.
 3. Back on the R2 **Overview** page, find **Account Details**. Save the
-   **Account ID** as `R2_ACCOUNT_ID`.
+   **Account ID** as `R2_ACCOUNT_ID` (one account: both environments
+   use it).
 4. Next to **API Tokens** select **Manage** → **Create Account API token**.
    - Name: `pandabase`
    - Permissions: **Object Read & Write**
    - Specify bucket(s): **Apply to specific buckets only** →
      `pandabase-media`
    - TTL: **Forever**
-5. **Create API Token**. Save **Access Key ID** as `R2_ACCESS_KEY_ID`
-   and **Secret Access Key** as `R2_SECRET_ACCESS_KEY` (shown only once).
-   Ignore the token value and the endpoint shown above them.
-6. Save `R2_BUCKET` = `pandabase-media`.
+5. **Create API Token**. Save **Access Key ID** as *prod
+   `R2_ACCESS_KEY_ID`* and **Secret Access Key** as *prod
+   `R2_SECRET_ACCESS_KEY`* (shown only once). Ignore the token value and
+   the endpoint shown above them.
+6. Save *prod `R2_BUCKET`* = `pandabase-media`.
+7. Repeat 2, 4–6 for previews: bucket `pandabase-media-preview`, token
+   name `pandabase-preview` scoped to **only** `pandabase-media-preview`.
+   Save as *preview `R2_ACCESS_KEY_ID`*, *preview
+   `R2_SECRET_ACCESS_KEY`*, *preview `R2_BUCKET`* =
+   `pandabase-media-preview`.
+
+Why a second token rather than adding the preview bucket to the first
+one: a token scoped to both buckets would sit in Preview's settings, and
+PR code could use it to read or delete the household's photos. A token
+per bucket keeps a leaked preview token away from production media.
 
 No CORS rule and no lifecycle rule: uploads come from the Mac Mini and
-photos are kept (README step 3).
+photos are kept (README step 3). The preview bucket's objects are
+synthetic; the preview tests delete what they create.
 
 Docs: [R2 API tokens](https://developers.cloudflare.com/r2/api/tokens/),
 [create a bucket](https://developers.cloudflare.com/r2/buckets/create-buckets/).
 
-**Check:** the bucket is listed; four `R2_*` values saved.
+**Check:** both buckets are listed; seven `R2_*` values saved (one
+account ID, three *prod*, three *preview*).
 
 ---
 
@@ -203,14 +229,21 @@ Platform** (sections *Branding*, *Audience*, *Clients*).
    secret** as `AUTH_GOOGLE_SECRET`. Google may not show the secret
    again; if there's a **Download JSON** option, you can skip it, the
    password manager is enough.
-7. Save `ALLOWED_EMAILS` = both Gmail addresses, comma-separated,
+7. Save *prod `ALLOWED_EMAILS`* = both Gmail addresses, comma-separated,
    lowercase, no spaces: `you@gmail.com,partner@gmail.com`.
+8. Save *preview `ALLOWED_EMAILS`* =
+   `alex@example.com,sam@example.com`. These are the synthetic members
+   the preview database is seeded with (`db/src/seed-data.ts`); nobody
+   can own a Google account at `example.com`, and previews keep your
+   real addresses out of PR code.
 
 PandaBase asks only for name and email (no sensitive scopes), so Testing
 mode needs no Google review.
 
 Preview deployments get a new address per build, so Google sign-in on
-previews needs a redirect URI per preview host. Skip that for now.
+previews needs a redirect URI per preview host. Skip that: previews
+aren't for signing in with Google. Their tests sign in with a session
+made from the preview `AUTH_SECRET` instead.
 
 Docs: [manage OAuth clients](https://support.google.com/cloud/answer/15549257),
 [test users / audience](https://support.google.com/cloud/answer/15549945).
@@ -232,26 +265,35 @@ environments. Turn on **Sensitive** for every secret. Leave
 
 Same value for **Production and Preview** (tick both):
 
-- `AUTH_SECRET`
 - `AUTH_GOOGLE_ID`
 - `AUTH_GOOGLE_SECRET`
-- `ALLOWED_EMAILS`
+- `R2_ACCOUNT_ID`
+- `HOUSEHOLD_TZ` (`America/Los_Angeles`)
+
+Different per environment. Add each **twice**: the *prod* value with
+only **Production** ticked, then the *preview* value with only
+**Preview** ticked:
+
+- `AUTH_SECRET`
 - `AGENT_API_TOKEN`
 - `WORKER_API_TOKEN`
 - `CRON_SECRET`
-- `R2_ACCOUNT_ID`
+- `ALLOWED_EMAILS`
 - `R2_ACCESS_KEY_ID`
 - `R2_SECRET_ACCESS_KEY`
-- `R2_BUCKET` (`pandabase-media`)
-- `HOUSEHOLD_TZ` (`America/Los_Angeles`)
+- `R2_BUCKET` (`pandabase-media` / `pandabase-media-preview`)
+- `TURSO_DATABASE_URL`
+- `TURSO_AUTH_TOKEN`
 
-Different per environment (add each twice, ticking one environment
-each time):
-
-- `TURSO_DATABASE_URL`: prod URL → **Production**; preview URL →
-  **Preview**
-- `TURSO_AUTH_TOKEN`: prod token → **Production**; preview token →
-  **Preview**
+Why the four shared ones are safe to share: `AUTH_GOOGLE_ID` is public
+(it's in every sign-in link) and `R2_ACCOUNT_ID` only names the account;
+`HOUSEHOLD_TZ` is a setting. `AUTH_GOOGLE_SECRET` is a real secret, but
+on its own it can't sign anyone in: Google sends sign-in codes only to
+the redirect URIs listed on the client (production and localhost, part
+5), and a session needs the environment's own `AUTH_SECRET`. A leak
+still means rotating it in Google, so if you'd rather not share it,
+make a second OAuth client for previews (part 5 again, no redirect
+URIs needed).
 
 Never add `DEV_AUTH_BYPASS` on Vercel.
 
@@ -283,8 +325,9 @@ Docs: [environment variables](https://vercel.com/docs/environment-variables),
 [access tokens](https://vercel.com/docs/accounts/access-tokens),
 [project settings](https://vercel.com/docs/project-configuration/general-settings).
 
-**Check:** *Environment Variables* lists 16 rows: 12 shared + 2×2
-`TURSO_*`. The note has `VERCEL_TOKEN`, `VERCEL_ORG_ID`,
+**Check:** *Environment Variables* lists 24 rows: 4 shared (both
+environments) + 10 Production-only + 10 Preview-only. No secret except
+`AUTH_GOOGLE_SECRET` shows both *Production* and *Preview*. The note has `VERCEL_TOKEN`, `VERCEL_ORG_ID`,
 `VERCEL_PROJECT_ID`.
 
 ---
@@ -319,9 +362,22 @@ Open
 
 1. **New environment** → `preview` (no branch rule: PR branches use
    it).
-2. Environment secrets: `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN`
-   with the **preview** values. Add `ALLOWED_EMAILS` too if you ever
-   want members in the preview database.
+2. Environment secrets, all with the **preview** values (never a
+   *prod* one):
+   - `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN`: `preview-migrate.yml`
+     and Bootstrap's `preview` target
+   - `AGENT_API_TOKEN`, `WORKER_API_TOKEN`, `CRON_SECRET`,
+     `AUTH_SECRET`: the preview end-to-end tests (tier A′,
+     [TESTING.md](TESTING.md)) call the preview deployment as the
+     agent, the worker and Vercel Cron, and sign in to its web UI with
+     a session signed by `AUTH_SECRET`
+   - `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`,
+     `R2_BUCKET`: the same tests delete the photos they uploaded to
+     `pandabase-media-preview`
+   - `ALLOWED_EMAILS` (optional): only for Bootstrap `add-member` on
+     `preview`; the seed already creates the preview members.
+   Until these exist, the preview tests skip with a notice instead of
+   failing.
 
 ### 7c. Worker image (nothing to do)
 
@@ -331,7 +387,8 @@ The deploy publishes `ghcr.io/willchan/pandabase-worker`, a public image
 Docs: [deployment environments](https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-deployments/manage-environments).
 
 **Check:** `production` shows 7 secrets (6 without telemetry), 1
-variable and the `main` rule; `preview` shows 2 secrets.
+variable and the `main` rule; `preview` shows 10 secrets (11 with
+`ALLOWED_EMAILS`), every one a *preview* value.
 
 ---
 
@@ -435,7 +492,7 @@ If sign-in fails:
 - *Access denied*: the email is missing from `ALLOWED_EMAILS` (part 6a;
   redeploy after changing it, by re-running the Deploy run), from Google
   test users (part 5).
-- A server error: check that Vercel has all 16 variables and that
+- A server error: check that Vercel has all 24 variables and that
   Bootstrap's production migrate succeeded.
 
 **Phase 1 is done.** From now on every merge to `main` migrates, deploys
@@ -445,46 +502,48 @@ the site and publishes a new worker image, without you doing anything.
 
 ## Secrets map
 
-Each value: where it comes from → where it goes. "Vercel P/Pv" means the
-Production and Preview environments. "GH prod / GH preview" are the GitHub
-environments. "Mac" is Phase 2.
+Each value: where it comes from → where it goes. "Vercel P" and "Vercel
+Pv" are the Production and Preview environments. "GH prod / GH preview"
+are the GitHub environments. "Mac" is Phase 2. *prod* and *preview*
+values are different values of the same name; a *preview* value never
+goes to Vercel P, GH prod or the Mac, and a *prod* value never goes to
+Vercel Pv or GH preview.
 
-**`AGENT_API_TOKEN`**
-- From: password manager (part 1)
-- To: Vercel P/Pv, GH prod (optional), Mac `.env`
+**`AGENT_API_TOKEN`, `WORKER_API_TOKEN`**
+- From: password manager (part 1), one *prod* and one *preview* value
+- *prod* → Vercel P, Mac `.env` (agent token: also GH prod, optional)
+- *preview* → Vercel Pv, GH preview
 
-**`WORKER_API_TOKEN`**
-- From: password manager (part 1)
-- To: Vercel P/Pv, Mac `.env`
+**`AUTH_SECRET`, `CRON_SECRET`**
+- From: password manager (part 1), one *prod* and one *preview* value
+- *prod* → Vercel P, Mac `.env.vercel` (only so `make secrets` keeps it)
+- *preview* → Vercel Pv, GH preview
 
-**`AUTH_SECRET`**
-- From: password manager (part 1)
-- To: Vercel P/Pv, Mac `.env.vercel` (only so `make secrets` keeps it)
+**`TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN`**
+- From: Turso: *prod* = database `pandabase`, *preview* =
+  `pandabase-preview` (part 2)
+- *prod* → Vercel P, GH prod. *preview* → Vercel Pv, GH preview. Never
+  the Mac.
 
-**`CRON_SECRET`**
-- From: password manager (part 1)
-- To: Vercel P/Pv, Mac `.env.vercel` (same reason)
+**`R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET`**
+- From: Cloudflare R2 (part 3): *prod* = token `pandabase` on
+  `pandabase-media`, *preview* = token `pandabase-preview` on
+  `pandabase-media-preview`
+- *prod* → Vercel P. *preview* → Vercel Pv, GH preview.
 
-**`TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN` (prod)**
-- From: Turso, database `pandabase` (part 2)
-- To: Vercel P, GH prod. Never the Mac.
-
-**`TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN` (preview)**
-- From: Turso, database `pandabase-preview` (part 2)
-- To: Vercel Pv, GH preview. Never the Mac.
-
-**`R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`,
-`R2_BUCKET`**
+**`R2_ACCOUNT_ID`** (identifies the account; shared)
 - From: Cloudflare R2 (part 3)
-- To: Vercel P/Pv
+- To: Vercel P/Pv, GH preview
 
-**`AUTH_GOOGLE_ID`, `AUTH_GOOGLE_SECRET`**
+**`AUTH_GOOGLE_ID`, `AUTH_GOOGLE_SECRET`** (shared; see part 6a)
 - From: Google Auth Platform → Clients (part 5)
 - To: Vercel P/Pv
 
 **`ALLOWED_EMAILS`** (kept secret: the repo is public)
-- From: you (part 5)
-- To: Vercel P/Pv, GH prod (and GH preview, optional)
+- From: you (part 5): *prod* = your Gmail addresses, *preview* =
+  `alex@example.com,sam@example.com`
+- *prod* → Vercel P, GH prod. *preview* → Vercel Pv (and GH preview,
+  optional).
 
 **`HOUSEHOLD_TZ`** (setting)
 - To: Vercel P/Pv
@@ -505,6 +564,68 @@ has the same information as a table, plus rotation.
 
 ---
 
+## Migrating an existing setup
+
+Set up before previews had their own secrets (October 2026)? Then
+Preview shares production's tokens, `AUTH_SECRET` and R2 bucket. Do
+this once, from a phone; about 20 minutes. Production keeps every value
+it has, so nothing on production changes or goes down.
+
+1. **Password manager: 4 new secrets.** Generate *preview
+   `AGENT_API_TOKEN`*, *preview `WORKER_API_TOKEN`*, *preview
+   `AUTH_SECRET`* and *preview `CRON_SECRET`* as in
+   [part 1](#1-the-random-secrets) (64 letters and digits). Rename the
+   existing four to *prod …* in the note.
+2. **Cloudflare: the preview bucket and its token**
+   ([part 3](#3-cloudflare-r2-photo-storage) step 7). dash.cloudflare.com
+   → **R2 Object Storage** → **Create bucket** `pandabase-media-preview`
+   → **Manage** API tokens → **Create Account API token**: name
+   `pandabase-preview`, **Object Read & Write**, **Apply to specific
+   buckets only** → `pandabase-media-preview`, TTL **Forever**. Save the
+   two keys as *preview `R2_ACCESS_KEY_ID`* / *preview
+   `R2_SECRET_ACCESS_KEY`*. Leave the `pandabase` token as it is.
+3. **Vercel: split the variables.** vercel.com → project → **Settings**
+   → **Environment Variables**. For each of `AUTH_SECRET`,
+   `AGENT_API_TOKEN`, `WORKER_API_TOKEN`, `CRON_SECRET`,
+   `ALLOWED_EMAILS`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` and
+   `R2_BUCKET`:
+   1. open the row's **⋯** → **Edit** → untick **Preview** (keep
+      **Production**) → **Save**. The value stays production's;
+   2. **Add New** (or **Add Environment Variable**): same **Key**, the
+      *preview* value, only **Preview** ticked, **Sensitive** on →
+      **Save**.
+
+   *Preview* values: the four new secrets, the two new R2 keys,
+   `R2_BUCKET` = `pandabase-media-preview`, `ALLOWED_EMAILS` =
+   `alex@example.com,sam@example.com`. Leave `AUTH_GOOGLE_ID`,
+   `AUTH_GOOGLE_SECRET`, `R2_ACCOUNT_ID` and `HOUSEHOLD_TZ` shared
+   ([why](#6a-environment-variables)). Vercel won't show a sensitive
+   value again, so you can't check by looking: the row count can (24,
+   part 6a **Check**).
+4. **GitHub: the `preview` environment.** github.com/willchan/pandabase
+   → **Settings** → **Environments** → **preview** → **Add environment
+   secret**, once each, all *preview* values:
+   - `AGENT_API_TOKEN`, `WORKER_API_TOKEN`, `CRON_SECRET`,
+     `AUTH_SECRET`: the preview end-to-end tests use these four (as
+     the agent, the worker, Vercel Cron, and to sign a web session);
+   - `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`,
+     `R2_BUCKET`: the same tests delete the photos they upload.
+
+   `TURSO_DATABASE_URL` / `TURSO_AUTH_TOKEN` are already there. If
+   `preview` has an `ALLOWED_EMAILS` secret with your real addresses,
+   replace it with the preview value or delete it. Don't touch
+   `production`.
+5. **Redeploy a preview.** Vercel → **Deployments** → the newest
+   *Preview* deployment → **⋯** → **Redeploy** (without the build
+   cache isn't needed). Environment variables reach a deployment only
+   when it's built, so older previews keep the old, shared values until
+   they're rebuilt or expire; any new push to a PR builds a fresh one.
+   Check: the redeployed preview's `/sign-in` page loads.
+
+Production needs no redeploy: its values didn't change.
+
+---
+
 ## Phase 2: on the Mac Mini
 
 Follow the [README setup](../README.md#setup-from-zero). Phase 1 already
@@ -514,9 +635,11 @@ did steps 2–4, 6, 7 and 15.1–15.3; skip them. What's left:
    can skip the `turso` and `vercel` CLIs.
 2. **Step 5 (secrets), with your existing values. Don't generate new
    ones:**
-   - `cp ops/mac.env.example .env`, then paste `AGENT_API_TOKEN` and
-     `WORKER_API_TOKEN` from the note, and set `PANDABASE_API_URL`.
-   - Create `.env.vercel` with `AUTH_SECRET=…` and `CRON_SECRET=…`.
+   - `cp ops/mac.env.example .env`, then paste the *prod*
+     `AGENT_API_TOKEN` and `WORKER_API_TOKEN` from the note, and set
+     `PANDABASE_API_URL`.
+   - Create `.env.vercel` with the *prod* `AUTH_SECRET=…` and
+     `CRON_SECRET=…`.
    - Run `make secrets`: it keeps every value already set, fills only
      empty ones and sets file modes to 600. Copy the template first: if
      `.env` already exists, `make secrets` keeps that file as it is and
