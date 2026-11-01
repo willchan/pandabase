@@ -10,16 +10,25 @@
 
 Everything is relative to the seed's `now` (= the real clock at startup); the API has no clock
 override.
+
+**Remote mode** (tier A', `SYSTEM_REMOTE_URL` set; `make e2e-preview`): no `next start`. The
+State Engine is a deployed preview: its database (reset and seeded by `make preview-reset`) is read
+through `BridgeDb`, R2 is the real preview bucket (`RemoteR2`), tokens and `AUTH_SECRET` come from
+the environment, and the worker and tools reach it through a local `HeaderProxy` that adds the
+Vercel protection-bypass header. Only steps marked `preview` run; the objects the run stored in R2
+are deleted at the end. `make e2e-system-remote-local` runs the same path against a local stack.
 """
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import re
 import secrets
 import shlex
 import shutil
+import signal
 import socket
 import sqlite3
 import subprocess
@@ -27,14 +36,15 @@ import sys
 import time
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
 import httpx
 import pytest
-from fakes import FakeOllama, FakeR2
+from fakes import FakeOllama, FakeR2, HeaderProxy
+from remote import BridgeDb, RemoteR2
 
 REPO = Path(__file__).resolve().parents[2]
 WEB = REPO / "web"
@@ -47,6 +57,26 @@ EMAILS = ("alex@example.com", "sam@example.com")
 # Seeded members (db/src/seed-data.ts): Alex is the cart member.
 ALEX = "100000000000000001"
 SAM = "100000000000000002"
+REMOTE_URL = os.environ.get("SYSTEM_REMOTE_URL", "").rstrip("/")
+# What remote mode reads from the environment (the GitHub `preview` environment's secrets).
+REMOTE_ENV = (
+    "AGENT_API_TOKEN", "WORKER_API_TOKEN", "CRON_SECRET", "AUTH_SECRET", "TURSO_DATABASE_URL",
+    "R2_ACCOUNT_ID", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY", "R2_BUCKET",
+)  # fmt: skip
+BYPASS_HEADER = "x-vercel-protection-bypass"
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    config.addinivalue_line("markers", "preview: part of tier A''s shortened week (remote mode)")
+
+
+def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
+    """Remote mode runs only the shortened week; the rest is deselected, not skipped."""
+    if not REMOTE_URL:
+        return
+    keep = [i for i in items if i.get_closest_marker("preview")]
+    config.hook.pytest_deselected(items=[i for i in items if i not in keep])
+    items[:] = keep
 
 
 def free_port() -> int:
@@ -142,20 +172,47 @@ def skill_argv(
 # --- stack ----------------------------------------------------------------------------------
 
 
+class LocalDb:
+    """The local stack's SQLite file, read-only."""
+
+    def __init__(self, path: Path) -> None:
+        self.path = path
+
+    def rows(self, sql: str, *params: Any) -> list[dict[str, Any]]:
+        con = sqlite3.connect(f"file:{self.path}?mode=ro", uri=True, timeout=10)
+        con.row_factory = sqlite3.Row
+        try:
+            return [dict(r) for r in con.execute(sql, params).fetchall()]
+        finally:
+            con.close()
+
+    def close(self) -> None:
+        return None
+
+
 @dataclass
 class Stack:
+    """`base_url` is what the API clients use; `web_url` is what the browser opens (the same
+    locally; in remote mode the proxy and the preview, see the module docstring)."""
+
     base_url: str
-    db_path: Path
+    db: LocalDb | BridgeDb
     tmp: Path
     config_path: Path
     tokens: dict[str, str]
     auth_secret: str
-    r2: FakeR2
+    r2: FakeR2 | RemoteR2
     ollama: FakeOllama
+    web_url: str = ""
+    bypass: str = ""
     procs: dict[str, subprocess.Popen[bytes]] = field(default_factory=dict)
     logs: dict[str, Path] = field(default_factory=dict)
     amazon_log: Path = Path()
     seq: int = 0
+
+    @property
+    def remote(self) -> bool:
+        return isinstance(self.r2, RemoteR2)
 
     # Agent CLI -------------------------------------------------------------------------------
 
@@ -208,12 +265,7 @@ class Stack:
         return httpx.request(method, self.base_url + path, headers=headers, timeout=60, **kw)
 
     def rows(self, sql: str, *params: Any) -> list[dict[str, Any]]:
-        con = sqlite3.connect(f"file:{self.db_path}?mode=ro", uri=True, timeout=10)
-        con.row_factory = sqlite3.Row
-        try:
-            return [dict(r) for r in con.execute(sql, params).fetchall()]
-        finally:
-            con.close()
+        return self.db.rows(sql, *params)
 
     def one(self, sql: str, *params: Any) -> dict[str, Any]:
         rows = self.rows(sql, *params)
@@ -233,22 +285,38 @@ class Stack:
         return datetime.now(ZoneInfo(TZ)).date().isoformat()
 
     def session_cookie(self, email: str) -> dict[str, str]:
-        """An Auth.js v5 session cookie (JWE) for `email`, as Google sign-in would set."""
+        """An Auth.js v5 session cookie (JWE) for `email`, as Google sign-in would set.
+
+        Over https (a deployed preview) Auth.js uses `__Secure-` cookies, and the cookie name is
+        also the JWE salt.
+        """
+        name = ("__Secure-" if self.web_url.startswith("https:") else "") + "authjs.session-token"
         script = (
             "import { encode } from 'next-auth/jwt';"
-            "const [email, secret] = process.argv.slice(1);"
-            "const salt = 'authjs.session-token';"
+            "const [email, secret, salt] = process.argv.slice(1);"
             "process.stdout.write(await encode({ salt, secret,"
             " token: { email, name: email.split('@')[0], sub: email } }));"
         )
         p = subprocess.run(
-            ["node", "--input-type=module", "-e", script, email, self.auth_secret],
+            ["node", "--input-type=module", "-e", script, email, self.auth_secret, name],
             cwd=WEB,
             capture_output=True,
             text=True,
             check=True,
         )
-        return {"name": "authjs.session-token", "value": p.stdout, "url": self.base_url}
+        return {"name": name, "value": p.stdout, "url": self.web_url}
+
+    def bypass_browser(self, ctx: Any) -> None:
+        """Remote mode: send Vercel's bypass header (and ask for its cookie) on every request the
+        browser makes to the preview — only there, never to R2."""
+        if not self.bypass:
+            return
+        extra = {BYPASS_HEADER: self.bypass, "x-vercel-set-bypass-cookie": "true"}
+        origin = self.web_url + "/"
+        ctx.route(
+            lambda url: url.startswith(origin),
+            lambda route: route.continue_(headers={**route.request.headers, **extra}),
+        )
 
     def log_tail(self, name: str, lines: int = 60) -> str:
         path = self.logs.get(name)
@@ -268,27 +336,18 @@ def _run(cmd: list[str], cwd: Path, env: dict[str, str], log: Path) -> None:
 def _start(stack: Stack, name: str, cmd: list[str], cwd: Path, env: dict[str, str]) -> None:
     log = stack.tmp / f"{name}.log"
     stack.logs[name] = log
+    # Its own process group, so stopping `pnpm exec next start` also stops next-server.
     stack.procs[name] = subprocess.Popen(
-        cmd, cwd=cwd, env=env, stdout=log.open("w"), stderr=subprocess.STDOUT
-    )
+        cmd, cwd=cwd, env=env, stdout=log.open("w"), stderr=subprocess.STDOUT,
+        start_new_session=True,
+    )  # fmt: skip
 
 
-@pytest.fixture(scope="session")
-def stack(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Stack]:
-    tmp = tmp_path_factory.mktemp("system")
-    db_path = tmp / "system.db"
-    tokens = {k: secrets.token_hex(16) for k in ("agent", "worker", "cron")}
-    auth_secret = secrets.token_hex(32)
-    r2_key, r2_secret = "SYSTEMTESTKEY", secrets.token_hex(16)
-    r2 = FakeR2("pandabase-system", r2_key, r2_secret).start()
-    ollama = FakeOllama().start()
-    port = int(os.environ.get("SYSTEM_PORT") or free_port())
-    base_url = f"http://127.0.0.1:{port}"
-
+def agent_config(base_url: str, web_url: str, tmp: Path) -> Path:
     cfg = json.loads((REPO / "agent" / "pandabase.config.example.json").read_text())
     cfg.update(
         api_base_url=base_url,
-        web_url=base_url,
+        web_url=web_url,
         household_tz=TZ,
         state_dir=str(tmp / "state"),
         diagnostics_dir=str(tmp / "diagnostics"),
@@ -310,11 +369,14 @@ def stack(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Stack]:
     config_path = tmp / "pandabase.config.json"
     (tmp / "profiles.json").write_text(json.dumps(profiles))
     config_path.write_text(json.dumps(cfg))
+    return config_path
 
-    s = Stack(base_url, db_path, tmp, config_path, tokens, auth_secret, r2, ollama)
-    s.amazon_log = tmp / "amazon.jsonl"
-    ollama.receipt_date = s.today()
-    web_env = {
+
+def web_env(
+    base_url: str, db_path: Path, tokens: dict[str, str], auth_secret: str, r2: FakeR2
+) -> dict[str, str]:
+    """The local State Engine's environment (also `remote_local.py`'s)."""
+    return {
         **os.environ,
         "NODE_ENV": "production",
         "NEXT_DIST_DIR": DIST_DIR,
@@ -330,48 +392,142 @@ def stack(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Stack]:
         # Must be ignored outside NODE_ENV=development (asserted in the test).
         "DEV_AUTH_BYPASS": "1",
         "R2_ACCOUNT_ID": "system",
-        "R2_ACCESS_KEY_ID": r2_key,
-        "R2_SECRET_ACCESS_KEY": r2_secret,
+        "R2_ACCESS_KEY_ID": r2.access_key,
+        "R2_SECRET_ACCESS_KEY": r2.secret,
         "R2_BUCKET": r2.bucket,
         "R2_ENDPOINT": r2.url,
         "HOUSEHOLD_TZ": TZ,
     }
+
+
+def build_web(env: dict[str, str], log: Path) -> None:
+    if os.environ.get("SYSTEM_BUILD", "1") != "0" or not (WEB / DIST_DIR / "BUILD_ID").exists():
+        _run(["pnpm", "exec", "next", "build"], WEB, env, log)
+
+
+def start_worker(s: Stack) -> None:
+    worker_env = {
+        **os.environ,
+        "PANDABASE_API_URL": s.base_url,
+        "WORKER_API_TOKEN": s.tokens["worker"],
+        "OLLAMA_URL": s.ollama.url,
+        "POLL_INTERVAL_SECONDS": "0.3",
+        "HOUSEHOLD_TZ": TZ,
+        "PANDABASE_BUILD_SHA": "systemtest",
+    }
+    worker_python = WORKER / ".venv" / "bin" / "python"
+    _start(s, "worker", [str(worker_python), "-m", "pandabase_worker"], WORKER, worker_env)
+
+
+def remote_stack(tmp: Path) -> tuple[Stack, HeaderProxy]:
+    """Tier A': a deployed State Engine (see the module docstring)."""
+    missing = [k for k in REMOTE_ENV if not os.environ.get(k)]
+    if missing:
+        raise pytest.UsageError(f"remote mode needs {', '.join(missing)}")
+    env = os.environ
+    bypass = env.get("VERCEL_AUTOMATION_BYPASS_SECRET", "")
+    proxy = HeaderProxy(REMOTE_URL, {BYPASS_HEADER: bypass} if bypass else {}).start()
+    tokens = {"agent": env["AGENT_API_TOKEN"], "worker": env["WORKER_API_TOKEN"],
+              "cron": env["CRON_SECRET"]}  # fmt: skip
+    db = BridgeDb(env["TURSO_DATABASE_URL"], env.get("TURSO_AUTH_TOKEN", ""))
+    config = agent_config(proxy.url, REMOTE_URL, tmp)
+    s = Stack(proxy.url, db, tmp, config, tokens, env["AUTH_SECRET"], RemoteR2.from_env(),
+              FakeOllama().start(), web_url=REMOTE_URL, bypass=bypass)  # fmt: skip
+    return s, proxy
+
+
+def cleanup_r2(s: Stack, since: str) -> list[str]:
+    """Delete what this run stored in the (shared, synthetic) preview bucket: the photos it
+    uploaded and the worker's keyframes, as recorded on the jobs created since `since`."""
+    keys: list[str] = []
+    for job in s.rows(
+        "select media_r2_key, keyframe_r2_keys from audit_job where created_at >= ?", since
+    ):
+        keys += [job["media_r2_key"] or "", *json.loads(job["keyframe_r2_keys"] or "[]")]
+    keys = [k for k in dict.fromkeys(keys) if k.startswith(("media/", "keyframes/"))]
+    assert isinstance(s.r2, RemoteR2)
+    for key in keys:
+        s.r2.delete(key)
+    left = [k for k in keys if s.r2.content_type(k) is not None]
+    assert not left, f"R2 objects not deleted: {left}"
+    print(f"--- deleted {len(keys)} R2 object(s) this run created ---")
+    return keys
+
+
+@pytest.fixture(scope="session")
+def stack(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Stack]:
+    tmp = tmp_path_factory.mktemp("system")
+    if REMOTE_URL:
+        yield from _remote(tmp)
+    else:
+        yield from _local(tmp)
+
+
+def _remote(tmp: Path) -> Iterator[Stack]:
+    s, proxy = remote_stack(tmp)
+    s.amazon_log = tmp / "amazon.jsonl"
+    s.ollama.receipt_date = s.today()
+    started = datetime.now(UTC).isoformat().replace("+00:00", "Z")
+    try:
+        wait_for("the preview", lambda: s.http("GET", "/sign-in").status_code == 200, timeout=60)
+        start_worker(s)
+        yield s
+    finally:
+        try:
+            cleanup_r2(s, started)
+        finally:
+            _stop(s)
+            s.db.close()
+            proxy.stop()
+            if isinstance(s.r2, RemoteR2):
+                s.r2.close()
+
+
+def _stop(s: Stack) -> None:
+    for name, proc in s.procs.items():
+        with contextlib.suppress(ProcessLookupError):
+            os.killpg(proc.pid, signal.SIGTERM)
+        try:
+            proc.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            with contextlib.suppress(ProcessLookupError):
+                os.killpg(proc.pid, signal.SIGKILL)
+        print(f"--- {name} log (tail) ---\n{s.log_tail(name)}")
+    s.ollama.stop()
+    keep = os.environ.get("SYSTEM_KEEP")
+    if keep:
+        shutil.copytree(s.tmp, keep, dirs_exist_ok=True)
+
+
+def _local(tmp: Path) -> Iterator[Stack]:
+    db_path = tmp / "system.db"
+    tokens = {k: secrets.token_hex(16) for k in ("agent", "worker", "cron")}
+    auth_secret = secrets.token_hex(32)
+    r2 = FakeR2("pandabase-system", "SYSTEMTESTKEY", secrets.token_hex(16)).start()
+    ollama = FakeOllama().start()
+    port = int(os.environ.get("SYSTEM_PORT") or free_port())
+    base_url = f"http://127.0.0.1:{port}"
+    config_path = agent_config(base_url, base_url, tmp)
+    s = Stack(base_url, LocalDb(db_path), tmp, config_path, tokens, auth_secret, r2, ollama,
+              web_url=base_url)  # fmt: skip
+    s.amazon_log = tmp / "amazon.jsonl"
+    ollama.receipt_date = s.today()
+    env = web_env(base_url, db_path, tokens, auth_secret, r2)
     try:
         setup = tmp / "setup.log"
         s.logs["setup"] = setup
-        if os.environ.get("SYSTEM_BUILD", "1") != "0" or not (WEB / DIST_DIR / "BUILD_ID").exists():
-            _run(["pnpm", "exec", "next", "build"], WEB, web_env, setup)
+        build_web(env, setup)
         _run(
             ["pnpm", "exec", "tsx", "e2e/seed-db.ts"],
             WEB,
-            {**web_env, "E2E_DB": str(db_path)},
+            {**env, "E2E_DB": str(db_path)},
             setup,
         )
         _start(s, "web", ["pnpm", "exec", "next", "start", "-p", str(port), "-H", "127.0.0.1"],
-               WEB, web_env)  # fmt: skip
+               WEB, env)  # fmt: skip
         wait_for("next start", lambda: s.http("GET", "/sign-in").status_code == 200, timeout=60)
-        worker_env = {
-            **os.environ,
-            "PANDABASE_API_URL": base_url,
-            "WORKER_API_TOKEN": tokens["worker"],
-            "OLLAMA_URL": ollama.url,
-            "POLL_INTERVAL_SECONDS": "0.3",
-            "HOUSEHOLD_TZ": TZ,
-            "PANDABASE_BUILD_SHA": "systemtest",
-        }
-        worker_python = WORKER / ".venv" / "bin" / "python"
-        _start(s, "worker", [str(worker_python), "-m", "pandabase_worker"], WORKER, worker_env)
+        start_worker(s)
         yield s
     finally:
-        for name, proc in s.procs.items():
-            proc.terminate()
-            try:
-                proc.wait(timeout=10)
-            except subprocess.TimeoutExpired:
-                proc.kill()
-            print(f"--- {name} log (tail) ---\n{s.log_tail(name)}")
+        _stop(s)
         r2.stop()
-        ollama.stop()
-        keep = os.environ.get("SYSTEM_KEEP")
-        if keep:
-            shutil.copytree(tmp, keep, dirs_exist_ok=True)

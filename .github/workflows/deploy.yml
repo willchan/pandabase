@@ -2,6 +2,7 @@ name: Deploy
 
 # Production deploy after CI passes on main (PLAN M9, DESIGN §8 *Continuous deployment*):
 #   migrate (Turso prod) → deploy-web (vercel deploy --prod) → publish-worker (GHCR :<sha>, :main)
+#                                                            → smoke (read-only checks; reports only)
 # The Mac Mini pulls the worker itself (scripts/deploy/mac-update.sh): an image tagged with a sha
 # exists only if every step above succeeded for that sha, which is its "green" signal.
 # Vercel's own production auto-deploy is off (web/vercel.json), so code never ships before its
@@ -137,3 +138,69 @@ jobs:
         env:
           PANDABASE_API_URL: ${{ vars.PANDABASE_API_URL }}
           AGENT_API_TOKEN: ${{ secrets.AGENT_API_TOKEN }}
+
+  smoke:
+    # Read-only production smoke (docs/TESTING.md *Post-deploy smoke*): GETs plus one
+    # unauthenticated POST that must be refused (scripts/deploy/web_smoke.py enforces it), and a
+    # SELECT on Turso's migration journal. A failure fails this job and posts once to Discord; it
+    # never rolls back (Vercel's Instant Rollback is a human's call: docs/SETUP-CLOUD.md). It runs
+    # beside publish-worker, so a red smoke doesn't hold back the Mac Mini's worker.
+    needs: deploy-web
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.SHA }}
+          persist-credentials: false
+      - name: Production URL is configured
+        run: scripts/deploy/require-env.sh production PANDABASE_API_URL TURSO_DATABASE_URL TURSO_AUTH_TOKEN
+        env:
+          PANDABASE_API_URL: ${{ vars.PANDABASE_API_URL }}
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Migrations applied in Turso production (read-only)
+        # Exit 1 on a mismatch; web_smoke.py reads the JSON and fails the check.
+        continue-on-error: true
+        run: pnpm -s db:migrations-status >"$RUNNER_TEMP/migrations.json"
+        env:
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+      - name: Smoke ${{ vars.PANDABASE_API_URL }}
+        id: smoke
+        run: python3 scripts/deploy/web_smoke.py --base-url "$PANDABASE_API_URL" --migrations "$RUNNER_TEMP/migrations.json"
+        env:
+          PANDABASE_API_URL: ${{ vars.PANDABASE_API_URL }}
+          AGENT_API_TOKEN: ${{ secrets.AGENT_API_TOKEN }}
+          WORKER_API_TOKEN: ${{ secrets.WORKER_API_TOKEN }}
+      - name: Tell Discord
+        if: failure()
+        # Optional secret; the URL goes to curl on stdin, never on the command line.
+        run: |
+          if [ -z "$DEPLOY_DISCORD_WEBHOOK_URL" ]; then
+            echo "::notice::DEPLOY_DISCORD_WEBHOOK_URL not set in production; not posted"
+            exit 0
+          fi
+          msg="❌ PandaBase production smoke failed for \`${SHA:0:7}\`: ${FAILED:-see the run}. $RUN_URL — roll back from Vercel → Deployments → previous Production → Instant Rollback if the site is broken (docs/SETUP-CLOUD.md)."
+          printf 'url = "%s"\n' "$DEPLOY_DISCORD_WEBHOOK_URL" |
+            curl -fsS --max-time 15 -K - -H 'Content-Type: application/json' \
+              --data-binary "$(jq -cn --arg m "$msg" '{content: $m, allowed_mentions: {parse: []}}')" \
+              >/dev/null || echo "::warning::Discord webhook post failed"
+        env:
+          DEPLOY_DISCORD_WEBHOOK_URL: ${{ secrets.DEPLOY_DISCORD_WEBHOOK_URL }}
+          FAILED: ${{ steps.smoke.outputs.failed }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      - name: Deploy telemetry
+        if: always()
+        run: scripts/deploy/emit-deploy.sh web-smoke "$SHA" "${{ job.status }}" "$FAILED"
+        env:
+          PANDABASE_API_URL: ${{ vars.PANDABASE_API_URL }}
+          AGENT_API_TOKEN: ${{ secrets.AGENT_API_TOKEN }}
+          FAILED: ${{ steps.smoke.outputs.failed }}

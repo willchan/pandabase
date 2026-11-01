@@ -19,7 +19,8 @@
     "add-member": "tsx src/add-member.ts",
     "seed": "tsx src/seed.ts",
     "reset": "tsx src/reset.ts",
-    "rebuild-state": "tsx src/rebuild-state.ts"
+    "rebuild-state": "tsx src/rebuild-state.ts",
+    "migrations-status": "tsx src/migrations-status.ts"
   },
   "devDependencies": {
     "@types/node": "^24.19.2",

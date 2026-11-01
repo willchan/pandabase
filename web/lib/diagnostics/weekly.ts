@@ -762,7 +762,8 @@ export async function renderWeekly(
   );
 
   // 8. Deploys (M9): `deploy {component, sha, outcome, …}` from deploy.yml (migrate, web,
-  // worker_image) and the Mac Mini updater (mac_mini: success / rolled_back / rollback_failed).
+  // worker_image, web-smoke: the read-only production checks, `reason` = the failed ones) and the
+  // Mac Mini updater (mac_mini: success / rolled_back / rollback_failed).
   const deploys = metric("deploy");
   const deployOutcome = (t: Telemetry) => s(t.p.outcome) ?? "?";
   const badDeploys = deploys.filter((t) => deployOutcome(t) !== "success");
@@ -823,6 +824,11 @@ export async function renderWeekly(
       ...(stuck.length
         ? [
             "A rollback failed: run `make update-status`, then roll back by hand (README *Manual rollback*).",
+          ]
+        : []),
+      ...(badDeploys.some((t) => s(t.p.component) === "web-smoke")
+        ? [
+            "A production smoke failed after a web deploy: read the deploy run's smoke summary; if the site is broken, use Vercel's Instant Rollback (docs/SETUP-CLOUD.md *Rolling back*).",
           ]
         : []),
       ...(badDeploys.some((t) => s(t.p.component) === "migrate")

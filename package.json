@@ -16,6 +16,7 @@
     "db:generate": "pnpm --filter @pandabase/db generate",
     "db:migrate": "pnpm --filter @pandabase/db migrate",
     "db:migrate:prod": "pnpm --filter @pandabase/db migrate:prod",
+    "db:migrations-status": "pnpm --filter @pandabase/db migrations-status",
     "db:add-member": "pnpm --filter @pandabase/db add-member",
     "db:seed": "pnpm --filter @pandabase/db seed",
     "db:reset": "pnpm --filter @pandabase/db reset",

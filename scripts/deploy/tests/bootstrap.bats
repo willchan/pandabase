@@ -145,15 +145,16 @@ member() {
 
 @test "deploy.yml checks every secret it uses before migrating" {
   local wf="$REPO_SRC/.github/workflows/deploy.yml" used checked name
-  # Secrets the workflow uses; AGENT_API_TOKEN is optional (telemetry), GITHUB_TOKEN is per run.
+  # Secrets the workflow uses; AGENT_API_TOKEN is optional (telemetry, smoke), GITHUB_TOKEN is per
+  # run, WORKER_API_TOKEN and DEPLOY_DISCORD_WEBHOOK_URL are the smoke's optional extras.
   used="$(grep -oE 'secrets\.[A-Z_]+' "$wf" | sed 's/secrets\.//' | sort -u |
-    grep -vxE 'AGENT_API_TOKEN|GITHUB_TOKEN')"
+    grep -vxE 'AGENT_API_TOKEN|GITHUB_TOKEN|WORKER_API_TOKEN|DEPLOY_DISCORD_WEBHOOK_URL')"
   checked="$(awk '/require-env\.sh production/,/env:/' "$wf")"
   for name in $used; do
     [[ "$checked" == *" $name"* ]] || { echo "deploy.yml preflight doesn't check $name"; return 1; }
   done
   # The preflight comes before the migration in the migrate job.
-  pre="$(grep -n 'require-env.sh production' "$wf" | cut -d: -f1)"
+  pre="$(grep -n 'require-env.sh production' "$wf" | head -1 | cut -d: -f1)"
   mig="$(grep -n 'run: pnpm db:migrate:prod' "$wf" | cut -d: -f1)"
   [ "$pre" -lt "$mig" ]
 }

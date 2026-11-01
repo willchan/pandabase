@@ -15,6 +15,7 @@ import re
 import threading
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
+from http.cookiejar import CookieJar, DefaultCookiePolicy
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Self
@@ -36,7 +37,7 @@ class _Server:
                 body = self.rfile.read(length) if length else b""
                 status, headers, payload = owner.handle(self.command, self.path, self.headers, body)
                 self.send_response(status)
-                for k, v in headers.items():
+                for k, v in headers.items() if isinstance(headers, dict) else headers:
                     self.send_header(k, v)
                 self.send_header("content-length", str(len(payload)))
                 self.end_headers()
@@ -61,12 +62,12 @@ class _Server:
         return self
 
     def stop(self) -> None:
-        self.httpd.shutdown()
+        if self.thread.is_alive():  # shutdown() waits forever on a server that never started
+            self.httpd.shutdown()
         self.httpd.server_close()
 
-    def handle(
-        self, method: str, path: str, headers: Any, body: bytes
-    ) -> tuple[int, dict[str, str], bytes]:
+    def handle(self, method: str, path: str, headers: Any, body: bytes) -> tuple[int, Any, bytes]:
+        """→ (status, headers as a dict or a list of pairs, body)."""
         raise NotImplementedError
 
 
@@ -100,7 +101,7 @@ def _hmac(key: bytes, msg: str) -> bytes:
 
 
 class FakeR2(_Server):
-    """S3-compatible stub for presigned GET/PUT (SigV4 query auth, `UNSIGNED-PAYLOAD`)."""
+    """S3-compatible stub for presigned GET/HEAD/PUT/DELETE (SigV4 query auth, unsigned payload)."""
 
     def __init__(self, bucket: str, access_key: str, secret: str) -> None:
         super().__init__()
@@ -128,6 +129,9 @@ class FakeR2(_Server):
             elif method == "PUT":
                 self.objects[key] = R2Object(body, headers.get("content-type"))
                 out = (200, {"etag": hashlib.md5(body).hexdigest()}, b"")
+            elif method == "DELETE":
+                self.objects.pop(key, None)
+                out = (204, {}, b"")
             elif method in ("GET", "HEAD"):
                 obj = self.objects.get(key)
                 if obj is None:
@@ -142,6 +146,11 @@ class FakeR2(_Server):
             status = out[0]
             self.requests.append(R2Request(method, key, status, error))
         return out
+
+    def content_type(self, key: str) -> str | None:
+        """The stored object's content type ("" when it has none), or None when it's absent."""
+        obj = self.objects.get(key)
+        return None if obj is None else (obj.content_type or "")
 
     def verify(self, method: str, path: str, query: str, host: str) -> str | None:
         """Check a SigV4 presigned URL the way S3/R2 does (signature, credential, expiry)."""
@@ -257,3 +266,77 @@ class FakeOllama(_Server):
                         {"item_id": a, "merge_into_item_id": b, "confidence": 0.9, "reason": "same"}
                     )
         return out
+
+
+# --- proxy to a remote State Engine ---------------------------------------------------------
+
+_HOP = {
+    "connection", "keep-alive", "transfer-encoding", "te", "upgrade", "host", "content-length",
+    "content-encoding", "proxy-authorization", "proxy-connection",
+}  # fmt: skip
+
+
+class HeaderProxy(_Server):
+    """Forwards every request to `target`, adding `headers` (tier A' remote mode).
+
+    The worker and `pandabase-tools` can't send Vercel's `x-vercel-protection-bypass` header, and
+    shouldn't learn to for a test, so they talk to this local proxy instead; the secret stays in
+    the test process. Redirects are passed through unchanged (API routes don't redirect).
+    """
+
+    def __init__(
+        self, target: str, headers: dict[str, str], *, preserve_host: bool = False
+    ) -> None:
+        super().__init__()
+        import httpx
+
+        self.target = target.rstrip("/")
+        self.headers = headers
+        self.preserve_host = preserve_host
+        # No cookie jar: a proxy that kept Set-Cookie (e.g. Auth.js refreshing a session during the
+        # UI step) would replay it on every later request, so a "no token" call wasn't one.
+        jar = CookieJar(DefaultCookiePolicy(allowed_domains=[]))
+        self.client = httpx.Client(timeout=90, follow_redirects=False, cookies=jar)
+        self.requests = 0
+
+    def handle(self, method: str, path: str, headers: Any, body: bytes) -> tuple[int, Any, bytes]:
+        fwd = {k: v for k, v in headers.items() if k.lower() not in _HOP}
+        if self.preserve_host and headers.get("host"):
+            fwd["host"] = headers["host"]
+        fwd.update(self.headers)
+        self.requests += 1
+        res = self.client.request(method, self.target + path, headers=fwd, content=body)
+        out = [(k, v) for k, v in res.headers.multi_items() if k.lower() not in _HOP]
+        return res.status_code, out, res.content
+
+    def stop(self) -> None:
+        super().stop()
+        self.client.close()
+
+
+class BypassGate(HeaderProxy):
+    """Stands in for Vercel's Deployment Protection in the local self-test of remote mode
+    (`remote_local.py`): 401 unless the request carries `x-vercel-protection-bypass: <secret>` or
+    the cookie that `x-vercel-set-bypass-cookie: true` asked for, then forwarded with its Host kept
+    (so the app's redirects come back through the gate)."""
+
+    COOKIE = "_vercel_jwt"
+
+    def __init__(self, target: str, secret: str) -> None:
+        super().__init__(target, {}, preserve_host=True)
+        self.secret = secret
+        self.token = hashlib.sha256(secret.encode()).hexdigest()
+        self.refused: list[str] = []
+
+    def handle(self, method: str, path: str, headers: Any, body: bytes) -> tuple[int, Any, bytes]:
+        by_header = headers.get("x-vercel-protection-bypass") == self.secret
+        by_cookie = f"{self.COOKIE}={self.token}" in (headers.get("cookie") or "")
+        if not (by_header or by_cookie):
+            self.refused.append(f"{method} {path}")
+            return 401, {"content-type": "text/plain"}, b"Authentication Required"
+        status, out, payload = super().handle(method, path, headers, body)
+        if by_header and headers.get("x-vercel-set-bypass-cookie") == "true":
+            out.append(
+                ("set-cookie", f"{self.COOKIE}={self.token}; Path=/; HttpOnly; SameSite=Lax")
+            )
+        return status, out, payload

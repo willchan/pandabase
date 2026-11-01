@@ -2,7 +2,8 @@
 .PHONY: install dev lint typecheck test check py-check db-reset db-seed db-check contracts contracts-check \
 	secrets vercel-env up up-local down logs update update-pause update-resume update-status rollback \
 	install-update-timer deploy-test migrations-check install-agent-tools install-agent-skills install-agent-cron \
-	install-chromium install-ollama-env backfill smoke ops-check e2e-system system-lint eval-agent
+	install-chromium install-ollama-env backfill smoke ops-check e2e-system system-lint eval-agent \
+	preview-reset e2e-preview e2e-system-remote-local
 
 PY_PROJECTS := worker agent/tools
 
@@ -38,6 +39,21 @@ system-lint:
 # SYSTEM_BUILD=0 reuses web/.next-system; SYSTEM_KEEP=<dir> keeps the db and logs.
 e2e-system:
 	cd agent/tools && uv run pytest -c ../../tests/system/pytest.ini ../../tests/system
+
+# Tier A' (docs/TESTING.md): the shortened week against a deployed preview (SYSTEM_REMOTE_URL;
+# tokens, AUTH_SECRET, TURSO_* and R2_* from the env; preview-e2e.yml). preview-reset first: it
+# migrates, empties and seeds TURSO_DATABASE_URL, and refuses any remote DB but the preview one
+# (PANDABASE_ALLOW_REMOTE_SEED=preview and a `preview` database name, db/src/preview-db.ts).
+preview-reset:
+	pnpm db:reset && pnpm db:seed --force --now
+
+e2e-preview:
+	@test -n "$$SYSTEM_REMOTE_URL" || (echo "SYSTEM_REMOTE_URL is not set"; exit 1)
+	cd agent/tools && uv run pytest -c ../../tests/system/pytest.ini ../../tests/system
+
+# The same remote code path against a local stack behind a fake Deployment Protection gate.
+e2e-system-remote-local:
+	cd agent/tools && uv run python ../../tests/system/remote_local.py
 
 # Tier B (docs/TESTING.md): the real OpenClaw agent + our skills on a local Ollama model against
 # the tier A stack; reports a pass rate. Skips without `openclaw` on PATH or EVAL_MODEL pulled.
@@ -170,3 +186,7 @@ ops-check: deploy-test migrations-check
 	cd worker && uv run ruff check --config pyproject.toml ../scripts/smoke/vlm_check.py && \
 	  uv run ruff format --check --config pyproject.toml ../scripts/smoke/vlm_check.py && \
 	  uv run mypy ../scripts/smoke/vlm_check.py
+	cd worker && uv run ruff check --config pyproject.toml ../scripts/deploy && \
+	  uv run ruff format --check --config pyproject.toml ../scripts/deploy && \
+	  uv run mypy ../scripts/deploy/web_smoke.py ../scripts/deploy/tests/test_web_smoke.py && \
+	  uv run pytest -q -p no:cacheprovider ../scripts/deploy/tests/test_web_smoke.py
