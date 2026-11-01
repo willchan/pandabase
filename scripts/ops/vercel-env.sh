@@ -3,7 +3,9 @@
 # them. Variables that already exist in an environment are left alone (to rotate one, remove it
 # with `vercel env rm NAME <env>` and re-run). Needs `vercel login` + `vercel link` in web/.
 #
-#   VERCEL_ENVS="production preview"   environments to fill (default: production)
+#   VERCEL_ENVS=production   environments to fill (default and only allowed value: production).
+#   Preview has its own secrets (docs/SETUP-CLOUD.md part 6a): this Mac's values are production's,
+#   and previews run unreviewed PR code, so they're never pushed there.
 set -euo pipefail
 # shellcheck source=scripts/ops/lib.sh
 . "$(dirname "$0")/lib.sh"
@@ -13,6 +15,10 @@ VERCEL_FILE="${VERCEL_FILE:-$ROOT/.env.vercel}"
 if [ ! -f "$ENV_FILE" ] || [ ! -f "$VERCEL_FILE" ]; then die "run 'make secrets' first"; fi
 [ -d "$ROOT/web/.vercel" ] || die "web/ isn't linked to a Vercel project — run: (cd web && vercel link)"
 
+for target in ${VERCEL_ENVS:-production}; do
+  [ "$target" = production ] ||
+    die "refusing to push this Mac's (production) secrets to Vercel '$target': previews get their own (docs/SETUP-CLOUD.md part 6a)"
+done
 for target in ${VERCEL_ENVS:-production}; do
   existing="$(vercel --cwd "$ROOT/web" env ls "$target" 2>/dev/null || true)"
   for key in AGENT_API_TOKEN WORKER_API_TOKEN AUTH_SECRET CRON_SECRET; do

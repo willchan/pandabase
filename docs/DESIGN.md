@@ -795,7 +795,7 @@ rejected (≥ 5 answered, < 50% accepted)) and keeps the top 3.
 | Env | DB | Auth | Notes |
 |---|---|---|---|
 | local | `db/dev.db` (libSQL file; the default when `TURSO_DATABASE_URL` is unset), seeded fake household | `DEV_AUTH_BYPASS` | `pnpm db:reset && pnpm db:seed`, `pnpm dev` |
-| preview | Turso `pandabase-preview` | Google | Vercel previews |
+| preview | Turso `pandabase-preview` (synthetic data only) | session signed by the preview `AUTH_SECRET`; allowlist = the seed's `@example.com` members | Vercel previews; **own** agent/worker/cron tokens, `AUTH_SECRET`, `ALLOWED_EMAILS` and R2 bucket `pandabase-media-preview` (scoped token), never production's (§10 #49) |
 | production | Turso `pandabase` | Google | Vercel; deployed by `deploy.yml` after migrations (see *Continuous deployment*) |
 
 Timestamps stored UTC; `HOUSEHOLD_TZ=America/Los_Angeles` defines "today" and schedules.
@@ -901,8 +901,11 @@ Agent tools: `PANDABASE_API_URL`, `AGENT_API_TOKEN`, `PANDABASE_CONFIG`. Mac Min
 `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN`, `VERCEL_TOKEN`, `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID`,
 `AGENT_API_TOKEN`, `ALLOWED_EMAILS` (bootstrap only), `WORKER_API_TOKEN` and
 `DEPLOY_DISCORD_WEBHOOK_URL` (smoke, optional), variable `PANDABASE_API_URL`; environment
-`preview`: preview `TURSO_*` (+ `ALLOWED_EMAILS`, optional), and for `preview-e2e.yml` the
-preview tokens, `AUTH_SECRET`, `R2_*` and `VERCEL_AUTOMATION_BYPASS_SECRET`. Preview reset/seed:
+`preview`: the **preview** values of `TURSO_*`, `AGENT_API_TOKEN`, `WORKER_API_TOKEN`,
+`CRON_SECRET`, `AUTH_SECRET`, `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`,
+`R2_BUCKET` (+ `ALLOWED_EMAILS`, optional), and `VERCEL_AUTOMATION_BYPASS_SECRET` for
+`preview-e2e.yml`. Vercel shares only `AUTH_GOOGLE_ID`, `AUTH_GOOGLE_SECRET`, `R2_ACCOUNT_ID` and
+`HOUSEHOLD_TZ` between Production and Preview. Preview reset/seed:
 `PANDABASE_ALLOW_REMOTE_SEED=preview`.
 
 ### Mac Mini operations (M8)
@@ -1020,5 +1023,6 @@ docker-compose.yml (+ docker-compose.build.yml), Makefile, CLAUDE.md, README.md,
 | 46 | PR previews keep Vercel's Git integration; a parallel GitHub job migrates the shared preview DB | Nothing reads the DB at build time, so no ordering is needed; reusing Vercel previews avoids a second deploy path |
 | 47 | Cross-component behavior is tested by a deterministic system test (tier A) on every PR; the real OpenClaw agent is evaluated nightly on a local model (tier B) and reports a pass rate instead of gating | Each milestone tested against contracts in isolation, so the bugs were at the seams; an LLM in the loop is too slow and non-deterministic to gate merges ([TESTING.md](TESTING.md)) |
 | 48 | Name resolution in the skills uses the lookup's `match` (name score + lead), not `confidence` | `confidence` describes the stock estimate; acting only on "high" made almost every list edit and text purchase fall back to free text |
+| 49 | Vercel Preview has its own API tokens, cron secret, `AUTH_SECRET`, allowlist and R2 bucket (scoped token); only the Google client, R2 account id and time zone are shared | Previews run unreviewed PR code, so a preview secret must be worthless on production and previews must not reach the household's photos; the Google secret alone can't sign anyone in (redirect URIs + `AUTH_SECRET`) |
 | 50 | PR previews are tested end to end (tier A′) by re-running tier A's steps in a remote mode against the real deployment, triggered by Vercel's `repository_dispatch` (reported as a commit status), on a preview DB that each run resets — guarded by two independent "preview" signals; reported, not required yet | Tier A can't see Vercel, Turso or R2; reusing its steps keeps one test of the week; the dispatch waits for the real build without polling, and runs `main`'s workflow definition; requiring it waits until it has proven stable |
 | 51 | Production gets a read-only smoke after every web deploy that reports (job, Discord, telemetry) but never rolls back | A smoke that can write could damage the household's data; rollback has side effects (Vercel stops auto-promoting, old env vars) that a human should choose; the Mac Mini already rolls back its own worker |
