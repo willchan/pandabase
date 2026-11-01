@@ -203,6 +203,18 @@ curl on stdin (`-K -`), never in argv or logs; CI is `pull_request` with `conten
 PRs get no secrets), `deploy.yml` runs on `workflow_run` only for a successful `push` to `main`
 from this repository, per-job `packages: write` only where it publishes.
 
+**Changed since** (2026-10-30): **Vercel Preview shared production's `AGENT_API_TOKEN`,
+`WORKER_API_TOKEN`, `CRON_SECRET`, `AUTH_SECRET` and R2 bucket.** Previews build unreviewed PR
+code, so any of those leaking from a preview (a logged env var, a debug route) worked on
+production, and previews could read, overwrite or delete the household's photos. Now Preview has
+its own four secrets, its own `ALLOWED_EMAILS` (the seed's synthetic `@example.com` members) and its
+own bucket `pandabase-media-preview` with a token scoped to that bucket only
+([SETUP-CLOUD.md](SETUP-CLOUD.md) part 6a, *Migrating an existing setup*); `make vercel-env`
+refuses to push to `preview`. Still shared: `AUTH_GOOGLE_ID` (public), `R2_ACCOUNT_ID` (an
+identifier), `HOUSEHOLD_TZ` (a setting) and `AUTH_GOOGLE_SECRET`, which can't complete a sign-in
+without a redirect URI registered on the client (production and localhost only) and can't mint a
+session without the environment's `AUTH_SECRET` — a leak means rotating it, nothing more.
+
 **Accepted risks** (household scale; revisit if more people get access):
 
 1. **Sessions pass the worker scope** (claim/complete jobs). Design §3.1: sessions are the
@@ -224,7 +236,8 @@ from this repository, per-job `packages: write` only where it publishes.
    Notes). Our tools enforce the guard in code; checkout still needs a human's "Place your order".
 8. **`preview-migrate.yml` runs same-repo PR code with the preview Turso secrets** (fork PRs are
    excluded): only the preview database, which holds synthetic data. Add an environment protection
-   rule if collaborators are added.
+   rule if collaborators are added. Preview *deployments* run that code too, so Vercel Preview has
+   its own secrets (below).
 9. **The Mac updater runs whatever `origin/main` is once its GHCR image exists**: that requires
    CI, the migration and the web deploy to have succeeded for it; GHCR push rights equal repo
    write access.
