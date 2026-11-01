@@ -173,6 +173,11 @@ jobs:
         env:
           TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
           TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+      # web_smoke.py is linted and formatted as the repo's Python (3.14 syntax, e.g. PEP 758
+      # `except A, B:`); the runner's system python3 is older and can't parse it.
+      - uses: actions/setup-python@v6
+        with:
+          python-version-file: worker/.python-version
       - name: Smoke ${{ vars.PANDABASE_API_URL }}
         id: smoke
         run: python3 scripts/deploy/web_smoke.py --base-url "$PANDABASE_API_URL" --migrations "$RUNNER_TEMP/migrations.json"

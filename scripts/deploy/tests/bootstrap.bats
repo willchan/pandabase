@@ -170,3 +170,17 @@ member() {
   grep -qF 'ALLOWED_EMAILS: ${{ secrets.ALLOWED_EMAILS }}' "$wf"
   grep -qF 'environment: ${{ inputs.target }}' "$wf"
 }
+
+# Regression: the first production smoke (Deploy on e3e4e02) died with "SyntaxError: multiple
+# exception types must be parenthesized" — web_smoke.py is linted and formatted as Python 3.14
+# (PEP 758 `except A, B:`), but the job ran it with the runner's older system python3.
+@test "deploy.yml runs web_smoke.py on the Python it is linted for" {
+  local wf="$REPO_SRC/.github/workflows/deploy.yml" smoke setup run
+  smoke="$(awk '/^  smoke:/,0' "$wf")"
+  setup="$(grep -n 'actions/setup-python@' <<<"$smoke" | head -1 | cut -d: -f1)"
+  run="$(grep -n 'scripts/deploy/web_smoke.py' <<<"$smoke" | grep -v '^[0-9]*: *#' | head -1 | cut -d: -f1)"
+  [ -n "$setup" ]
+  [ -n "$run" ]
+  [ "$setup" -lt "$run" ]
+  grep -A3 'actions/setup-python@' <<<"$smoke" | grep -qF 'python-version-file: worker/.python-version'
+}
