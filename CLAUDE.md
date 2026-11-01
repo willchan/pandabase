@@ -88,7 +88,7 @@ make e2e-preview             # tier A′: @preview steps against SYSTEM_REMOTE_U
                              # on Vercel's repository_dispatch → `Preview E2E` commit status)
 make e2e-system-remote-local # the same remote code path against a local stack + bypass gate (~1 min)
 pnpm db:migrations-status    # read-only: applied migrations vs db/migrations (deploy.yml smoke)
-python3 scripts/deploy/web_smoke.py --base-url URL [--migrations F]   # read-only prod smoke
+(cd worker && uv run python ../scripts/deploy/web_smoke.py --base-url URL [--migrations F])   # read-only prod smoke (Python 3.14)
 make eval-agent              # tier B: real OpenClaw + skills on local Ollama (EVAL_MODEL); skips if unavailable
 make check                   # everything CI runs
 make ops-check               # shellcheck, actionlint, compose/plists, deploy bats tests, migration check, smoke ruff/mypy
