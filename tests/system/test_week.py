@@ -292,6 +292,16 @@ def test_07b_confirm_receipt_in_web_ui(stack: Stack) -> None:
 
     review = W["receipt_review"]
     t = stack.rows("select max(created_at) t from system_telemetry")[0]["t"]
+    # The session the browser will carry, checked through the API first so a misconfigured
+    # deployment fails with its cause instead of a missing link (tier A' found this the hard way).
+    cookie = stack.session_cookie("sam@example.com")
+    jar = {"cookie": f"{cookie['name']}={cookie['value']}"}
+    res = stack.http("GET", "/api/grocery/cycle/current", headers=jar)
+    assert res.status_code == 200, (
+        f"the State Engine rejected Sam's session cookie: {res.status_code} {res.text[:200]}. "
+        "401: the AUTH_SECRET used here differs from the deployment's (or the cookie name); "
+        "403: sam@example.com isn't in the deployment's ALLOWED_EMAILS, or has no member row"
+    )
     with sync_playwright() as pw:
         exe = "/opt/pw-browsers/chromium"
         import os
@@ -305,9 +315,15 @@ def test_07b_confirm_receipt_in_web_ui(stack: Stack) -> None:
         page.goto(stack.web_url + "/cleanup")
         expect(page).to_have_url(re.compile(r"/sign-in\?callbackUrl=%2Fcleanup"))
         expect(page.get_by_role("button", name=re.compile("Continue as"))).to_have_count(0)
-        ctx.add_cookies([stack.session_cookie("sam@example.com")])  # type: ignore[list-item]
+        ctx.add_cookies([cookie])  # type: ignore[list-item]
         page.goto(stack.web_url + "/cleanup")
-        page.locator(f"a[href='/cleanup/receipts/{review}']").click()
+        try:
+            page.locator(f"a[href='/cleanup/receipts/{review}']").click(timeout=15_000)
+        except Exception:
+            # Kept with SYSTEM_KEEP (the CI artifact): where the browser ended up, and what it saw.
+            page.screenshot(path=str(stack.tmp / "07b-cleanup.png"), full_page=True)
+            (stack.tmp / "07b-cleanup.txt").write_text(f"{page.url}\n\n{page.inner_text('body')}")
+            raise
         expect(page.get_by_text("Check each line against the photo")).to_be_visible()
         # The photo is a presigned R2 GET the browser loads from the (fake) bucket.
         img = page.locator(f"img[src^='{stack.r2.url}/{stack.r2.bucket}/']")
