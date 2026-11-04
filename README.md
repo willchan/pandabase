@@ -24,9 +24,14 @@ The Mac Mini makes outbound connections only. Details: [DESIGN §1](docs/DESIGN.
 > **Cloud first, no terminal needed:** [docs/SETUP-CLOUD.md](docs/SETUP-CLOUD.md) (Phase 1) sets
 > up Turso, R2, Google sign-in, Vercel and the GitHub deploy in the browser, before the Mac Mini
 > exists. It covers steps 2–4, 6, 7 and 15.1–15.4 below and changes step 5; each step says so.
+>
+> **Then the Mac mini:** [docs/SETUP-MAC.md](docs/SETUP-MAC.md) (Phase 2) is the order that
+> worked on a fresh Mac mini with a dedicated agent account, Colima, Google Chrome and a local
+> reply model. It runs steps 1 and 8–15 below with those choices.
 
 You need: a Mac Mini (Apple silicon, 32GB; macOS with a GUI login), the household's existing
-OpenClaw gateway on it with a Discord bot, a Discord server with a `#pandabase` channel, each
+OpenClaw gateway on it with a Discord bot (a fresh OpenClaw install must be onboarded first; the
+[Mac mini guide](docs/SETUP-MAC.md) covers that case), a Discord server with a `#pandabase` channel, each
 member's Amazon account, a GitHub checkout of this repo, and accounts at **Turso**,
 **Cloudflare** (R2), **Google Cloud** (OAuth) and **Vercel**. Do the steps in order; each
 ends with a check. Commands run from the repo root unless they say otherwise.
@@ -37,13 +42,18 @@ On the Mac Mini (and on a laptop if you prefer to do steps 2–7 there):
 
 ```sh
 brew install git jq uv node@24 tursodatabase/tap/turso && brew link --force node@24
-brew install --cask docker chromium ollama   # Docker Desktop, Chromium, Ollama.app
+brew install --cask docker google-chrome ollama   # Docker Desktop, Google Chrome, Ollama.app
 npm i -g pnpm@12 vercel
 git clone https://github.com/willchan/pandabase.git && cd pandabase   # private repo: gh auth login first
 pnpm install && make install
 ```
 
 Check: `node -v` → v24, `pnpm -v` → 12, `uv --version`, `turso --version`, `vercel --version`.
+
+Homebrew's `chromium` cask was disabled on 2026-09-01, so the per-member browsers are **Google
+Chrome** by default (`CHROMIUM_BIN` in `.env`; any Chromium build works). Docker Desktop is
+optional: [Colima](https://github.com/abiosoft/colima) (`brew install colima docker
+docker-compose`) runs the worker just as well; [SETUP-MAC.md](docs/SETUP-MAC.md) has the details.
 
 ### 2. Turso (database)
 
@@ -190,13 +200,14 @@ Manual (macOS settings, once):
   auto-login is unavailable and a reboot waits for a password.
 - **Energy → Prevent automatic sleeping**, and *Start up automatically after a power failure*.
 - **Docker Desktop → Settings**: *Start when you sign in*; Resources → Memory 4GB is plenty (the
-  worker uses ~150MB; Ollama runs outside Docker).
+  worker uses ~150MB; Ollama runs outside Docker). With Colima instead, start it at login with a
+  LaunchAgent ([SETUP-MAC.md](docs/SETUP-MAC.md)).
 - Open **Ollama.app** once and enable *launch at login*.
 
 Then:
 
 ```sh
-make install-ollama-env            # OLLAMA_NUM_PARALLEL=1, OLLAMA_MAX_LOADED_MODELS=1 (LaunchAgent)
+make install-ollama-env            # OLLAMA_NUM_PARALLEL=1, OLLAMA_MAX_LOADED_MODELS=1, OLLAMA_NO_CLOUD=1
 # quit Ollama from the menu bar and open it again so it reads them
 ollama pull qwen3.5:9b             # the VLM: receipts, Trash Cam, and OpenClaw's photo descriptions
 ollama pull qwen3.5:4b             # merge suggestions (skip if you choose the single-model option)
@@ -217,6 +228,11 @@ Check: `curl -s localhost:11434/api/tags | jq -r '.models[].name'` lists both mo
 | Chromium × 2 (one per member) | ~0.5–1.5GB each | only one is driven at a time (profile lock) |
 | Evening Claude Code sessions | ~1–2GB | |
 | **Worst case** | **~18–20GB + `$OPENCLAW_MODEL`** | leaves headroom for the OS cache |
+
+**With a local reply model** (our setup: `qwen3.5:27b` on this Ollama, ~25GB resident at a 32K
+context) there is no room for a second model on 32GB. Keep `OLLAMA_MAX_LOADED_MODELS=1`: Ollama
+swaps models, so the first reply after a photo or a worker job waits for the 27B to load again
+(seconds, not minutes). Raise it to `2` only with a smaller reply model or more memory.
 
 `OLLAMA_NUM_PARALLEL=1` keeps one request (and one KV cache) at a time; the worker is
 single-job anyway. `OLLAMA_MAX_LOADED_MODELS=1` caps Ollama at one resident model.
@@ -267,7 +283,8 @@ Check: `scripts/ops/agent-run.sh config show` prints your members and `"token_se
 make install-chromium
 ```
 
-One LaunchAgent per profile in `agent/profiles.json` starts that member's Chromium at login with
+One LaunchAgent per profile in `agent/profiles.json` starts that member's browser (Google Chrome
+unless `CHROMIUM_BIN` says otherwise; window title "PandaBase · <profile>") at login with
 its own user-data dir and a DevTools port bound to `127.0.0.1` only (9222, 9223, …). CDP means
 full control of a signed-in browser: never expose those ports. If macOS blocks Chromium the first
 time, open it once from Finder (right-click → Open) and re-run.
@@ -282,6 +299,10 @@ Manual, in the [Discord Developer Portal](https://discord.com/developers/applica
 existing bot: enable **Message Content Intent**. In the server, give the bot these permissions on
 `#pandabase`: View Channel, Send Messages, Create Public Threads, Send Messages in Threads, Add
 Reactions, Read Message History, Attach Files.
+
+OpenClaw's Discord channel is a plugin: if `openclaw plugins list` doesn't show it, install it at
+your OpenClaw version and pin it (`openclaw plugins install @openclaw/discord@<version> --pin`),
+then connect the bot as OpenClaw's docs describe.
 
 ```sh
 cp agent/openclaw.pandabase.example.json5 agent/openclaw.pandabase.json5
@@ -304,12 +325,18 @@ you already had `tools.media.models` or Ollama models configured, merge those li
 Exec policy: OpenClaw's default host exec mode works as is. If you run `tools.exec.mode:
 "allowlist"`, allowlist `pandabase-tools` (the only command the skills run).
 
+The patch leaves `models.providers.ollama.models` alone: onboarding already lists every pulled
+model, and a patch array would replace that list (deleting your reply model). To tune the VLM,
+find its index with `openclaw config get models.providers.ollama.models --json` and set
+`openclaw config set "models.providers.ollama.models[<i>].params" '{"num_ctx":8192,"keep_alive":"2m"}' --strict-json`.
+
 Check:
 
 ```sh
 openclaw skills check     # the five PandaBase skills are eligible (no missing bin/env)
 openclaw automations list # pandabase-* jobs, household-TZ schedules
-openclaw infer image describe --file <any photo> --model ollama/qwen3.5:9b   # local vision works
+openclaw infer image describe --file <any photo> --model ollama/qwen3.5:9b --timeout-ms 180000
+# local vision works (the default 30s timeout is too short while the model loads)
 ```
 
 Then say "do we have milk?" mentioning the bot in any channel, and post a test message in

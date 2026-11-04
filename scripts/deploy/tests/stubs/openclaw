@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# OpenClaw CLI stub for the scripts/ops installers. Behaves like OpenClaw 2026.10: `config set`
+# applies live, and `gateway stop` refuses the operator's running service without --force.
+printf 'openclaw %s\n' "$*" >>"$STUB/calls"
+case "$1 ${2:-}" in
+  "config file") printf '{"path":"%s"}\n' "$STUB/openclaw.json" ;;
+  "config get") if [ -f "$STUB/extraDirs" ]; then cat "$STUB/extraDirs"; else echo '{"ok":false}'; exit 1; fi ;;
+  "config set") printf '%s\n' "$4" >"$STUB/extraDirs" ;;
+  "gateway status") exit 0 ;;
+  "gateway stop")
+    case " $* " in *" --force "*) ;; *) echo "refusing to stop the running service; pass --force" >&2; exit 1 ;; esac ;;
+  "automations list") echo '[]' ;;
+esac
+exit 0

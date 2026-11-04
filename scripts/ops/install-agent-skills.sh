@@ -4,8 +4,8 @@
 #
 # 1. Adds <repo>/agent/skills to `skills.load.extraDirs` (OpenClaw rejects workspace skill
 #    symlinks that resolve outside the workspace, so the repo is loaded as an extra root).
-#    `openclaw config set` needs the gateway stopped: it is stopped and started again only when
-#    the list actually changes.
+#    `openclaw config set` applies this live, so the gateway keeps running (OpenClaw 2026.10+
+#    refuses `gateway stop` on the operator's running service without --force anyway).
 # 2. Writes AGENT_API_TOKEN, PANDABASE_CONFIG and PANDABASE_API_URL from .env (plus a dummy
 #    OLLAMA_API_KEY for local vision, if unset) into ~/.openclaw/.env: the gateway loads it, and
 #    the skills gate on these variables.
@@ -40,14 +40,8 @@ if printf '%s' "$current" | jq -e --arg d "$SKILLS_DIR" 'index($d) != null' >/de
 else
   updated="$(printf '%s' "$current" | jq -c --arg d "$SKILLS_DIR" '. + [$d]')"
   backup "$config_file"
-  was_running=0
-  if openclaw gateway status >/dev/null 2>&1; then
-    was_running=1
-    run openclaw gateway stop
-  fi
   run openclaw config set skills.load.extraDirs "$updated" --strict-json
   info "added $SKILLS_DIR to skills.load.extraDirs"
-  if [ "$was_running" = 1 ]; then run openclaw gateway start; fi
 fi
 
 # 2. ~/.openclaw/.env (only the PandaBase keys; other lines are kept as they are)

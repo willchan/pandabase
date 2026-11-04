@@ -8,7 +8,7 @@
 #
 # The image comes from GHCR (PLAN M9): deploy.yml pushes ghcr.io/willchan/pandabase-worker:<sha>
 # and :main after CI passes on main, and `make update` pins PANDABASE_WORKER_TAG=<sha> in `.env`
-# (compose reads it for this interpolation). Pulling needs `docker login ghcr.io` (README).
+# (compose reads it for this interpolation). The package is public: pulling needs no login.
 name: pandabase
 
 services:

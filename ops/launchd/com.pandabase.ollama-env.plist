@@ -4,7 +4,10 @@
   PandaBase: Ollama memory settings for the Mac Mini (DESIGN §1.2, README "Memory budget").
   The Ollama app reads its environment from launchd, and `launchctl setenv` doesn't survive a
   reboot, so this sets them again at every login. Installed by `make install-ollama-env`.
-  If OpenClaw's own reply model also runs on this Ollama, raise MAX_LOADED_MODELS to 2.
+  With OpenClaw's reply model on this Ollama too, MAX_LOADED_MODELS=1 makes models swap (slower
+  first reply after a photo or a worker job); raise it to 2 only if memory allows both.
+  OLLAMA_NO_CLOUD=1 turns off Ollama's cloud models, so nothing PandaBase or the agent sends to this
+  Ollama can leave the Mac (README "Photo privacy", option C). Remove it if you want cloud models.
 -->
 <plist version="1.0">
 <dict>
@@ -14,7 +17,7 @@
   <array>
     <string>/bin/sh</string>
     <string>-c</string>
-    <string>/bin/launchctl setenv OLLAMA_NUM_PARALLEL 1; /bin/launchctl setenv OLLAMA_MAX_LOADED_MODELS 1</string>
+    <string>/bin/launchctl setenv OLLAMA_NUM_PARALLEL 1; /bin/launchctl setenv OLLAMA_MAX_LOADED_MODELS 1; /bin/launchctl setenv OLLAMA_NO_CLOUD 1</string>
   </array>
   <key>RunAtLoad</key>
   <true/>

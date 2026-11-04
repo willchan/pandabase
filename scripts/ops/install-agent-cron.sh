@@ -18,6 +18,8 @@ CRON_FILE="$ROOT/agent/cron.example.json"
 TOOLS_LIST="exec,read,write,message,browser"
 tz="$(jq -r '.tz' "$CRON_FILE")"
 intake="$(jq -r '.discord.intake_channel' "$PANDABASE_CONFIG")"
+# Empty-array expansions use ${a[@]+"${a[@]}"}: macOS /bin/bash 3.2 with `set -u` calls an empty
+# "${a[@]}" an unbound variable.
 agent_args=()
 [ -n "${OPENCLAW_AGENT:-}" ] && agent_args=(--agent "$OPENCLAW_AGENT")
 
@@ -40,7 +42,7 @@ upsert() {
   if [ "$kind" = command ]; then
     args+=(--command "$payload" --announce --channel discord --to "channel:$intake")
   else
-    args+=(--session isolated --message "$payload" --tools "$TOOLS_LIST" --no-deliver "${agent_args[@]}")
+    args+=(--session isolated --message "$payload" --tools "$TOOLS_LIST" --no-deliver ${agent_args[@]+"${agent_args[@]}"})
   fi
   id="$(job_id "$name")"
   if [ -n "$id" ]; then

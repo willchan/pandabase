@@ -2,7 +2,8 @@
 # `make install-chromium`: one LaunchAgent per profile in agent/profiles.json, starting that
 # member's Chromium at login with its own user-data dir and a loopback-only DevTools port
 # (PLAN M7 Notes). Idempotent: an unchanged, loaded agent is left alone; a changed one is
-# reloaded. macOS only (launchd).
+# reloaded. macOS only (launchd). The browser is Google Chrome by default (CHROMIUM_BIN in .env);
+# each window is named "PandaBase · <profile>" so you can tell the members' windows apart.
 set -euo pipefail
 # shellcheck source=scripts/ops/lib.sh
 . "$(dirname "$0")/lib.sh"
@@ -13,9 +14,9 @@ TEMPLATE="$ROOT/ops/launchd/com.pandabase.chromium.plist.template"
 AGENTS_DIR="${LAUNCH_AGENTS_DIR:-$HOME/Library/LaunchAgents}"
 LOG_DIR="${LOG_DIR:-$HOME/Library/Logs/PandaBase}"
 CHROMIUM_BIN="${CHROMIUM_BIN:-$(env_get CHROMIUM_BIN)}"
-CHROMIUM_BIN="${CHROMIUM_BIN:-/Applications/Chromium.app/Contents/MacOS/Chromium}"
+CHROMIUM_BIN="${CHROMIUM_BIN:-/Applications/Google Chrome.app/Contents/MacOS/Google Chrome}"
 [ -f "$PROFILES" ] || die "missing agent/profiles.json — run 'make install-agent-tools'"
-[ "$DRY_RUN" = 1 ] || [ -x "$CHROMIUM_BIN" ] || die "no Chromium at $CHROMIUM_BIN (set CHROMIUM_BIN in .env)"
+[ "$DRY_RUN" = 1 ] || [ -x "$CHROMIUM_BIN" ] || die "no browser at $CHROMIUM_BIN (install Google Chrome or set CHROMIUM_BIN in .env)"
 domain="gui/$(id -u)"
 
 run mkdir -p "$AGENTS_DIR" "$LOG_DIR"
@@ -31,7 +32,7 @@ while IFS=$'\t' read -r profile cdp_url data_dir; do
   label="com.pandabase.chromium.$profile"
   plist="$AGENTS_DIR/$label.plist"
   rendered="$(sed -e "s|@LABEL@|$label|g" -e "s|@CHROMIUM_BIN@|$CHROMIUM_BIN|g" \
-    -e "s|@USER_DATA_DIR@|$data_dir|g" -e "s|@PORT@|$port|g" -e "s|@LOG_DIR@|$LOG_DIR|g" \
+    -e "s|@USER_DATA_DIR@|$data_dir|g" -e "s|@PORT@|$port|g" -e "s|@LOG_DIR@|$LOG_DIR|g" -e "s|@PROFILE@|$profile|g" \
     "$TEMPLATE")"
   loaded=0
   launchctl print "$domain/$label" >/dev/null 2>&1 && loaded=1
