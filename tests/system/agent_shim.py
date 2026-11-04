@@ -133,7 +133,7 @@ class FakeAmazon:
                 "</body></html>"
             )
             return self._land(url, html)
-        if parts.path == "/gp/cart/view.html":
+        if parts.path in ("/gp/cart/view.html", "/cart/localmarket"):  # one cart in the fake
             return self._land(url, self._cart_html())
         if parts.path == "/s":
             return self._land(url, self._search_html(dict(parse_qsl(parts.query))["k"]))
