@@ -928,15 +928,20 @@ Setup is the README checklist; every step is a `make` target over an idempotent 
 - **Agent install:** `make install-agent-tools` (uv sync, `pandabase-tools` linked into
   `~/.local/bin`, configs from the examples with `diagnostics_dir` = `<repo>/diagnostics`);
   `make install-agent-skills` (backs up `openclaw.json`, appends `<repo>/agent/skills` to
-  `skills.load.extraDirs` with the gateway stopped, writes the agent env to `~/.openclaw/.env`);
+  `skills.load.extraDirs` (applied live; the gateway keeps running), writes the agent env to `~/.openclaw/.env`);
   `make install-agent-cron` (list, then `edit` by name or `add`; receipt sweeps generated per
   member from `receipt_sweep`; the job-replies command payload runs `scripts/ops/agent-run.sh`,
   which reads the token from `.env` so it isn't stored in OpenClaw's automation DB). Gateway
   config (Discord channel policy, Ollama media model, browser profiles) is a reviewed
   `openclaw config patch` from `agent/openclaw.pandabase.example.json5`.
-- **launchd:** one Chromium LaunchAgent per profile (`ops/launchd/com.pandabase.chromium.plist.template`,
-  loopback-only DevTools port, `KeepAlive`), and `com.pandabase.ollama-env` re-applying
-  `OLLAMA_NUM_PARALLEL=1` / `OLLAMA_MAX_LOADED_MODELS=1` at login.
+- **launchd:** one browser LaunchAgent per profile (`ops/launchd/com.pandabase.chromium.plist.template`;
+  Google Chrome by default via `CHROMIUM_BIN`, any Chromium build works; loopback-only DevTools
+  port, `KeepAlive`, window named `PandaBase · <profile>`), and `com.pandabase.ollama-env`
+  re-applying `OLLAMA_NUM_PARALLEL=1` / `OLLAMA_MAX_LOADED_MODELS=1` / `OLLAMA_NO_CLOUD=1` at
+  login (§10 #53).
+- **Container network (Colima):** the VM's `provision:` adds an iptables `DOCKER-USER` rule so
+  containers reach the host gateway only on tcp/11434 (Ollama); every other host port, including
+  the browsers' CDP ports and the OpenClaw gateway, is rejected (docs/SETUP-MAC.md).
 - **First run:** members are created on first sign-in (§3.1). `pnpm db:add-member` (or the
   Bootstrap workflow) still upserts a member by email, e.g. to set the Chromium profile, which
   Settings doesn't edit, keeping exactly one cart account.
@@ -1026,3 +1031,4 @@ docker-compose.yml (+ docker-compose.build.yml), Makefile, CLAUDE.md, README.md,
 | 49 | Vercel Preview has its own API tokens, cron secret, `AUTH_SECRET`, allowlist and R2 bucket (scoped token); only the Google client, R2 account id and time zone are shared | Previews run unreviewed PR code, so a preview secret must be worthless on production and previews must not reach the household's photos; the Google secret alone can't sign anyone in (redirect URIs + `AUTH_SECRET`) |
 | 50 | PR previews are tested end to end (tier A′) by re-running tier A's steps in a remote mode against the real deployment, triggered by Vercel's `repository_dispatch` (reported as a commit status), on a preview DB that each run resets — guarded by two independent "preview" signals; reported, not required yet | Tier A can't see Vercel, Turso or R2; reusing its steps keeps one test of the week; the dispatch waits for the real build without polling, and runs `main`'s workflow definition; requiring it waits until it has proven stable |
 | 51 | Production gets a read-only smoke after every web deploy that reports (job, Discord, telemetry) but never rolls back | A smoke that can write could damage the household's data; rollback has side effects (Vercel stops auto-promoting, old env vars) that a human should choose; the Mac Mini already rolls back its own worker |
+| 53 | Mac mini defaults: Google Chrome for the per-member browsers, Colima allowed for Docker, the containers may reach the host only on Ollama's port, and Ollama runs with `OLLAMA_NO_CLOUD=1` | Homebrew disabled its `chromium` cask (2026-09-01) and any Chromium build speaks CDP; the worker needs only Ollama, while CDP on the host is full control of signed-in Amazon sessions; with a local reply model (photo privacy option C) no PandaBase or agent request should be able to reach a cloud model |

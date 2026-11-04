@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!--
-  PandaBase: one Chromium per household member, kept running for the agent tools (CDP attach).
+  PandaBase: one Chrome/Chromium per household member, kept running for the agent tools (CDP attach).
   Rendered by scripts/ops/install-chromium.sh into ~/Library/LaunchAgents; don't edit the copy.
   The DevTools port is bound to loopback only: CDP is full control of a signed-in browser.
 -->
@@ -15,6 +15,7 @@
     <string>--user-data-dir=@USER_DATA_DIR@</string>
     <string>--remote-debugging-port=@PORT@</string>
     <string>--remote-debugging-address=127.0.0.1</string>
+    <string>--window-name=PandaBase · @PROFILE@</string>
     <string>--no-first-run</string>
     <string>--no-default-browser-check</string>
   </array>

@@ -722,8 +722,10 @@ Production needs no redeploy: its values didn't change.
 
 ## Phase 2: on the Mac Mini
 
-Follow the [README setup](../README.md#setup-from-zero). Phase 1 already
-did steps 2–4, 6, 7 and 15.1–15.3; skip them. What's left:
+Follow [SETUP-MAC.md](SETUP-MAC.md): the short path that worked on a
+fresh Mac mini. The list below maps it to the [README
+setup](../README.md#setup-from-zero). Phase 1 already did steps 2–4, 6, 7
+and 15.1–15.3; skip them. What's left:
 
 1. **Step 1 (tools):** Homebrew, Docker, Ollama, the repo checkout. You
    can skip the `turso` and `vercel` CLIs.
@@ -732,8 +734,9 @@ did steps 2–4, 6, 7 and 15.1–15.3; skip them. What's left:
    - `cp ops/mac.env.example .env`, then paste the *prod*
      `AGENT_API_TOKEN` and `WORKER_API_TOKEN` from the note, and set
      `PANDABASE_API_URL`.
-   - Create `.env.vercel` with the *prod* `AUTH_SECRET=…` and
-     `CRON_SECRET=…`.
+   - Don't keep `.env.vercel` on the Mac: `AUTH_SECRET` and
+     `CRON_SECRET` live only in Vercel. `make secrets` creates one with
+     fresh values; delete it afterwards.
    - Run `make secrets`: it keeps every value already set, fills only
      empty ones and sets file modes to 600. Copy the template first: if
      `.env` already exists, `make secrets` keeps that file as it is and
