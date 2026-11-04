@@ -962,15 +962,20 @@ Setup is the README checklist; every step is a `make` target over an idempotent 
 - **Agent install:** `make install-agent-tools` (uv sync, `pandabase-tools` linked into
   `~/.local/bin`, configs from the examples with `diagnostics_dir` = `<repo>/diagnostics`);
   `make install-agent-skills` (backs up `openclaw.json`, appends `<repo>/agent/skills` to
-  `skills.load.extraDirs` with the gateway stopped, writes the agent env to `~/.openclaw/.env`);
+  `skills.load.extraDirs` (applied live; the gateway keeps running), writes the agent env to `~/.openclaw/.env`);
   `make install-agent-cron` (list, then `edit` by name or `add`; receipt sweeps generated per
   member from `receipt_sweep`; the job-replies command payload runs `scripts/ops/agent-run.sh`,
   which reads the token from `.env` so it isn't stored in OpenClaw's automation DB). Gateway
   config (Discord channel policy, Ollama media model, `tools.deny` for web/browser) is a reviewed
   `openclaw config patch` from `agent/openclaw.pandabase.example.json5`.
-- **launchd:** one Chromium LaunchAgent per profile (`ops/launchd/com.pandabase.chromium.plist.template`,
-  loopback-only DevTools port, `KeepAlive`), and `com.pandabase.ollama-env` re-applying
-  `OLLAMA_NUM_PARALLEL=1` / `OLLAMA_MAX_LOADED_MODELS=1` at login.
+- **launchd:** one browser LaunchAgent per profile (`ops/launchd/com.pandabase.chromium.plist.template`;
+  Google Chrome by default via `CHROMIUM_BIN`, any Chromium build works; loopback-only DevTools
+  port, `KeepAlive`, window named `PandaBase · <profile>`), and `com.pandabase.ollama-env`
+  re-applying `OLLAMA_NUM_PARALLEL=1` / `OLLAMA_MAX_LOADED_MODELS=1` / `OLLAMA_NO_CLOUD=1` at
+  login (§10 #53).
+- **Container network (Colima):** the VM's `provision:` adds an iptables `DOCKER-USER` rule so
+  containers reach the host gateway only on tcp/11434 (Ollama); every other host port, including
+  the browsers' CDP ports and the OpenClaw gateway, is rejected (docs/SETUP-MAC.md).
 - **First run:** members are created on first sign-in (§3.1). `pnpm db:add-member` (or the
   Bootstrap workflow) still upserts a member by email, e.g. to set the Chromium profile, which
   Settings doesn't edit, keeping exactly one cart account.
@@ -1011,7 +1016,7 @@ docker-compose.yml (+ docker-compose.build.yml), Makefile, CLAUDE.md, README.md,
 |---|---|---|
 | 1 | One household, `member` table, Google allowlist | Two users; no tenancy complexity; need Discord↔Google identity mapping for attribution |
 | 2 | Ship a skill pack for the existing OpenClaw, not a new deployment | Family agent already runs on the Mac Mini; OpenClaw skills are `SKILL.md`, not YAML workflows |
-| 3 | Cart tier 1 = add by known ASIN (was the add-to-cart URL; now the product page's own add form, #53); tier 2 = the agent picks an ASIN from guarded search results (was: agent's LLM browser; #52) | Minimizes DOM coupling; the model only judges which product matches |
+| 3 | Cart tier 1 = add by known ASIN (was the add-to-cart URL; now the product page's own add form, #54); tier 2 = the agent picks an ASIN from guarded search results (was: agent's LLM browser; #52) | Minimizes DOM coupling; the model only judges which product matches |
 | 4 | Tools attach via CDP to existing logged-in profiles | No credential/2FA handling in PandaBase; shares the agent's session |
 | 5 | Cart only, never checkout | Safety; humans keep control of spend |
 | 6 | Ingest only Delivered/Picked-up orders; dedupe by order id | Substitutions are reflected; acquisition date is real; retries safe |
@@ -1061,4 +1066,5 @@ docker-compose.yml (+ docker-compose.build.yml), Makefile, CLAUDE.md, README.md,
 | 50 | PR previews are tested end to end (tier A′) by re-running tier A's steps in a remote mode against the real deployment, triggered by Vercel's `repository_dispatch` (reported as a commit status), on a preview DB that each run resets — guarded by two independent "preview" signals; reported, not required yet | Tier A can't see Vercel, Turso or R2; reusing its steps keeps one test of the week; the dispatch waits for the real build without polling, and runs `main`'s workflow definition; requiring it waits until it has proven stable |
 | 51 | Production gets a read-only smoke after every web deploy that reports (job, Discord, telemetry) but never rolls back | A smoke that can write could damage the household's data; rollback has side effects (Vercel stops auto-promoting, old env vars) that a human should choose; the Mac Mini already rolls back its own worker |
 | 52 | Tier 2 runs only through `pandabase-tools cart search` / `cart add` on the guarded CDP driver; the agent's OpenClaw denies `group:web` and `browser` | A local model with a raw browser on the signed-in Amazon profile could be steered by product-page text to Buy Now / checkout (OpenClaw's browser has no URL denylist; audit `models.small_params`). Search returns size-limited, labelled-untrusted JSON; add is by ASIN through tier 1's guarded path with Buy Now controls deny-listed and the cart count verified |
-| 53 | Tier 1 adds each line from its product page (`/dp/{ASIN}`, that ASIN's own `/cart/add-to-cart` form, Buy Now deny-listed), verified by the cart count rising; the batch add URL stays as `cart.tier1_method: add_url` | `/gp/aws/cart/add.html` began redirecting to the cart without adding (live smoke, 2026-11-04). One shared, verified path for tiers 1 and 2; the cart check makes re-runs idempotent per ASIN |
+| 53 | Mac mini defaults: Google Chrome for the per-member browsers, Colima allowed for Docker, the containers may reach the host only on Ollama's port, and Ollama runs with `OLLAMA_NO_CLOUD=1` | Homebrew disabled its `chromium` cask (2026-09-01) and any Chromium build speaks CDP; the worker needs only Ollama, while CDP on the host is full control of signed-in Amazon sessions; with a local reply model (photo privacy option C) no PandaBase or agent request should be able to reach a cloud model |
+| 54 | Tier 1 adds each line from its product page (`/dp/{ASIN}`, that ASIN's own `/cart/add-to-cart` form, Buy Now deny-listed), verified by the cart count rising; the batch add URL stays as `cart.tier1_method: add_url` | `/gp/aws/cart/add.html` began redirecting to the cart without adding (live smoke, 2026-11-04). One shared, verified path for tiers 1 and 2; the cart check makes re-runs idempotent per ASIN |

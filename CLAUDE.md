@@ -108,8 +108,8 @@ make install-update-timer    # launchd: make update every 15 min (GHCR image is 
 make install-agent-tools     # agent/tools venv, pandabase-tools on PATH, configs from examples
 make install-agent-skills    # skills.load.extraDirs += agent/skills (backs up openclaw.json)
 make install-agent-cron      # OpenClaw automations (list, then edit or add)
-make install-chromium        # per-member Chromium LaunchAgents (loopback-only CDP)
-make install-ollama-env      # OLLAMA_NUM_PARALLEL=1, OLLAMA_MAX_LOADED_MODELS=1 at login
+make install-chromium        # per-member Chrome LaunchAgents (CHROMIUM_BIN; loopback-only CDP)
+make install-ollama-env      # OLLAMA_NUM_PARALLEL=1, OLLAMA_MAX_LOADED_MODELS=1, OLLAMA_NO_CLOUD=1 at login
 make backfill [MEMBER=m]     # 12-month receipt backfill, resumable
 make smoke                   # live checks; SMOKE_CART=1 / SMOKE_E2E=1 opt-ins, SMOKE_ONLY="api vlm"
 ```

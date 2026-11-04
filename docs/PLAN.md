@@ -913,6 +913,24 @@ needed for the LaunchAgents/Chromium after a power cut; the OpenClaw patch hardc
 Discord Message Content Intent. Remaining manual steps are listed in README *Manual steps that
 can't be scripted*.
 
+*Phase 2 on the real Mac mini (2026-11-04):* set up from zero with a dedicated Standard agent
+account that logs in automatically; recorded as `docs/SETUP-MAC.md`. `make smoke` 7/7 and `make
+backfill` (114 orders) passed. Deviations from this milestone's README: **Google Chrome** instead
+of Chromium (Homebrew's `chromium` cask was disabled 2026-09-01; `CHROMIUM_BIN` now defaults to
+Chrome, and each window is named `PandaBase · <profile>`); **Colima** instead of Docker Desktop,
+with a `DOCKER-USER` rule so containers reach the host only on Ollama's port; **local reply
+model** `qwen3.5:27b` (photo privacy option C as decided above; ~25GB resident, so
+`OLLAMA_MAX_LOADED_MODELS=1` and models swap; `OLLAMA_NO_CLOUD=1` added); OpenClaw `tools.deny:
+["group:web", "browser"]` after `openclaw security audit` flagged `models.small_params` (tier 2
+moves into the tools in a parallel PR). Bugs fixed: `install-agent-skills` stopped the gateway,
+which OpenClaw 2026.10 refuses for a running service (the setting applies live); `install-agent-cron`
+crashed under macOS bash 3.2 (`set -u` + empty array); the gateway patch's
+`models.providers.ollama.models` replaced onboarding's model list and deleted the reply model
+(removed; params are set per index); `openclaw infer image describe` needs `--timeout-ms 180000`;
+the Discord channel is an OpenClaw plugin to install. Bats tests for the two scripts run under
+`/bin/bash`. Also seen: Amazon's tier-1 `add.html` now redirects straight to the cart (handled
+by the tier-2 PR).
+
 *For M9:*
 - `make update` → `scripts/ops/update.sh` is the procedure to wrap; it needs a clean tracked tree
   and prints the before/after sha (rollback = checkout + `make up`). It uses `--build`: switch to
@@ -1091,10 +1109,11 @@ branch `claude/system-e2e`). Details, the bugs found and the security review are
   signed-in Amazon Chromium), so `browser` and `group:web` were denied and tier 2 stopped working.
   Tier 2 now runs through `pandabase-tools cart search` / `cart add` (DESIGN §6, §10 #52) and the
   skill forbids the browser tool; `openclaw.pandabase.example.json5` ships the deny list and no
-  longer defines browser profiles. **Tier 1 moved to product pages in the same PR:** the Mac's
+  longer defines browser profiles; `install-agent-cron` no longer passes `browser` in the
+  automations' `--tools` (re-run it to update existing jobs). **Tier 1 moved to product pages in the same PR:** the Mac's
   `SMOKE_CART=1` run (2026-11-04) showed `/gp/aws/cart/add.html` now redirects to the cart and adds
   nothing (read as `not_offered` because of the cart's recommendation forms; regression test). Both
-  tiers now share `cart_add.add_one` (DESIGN §10 #53); `cart.tier1_method: add_url` keeps the old
+  tiers now share `cart_add.add_one` (DESIGN §10 #54); `cart.tier1_method: add_url` keeps the old
   path. Not verified here (owner on the Mac): live search markup (`data-asin` results), the cart
   page (`nav-cart-count`, `data-itemtype` rows) incl. Whole Foods' `/cart/localmarket`, and that
   the product page's add form posts to `/cart/add-to-cart…` (if it's `handle-buy-box`, the guard

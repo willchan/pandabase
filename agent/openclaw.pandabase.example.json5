@@ -7,7 +7,12 @@
 //   openclaw gateway start
 //
 // Arrays are replaced, not merged: if your config already has `tools.media.models` (e.g. an audio
-// transcriber) or `models.providers.ollama.models`, add these entries to your lists by hand.
+// transcriber), add these entries to your list by hand. This file deliberately leaves
+// `models.providers.ollama.models` alone: onboarding lists every pulled model there, and a patch
+// array would replace that list (deleting your reply model). To tune the VLM, set its params by
+// index instead (README step 11):
+//   openclaw config set "models.providers.ollama.models[<i>].params" \
+//     '{"num_ctx":8192,"keep_alive":"2m"}' --strict-json
 {
   channels: {
     discord: {
@@ -15,8 +20,8 @@
       intents: { messageContent: true },
       guilds: {
         "<GUILD_ID>": {
-          // A channel map is an allowlist: keep "*" so the bot still answers when mentioned
-          // elsewhere ("do we have eggs?").
+          // A channel map is an allowlist: keep "*" so the bot still answers members when
+          // mentioned elsewhere ("do we have eggs?"), but only members.
           channels: {
             "<PANDABASE_CHANNEL_ID>": {
               enabled: true,
@@ -25,7 +30,7 @@
               requireMentionInBotThreads: false,
               users: ["<MEMBER_1_DISCORD_ID>", "<MEMBER_2_DISCORD_ID>"],
             },
-            "*": { requireMention: true },
+            "*": { requireMention: true, users: ["<MEMBER_1_DISCORD_ID>", "<MEMBER_2_DISCORD_ID>"] },
           },
         },
       },
@@ -35,21 +40,6 @@
   // Local vision for inbound photos (PRD §3.6, DESIGN §6): OpenClaw describes each photo with the
   // same Ollama VLM the worker uses, and the reply model gets that text instead of the pixels.
   // Residual risk and the mitigation: README "Photo privacy" (agent/openclaw.privacy.example.json5).
-  models: {
-    providers: {
-      ollama: {
-        models: [
-          {
-            id: "qwen3.5:9b",
-            name: "qwen3.5:9b",
-            input: ["text", "image"],
-            // Small context + short keep-alive: the model unloads soon after, like the worker's.
-            params: { num_ctx: 8192, keep_alive: "2m" },
-          },
-        ],
-      },
-    },
-  },
   tools: {
     // No raw web or browser tools for this agent (DESIGN §10 #52). Tier 2 of the Saturday cart
     // runs through `pandabase-tools cart search` / `cart add`, which guard against checkout in

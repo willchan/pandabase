@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# `make install-ollama-env`: OLLAMA_NUM_PARALLEL=1 and OLLAMA_MAX_LOADED_MODELS=1 for the native
-# Ollama app, now and at every login (a LaunchAgent; DESIGN §1.2). Idempotent. Restart Ollama
-# afterwards (quit it from the menu bar and open it again) so it reads them.
+# `make install-ollama-env`: OLLAMA_NUM_PARALLEL=1, OLLAMA_MAX_LOADED_MODELS=1 and OLLAMA_NO_CLOUD=1
+# (no cloud models: nothing sent to this Ollama leaves the Mac) for the native Ollama app, now and
+# at every login (a LaunchAgent; DESIGN §1.2). Idempotent. Restart Ollama afterwards (quit it from
+# the menu bar and open it again) so it reads them.
 set -euo pipefail
 # shellcheck source=scripts/ops/lib.sh
 . "$(dirname "$0")/lib.sh"
@@ -23,4 +24,5 @@ else
 fi
 run launchctl setenv OLLAMA_NUM_PARALLEL 1
 run launchctl setenv OLLAMA_MAX_LOADED_MODELS 1
+run launchctl setenv OLLAMA_NO_CLOUD 1
 info "Now restart Ollama (menu bar → Quit Ollama, then open it again)."
