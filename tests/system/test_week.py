@@ -324,14 +324,18 @@ def test_07b_confirm_receipt_in_web_ui(stack: Stack) -> None:
             page.screenshot(path=str(stack.tmp / "07b-cleanup.png"), full_page=True)
             (stack.tmp / "07b-cleanup.txt").write_text(f"{page.url}\n\n{page.inner_text('body')}")
             raise
-        expect(page.get_by_text("Check each line against the photo")).to_be_visible()
+        # A server-rendered page on a possibly cold preview function: give it the link's budget.
+        expect(page.get_by_text("Check each line against the photo")).to_be_visible(timeout=15_000)
         # The photo is a presigned R2 GET the browser loads from the (fake) bucket.
         img = page.locator(f"img[src^='{stack.r2.url}/{stack.r2.bucket}/']")
         expect(img).to_have_count(1)
         loaded = "i => i.complete && i.naturalWidth > 0"
         wait_for("the receipt photo to load", lambda: img.evaluate(loaded), timeout=15)
         page.get_by_role("button", name="Confirm receipt").click()
-        expect(page).to_have_url(re.compile(r"/cleanup\?done=receipt"))
+        # The server action applies the receipt, then redirects. On a cold Vercel preview that
+        # took longer than Playwright's 5 s default (the button sat at "Confirming…"), so wait
+        # longer; locally it redirects well within the default either way.
+        expect(page).to_have_url(re.compile(r"/cleanup\?done=receipt"), timeout=30_000)
         browser.close()
     if isinstance(stack.r2, FakeR2):  # the fake bucket also shows which request fetched it
         assert any(r.method == "GET" and r.status == 200 and r.key.startswith("media/")
