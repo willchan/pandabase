@@ -15,6 +15,9 @@ form's `action`, `ASIN.n` inputs, and visible text.
 | `cart_add_buy_now_only.html` | an add form whose only submit is Buy Now / 1-Click (never clicked) |
 | `cart_view.html`, `cart_view_after.html` | cart page before / after a tier-2 add (active, saved-for-later, recommendations) |
 | `search_results.html` | tier-2 search results: sponsored, size swatch, unavailable, an injection-style title, a legacy row |
+| `cart_view_recs.html` | where `/gp/aws/cart/add.html` lands now: the cart, unchanged, with recommendation add forms |
+| `product_add_form.html` | product page with the add-to-cart form (Buy Now inside it) and a related-item form |
+| `product_unavailable.html` | product page with no add form for its own ASIN |
 | `search_no_results.html` | tier-2 search with no results |
 | `orders_list_p1.html`, `orders_list_p2.html` | order history, two pages |
 | `order_details_delivery.html` | delivered Amazon order (+ a recommendations carousel) |

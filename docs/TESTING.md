@@ -67,7 +67,7 @@ test. Name resolution follows the skills' written rule (`matches[0].item_id` whe
 | 8 | Trash Cam photo | provisional `consumed` on Oat Milk, reply, back in the plan |
 | 9 | "bought chicken thighs and avocados" | one manual receipt, `manual`/`confirmed` lines, idempotent |
 | 10 | "froze the chicken thighs" | `moved` fridge → freezer with the bought quantity, freezer aging |
-| 11 | Saturday build | `building`, price checks + quotes, tier 1 on Amazon lines, WF + free text → `needs_agent`, resume adds nothing twice, tier 2 via the skill's `cart search` → `cart add` (labelled-untrusted candidates, count rose, a repeat add is `already_in_cart`), a held lease makes `cart search` exit 3, `cart finish` → `ready`, `cart_result`, `cart_line_result` / `cart_tier1_line` / `cart_tier2_line`, only `no_asin` price failures, **no checkout URL ever opened** |
+| 11 | Saturday build | `building`, price checks + quotes, tier 1 on Amazon lines from their product pages (the add form, never Buy Now), WF + free text → `needs_agent`, resume adds nothing twice, tier 2 via the skill's `cart search` → `cart add` (labelled-untrusted candidates, count rose, a repeat add is `already_in_cart`), a held lease makes `cart search` exit 3, `cart finish` → `ready`, `cart_result`, `cart_line_result` / `cart_tier1_line` / `cart_tier2_line`, only `no_asin` price failures, **no checkout URL ever opened** |
 | 12 | `receipts ingest` (synthetic order) | closes the cycle (`order_ingested`), ASIN matches, new unverified item, replay + `external_order_id` dedupe, cursor |
 | 13 | next cycle opens | new open cycle, later week |
 | 14 | merge suggestions round trip | `merge-suggestions/run` → worker (text model) → `merge_suggestion` review for the new item, telemetry |

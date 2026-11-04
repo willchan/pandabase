@@ -485,9 +485,9 @@ def test_11_saturday_build(stack: Stack) -> None:
     # Never near checkout: every page the injector opened or landed on passed the guard.
     pages = [json.loads(x) for x in stack.amazon_log.read_text().splitlines()]
     assert pages and all("checkout" not in p["url"] and "/gp/buy/" not in p["url"] for p in pages)
-    assert {p["url"].split("?")[0] for p in pages if p["kind"] == "clicked"} == {
-        "https://www.amazon.com/gp/aws/cart/add.html"
-    }
+    # Tiers 1 and 2 add from product pages (the add URL stopped working, 2026-11-04).
+    clicked = [p["url"] for p in pages if p["kind"] == "clicked"]
+    assert clicked and all(u.startswith("https://www.amazon.com/dp/") for u in clicked)
 
 
 @preview

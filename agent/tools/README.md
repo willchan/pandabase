@@ -14,7 +14,7 @@ PANDABASE_CONFIG=../pandabase.config.json AGENT_API_TOKEN=… uv run pandabase-t
 | Command | What |
 |---|---|
 | `api get\|post <path> [-q k=v] [--json …\|--input FILE] [--actor ID] [--key K]` | any agent route, contract-validated |
-| `cart build [--cycle-id C]` / `cart finish --cycle-id C --outcomes '{…}'` / `cart url ASIN[:QTY]…` | Saturday build (price checks + tier 1), post result after tier 2, print an add URL |
+| `cart build [--cycle-id C]` / `cart finish --cycle-id C --outcomes '{…}'` / `cart url ASIN[:QTY]…` | Saturday build (price checks + tier 1 from product pages), post result after tier 2, print the legacy add URL |
 | `cart search --query Q [--store amazon\|wholefoods] [--limit N]` / `cart add --asin X [--qty N] [--store …]` | tier 2: candidates as labelled-untrusted JSON (no clicks); add one ASIN through the guarded add path, verify the cart count |
 | `receipts sweep --member M [--backfill]` / `receipts ingest --member M --input FILE` | order-history sweep; ingest an agent-extracted receipt |
 | `photo submit --file F --actor ID …` / `photo classify` | classify + upload + audit job |

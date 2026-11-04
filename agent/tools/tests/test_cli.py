@@ -9,8 +9,8 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from conftest import REPO, FakeApi, FakeDriver
-from test_cart_injector import ADD, VIEW, line, product
+from conftest import REPO, FakeApi, FakeDriver, FakeShop
+from test_cart_injector import VIEW, line, product
 
 from pandabase_tools import cli
 from pandabase_tools.config import load
@@ -175,10 +175,7 @@ class CycleServer:
 
 
 def _driver() -> FakeDriver:
-    return FakeDriver(
-        lambda url: (url, "cart_add_confirm.html") if url.startswith(ADD) else None,
-        lambda _: (VIEW, "cart_added.html"),
-    )
+    return FakeShop().driver  # product pages + a cart whose count follows the adds
 
 
 def test_cart_build_then_finish(config: Path) -> None:
@@ -373,11 +370,10 @@ def test_cart_search_and_add_commands(config: Path) -> None:
     views = iter(["cart_view.html", "cart_view_after.html"])
     add_driver = FakeDriver(
         lambda u: (
-            (u, "cart_add_confirm_one.html")
-            if u.startswith(ADD)
+            (u, "product_add_form.html")
+            if u == "https://www.amazon.com/dp/B0SYNTH202"
             else ((u, next(views)) if u == VIEW else None)
-        ),
-        lambda _: (VIEW, "cart_added.html"),
+        )
     )
     argv = ["cart", "add", "--member", "will", "--asin", "B0SYNTH202", "--qty", "1"]
     code, out = run(config, argv, api, add_driver)

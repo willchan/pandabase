@@ -657,18 +657,31 @@ JSON on stdout; exit 0 ok, 1 error, 2 usage, 3 profile locked, 4 refused URL):
   `pandabase-tools api get|post <path>` exposes every agent route to the skills.
 - `cart_injector.py` (`cart build`, `cart finish`) — attaches over **CDP** to the cart member's
   existing Chromium profile. Price checks for `needs_price_check` candidates (product page:
-  JSON-LD offer → `itemprop=price` → the price block's screen-reader text). Tier 1: navigate to
+  JSON-LD offer → `itemprop=price` → the price block's screen-reader text). Tier 1
+  (`cart.tier1_method`, default `product_page`): each line through `cart_add.add_one` (below).
+  The legacy `add_url` method navigates to
   `https://www.amazon.com/gp/aws/cart/add.html?ASIN.1=…&Quantity.1=…` (batched per vendor, ≤ 10),
-  read which ASINs the confirm form offers (`ASIN.n` inputs; "unavailable" text excludes one),
-  click the single confirm control (submit of the form whose action contains `/cart/add`; button
-  name fallback) and verify ("added to cart" text, or a cart page without an add form).
-  Outputs `{added, needs_agent, failed}`; a page with no add form and no "added" signal is
-  "layout changed" → whole batch `needs_agent` + `selector_error`. Lines without an ASIN, free
-  text, and vendors not enabled for tier 1 go straight to `needs_agent`; the skill adds them with
-  `cart search` / `cart add` (tier 2, below), then `cart finish` posts `cart-result`. A build state file makes
-  re-runs resume without adding a line twice. Whole Foods via the add URL is **unverified**:
-  `cart.wholefoods_tier1` defaults to `false` (WF lines → `needs_agent`) until `make smoke`
-  proves it.
+  reads which ASINs the confirm form offers (`ASIN.n` inputs; "unavailable" text excludes one),
+  clicks the single confirm control and verifies ("added to cart" text, or a cart page without
+  an add form). Since 2026-11-04 Amazon redirects that URL to the cart and adds nothing; only the
+  add page itself counts as a confirm page, so the redirect is "layout changed", not
+  `not_offered`. Outputs `{added, needs_agent, failed}`. Lines without an ASIN, free text,
+  vendors not enabled for tier 1, and product-page adds that found no add form (unavailable) or
+  couldn't be verified go to `needs_agent`; the skill handles them with `cart search` / `cart add`
+  (tier 2, below), then `cart finish` posts `cart-result`. Signed out or a refused URL is
+  `failed`. A build state file makes re-runs resume without adding a line twice. Whole Foods
+  tier 1 is **unverified**: `cart.wholefoods_tier1` defaults to `false` (WF lines →
+  `needs_agent`) until `make smoke` proves it.
+- `cart_add.py` — the one add path tiers 1 and 2 share. Read the cart page (Amazon
+  `/gp/cart/view.html`, Whole Foods `/cart/localmarket`; count from `nav-cart-count`, else
+  "Subtotal (N items)"; active rows = `data-asin` in a `/cart` form that isn't an add form, not
+  `data-itemtype="saved"`): an ASIN already there is `already_in_cart` (a re-run never doubles a
+  line). Otherwise open `/dp/{ASIN}`, find **that ASIN's own** add-to-cart form (action contains
+  `/cart/add-to-cart`, an input whose value is the ASIN, a submit `control_allowed` accepts —
+  related-item forms carry other ASINs; Buy Now is never the control), set its quantity field
+  (`CdpDriver.add_to_cart`; a quantity > 1 with no quantity field is not added), submit, and
+  re-read the cart: `added` only if the count rose (no count: the ASIN appears), else
+  `unverified`. No add form → `no_add_form`. Nothing from the product page reaches the model.
 - `cart_tier2.py` (`cart search`, `cart add`) — tier 2 on the same guarded CDP driver, so the
   agent never needs OpenClaw's `browser` tool (§10 #52). `cart search --query Q [--store
   amazon|wholefoods] [--limit N]` opens one results page (`/s?k=…`, Whole Foods `&i=wholefoods`;
@@ -677,13 +690,9 @@ JSON on stdout; exit 0 ok, 1 error, 2 usage, 3 profile locked, 4 refused URL):
   `data-asin` block, else the widest ancestor mentioning only that ASIN; swatch links inside
   another result are not candidates. No clicks. Page text is untrusted: control/format characters
   stripped, one line, ≤ `cart.tier2_title_chars` (160) per field, under a `notice` saying it is
-  data, not instructions; the model chooses by ASIN. `cart add --asin X --qty N` reads the cart
-  page (`nav-cart-count`, else "Subtotal (N items)"; active rows = `data-asin` in a `/cart` form,
-  not `data-itemtype="saved"`): an ASIN already there is `already_in_cart` (a re-run never
-  doubles a line). Otherwise it uses tier 1's add-to-cart URL + confirm click for that one ASIN
-  (never a product page's buy box) and re-reads the cart: `added` only if the count rose,
-  else `failed: unverified`. ASIN must be 10 upper-case alphanumerics, `1 ≤ qty ≤
-  cart.tier2_max_qty` (10). Telemetry `cart_tier2_search {store, results}` and `cart_tier2_line
+  data, not instructions; the model chooses by ASIN. `cart add --asin X --qty N [--store …]`
+  is `cart_add.add_one` for that ASIN (`added`, `already_in_cart`, or `failed` with a reason).
+  ASIN must be 10 upper-case alphanumerics, `1 ≤ qty ≤ cart.tier2_max_qty` (10). Telemetry `cart_tier2_search {store, results}` and `cart_tier2_line
   {asin, vendor, quantity, outcome, error}`.
 - `receipt_parser.py` (`receipts sweep [--backfill]`) — attaches over CDP to a member's profile.
   Collect phase: walk order history newest-first (`orderID=` links; card = widest ancestor
@@ -1002,7 +1011,7 @@ docker-compose.yml (+ docker-compose.build.yml), Makefile, CLAUDE.md, README.md,
 |---|---|---|
 | 1 | One household, `member` table, Google allowlist | Two users; no tenancy complexity; need Discord↔Google identity mapping for attribution |
 | 2 | Ship a skill pack for the existing OpenClaw, not a new deployment | Family agent already runs on the Mac Mini; OpenClaw skills are `SKILL.md`, not YAML workflows |
-| 3 | Cart tier 1 = add-to-cart URL by ASIN; tier 2 = the agent picks an ASIN from guarded search results (was: agent's LLM browser; see #52) | Minimizes DOM coupling; the model only judges which product matches |
+| 3 | Cart tier 1 = add by known ASIN (was the add-to-cart URL; now the product page's own add form, #53); tier 2 = the agent picks an ASIN from guarded search results (was: agent's LLM browser; #52) | Minimizes DOM coupling; the model only judges which product matches |
 | 4 | Tools attach via CDP to existing logged-in profiles | No credential/2FA handling in PandaBase; shares the agent's session |
 | 5 | Cart only, never checkout | Safety; humans keep control of spend |
 | 6 | Ingest only Delivered/Picked-up orders; dedupe by order id | Substitutions are reflected; acquisition date is real; retries safe |
@@ -1052,3 +1061,4 @@ docker-compose.yml (+ docker-compose.build.yml), Makefile, CLAUDE.md, README.md,
 | 50 | PR previews are tested end to end (tier A′) by re-running tier A's steps in a remote mode against the real deployment, triggered by Vercel's `repository_dispatch` (reported as a commit status), on a preview DB that each run resets — guarded by two independent "preview" signals; reported, not required yet | Tier A can't see Vercel, Turso or R2; reusing its steps keeps one test of the week; the dispatch waits for the real build without polling, and runs `main`'s workflow definition; requiring it waits until it has proven stable |
 | 51 | Production gets a read-only smoke after every web deploy that reports (job, Discord, telemetry) but never rolls back | A smoke that can write could damage the household's data; rollback has side effects (Vercel stops auto-promoting, old env vars) that a human should choose; the Mac Mini already rolls back its own worker |
 | 52 | Tier 2 runs only through `pandabase-tools cart search` / `cart add` on the guarded CDP driver; the agent's OpenClaw denies `group:web` and `browser` | A local model with a raw browser on the signed-in Amazon profile could be steered by product-page text to Buy Now / checkout (OpenClaw's browser has no URL denylist; audit `models.small_params`). Search returns size-limited, labelled-untrusted JSON; add is by ASIN through tier 1's guarded path with Buy Now controls deny-listed and the cart count verified |
+| 53 | Tier 1 adds each line from its product page (`/dp/{ASIN}`, that ASIN's own `/cart/add-to-cart` form, Buy Now deny-listed), verified by the cart count rising; the batch add URL stays as `cart.tier1_method: add_url` | `/gp/aws/cart/add.html` began redirecting to the cart without adding (live smoke, 2026-11-04). One shared, verified path for tiers 1 and 2; the cart check makes re-runs idempotent per ASIN |

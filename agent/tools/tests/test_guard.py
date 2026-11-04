@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
 import pytest
 
@@ -212,3 +213,77 @@ def test_cdp_click_confirm_clicks_nothing_when_only_buy_now() -> None:
     driver._page = page  # type: ignore[assignment]
     assert driver.click_confirm() is None
     assert page.clicked == []
+
+
+class _Ctl:
+    def __init__(self, desc: dict[str, str], log: list[str]) -> None:
+        self.desc, self.log = desc, log
+
+    def evaluate(self, _js: str) -> dict[str, str]:
+        return self.desc
+
+    def click(self) -> None:
+        self.log.append("click:" + (self.desc.get("name") or self.desc.get("text") or ""))
+
+
+class _Many:
+    def __init__(self, items: list[Any]) -> None:
+        self.items = items
+
+    def count(self) -> int:
+        return len(self.items)
+
+    def nth(self, i: int) -> Any:
+        return self.items[i]
+
+
+class _Form:
+    def __init__(self, controls: list[dict[str, str]], qty_fields: int, log: list[str]) -> None:
+        self.controls = [_Ctl(d, log) for d in controls]
+        self.qty_fields, self.log = qty_fields, log
+
+    def locator(self, _sel: str) -> _Many:
+        return _Many(self.controls)
+
+    def evaluate(self, _js: str, qty: int) -> int:
+        self.log.append(f"qty:{qty}")
+        return self.qty_fields
+
+
+class _FormPage(_Page):
+    def __init__(self, forms: list[_Form]) -> None:
+        super().__init__([])
+        self.forms = forms
+        self.selectors: list[str] = []
+
+    def locator(self, sel: str) -> Any:
+        self.selectors.append(sel)
+        page = self
+
+        class _Filterable(_Many):
+            def filter(self, has: object) -> _Many:
+                return _Many(page.forms)
+
+        return _Filterable([])
+
+
+def test_cdp_add_to_cart_sets_qty_and_never_clicks_buy_now() -> None:
+    log: list[str] = []
+    buy = {"name": "submit.buy-now", "value": "Buy Now"}
+    add = {"name": "submit.addToCart", "value": "Add to Cart", "form_action": "/cart/add-to-cart/x"}
+    page = _FormPage([_Form([buy], 1, log), _Form([buy, add], 1, log)])
+    driver = CdpDriver("http://127.0.0.1:9222")
+    driver._page = page  # type: ignore[assignment]
+    assert driver.add_to_cart("B0SYNTH202", 2) is not None
+    assert log == ["qty:2", "click:submit.addToCart"]  # the Buy-Now-only form was passed over
+    assert "input[value='B0SYNTH202']" in page.selectors
+
+
+def test_cdp_add_to_cart_wont_add_a_wrong_quantity() -> None:
+    log: list[str] = []
+    add = {"name": "submit.addToCart", "value": "Add to Cart"}
+    driver = CdpDriver("http://127.0.0.1:9222")
+    driver._page = _FormPage([_Form([add], 0, log)])  # type: ignore[assignment]
+    assert driver.add_to_cart("B0SYNTH202", 3) is None and not any("click" in x for x in log)
+    with pytest.raises(ValueError):
+        driver.add_to_cart("B0SYNTH202']", 1)

@@ -25,6 +25,21 @@ if TYPE_CHECKING:
 # Located by form action and input type, with an accessible-name fallback — no class names.
 CONFIRM_SELECTOR = "form[action*='/cart/add'] [type=submit], form[action*='/cart/add'] button"
 CONFIRM_NAME = re.compile(r"^\s*(continue|add to (your )?cart|add all to cart)\s*$", re.I)
+# Product-page add (tiers 1 and 2, `cart_add`): the ASIN's own add-to-cart form.
+ADD_FORM_ACTION = "/cart/add-to-cart"
+ASIN_RE = re.compile(r"^[A-Z0-9]{10}$")
+SET_QTY_JS = """(form, q) => {
+  let n = 0;
+  for (const el of form.querySelectorAll("input, select")) {
+    if (!/quantity/i.test(el.getAttribute("name") || "")) continue;
+    if (el.tagName === "SELECT" && ![...el.options].some(o => o.value === String(q))) {
+      el.add(new Option(String(q), String(q)));
+    }
+    el.value = String(q);
+    n++;
+  }
+  return n;
+}"""
 # Controls that must never be clicked, whatever page we're on and whatever the model asked for:
 # Buy Now / 1-Click / Turbo checkout / anything that orders or checks out. Matched against a
 # control's id, name, value, label and text; its form's action also has to pass the URL guard.
@@ -71,6 +86,11 @@ class Driver(Protocol):
 
     def click_confirm(self) -> Snapshot | None:
         """Click the add-to-cart confirm control; `None` when there isn't one."""
+        ...
+
+    def add_to_cart(self, asin: str, qty: int) -> Snapshot | None:
+        """On a product page: set the quantity in `asin`'s own add-to-cart form and submit it
+        with an allowed control (never Buy Now). `None` when there's no such form/control."""
         ...
 
 
@@ -154,4 +174,27 @@ class CdpDriver:
                     control.click()
                     self.page.wait_for_load_state("domcontentloaded")
                     return self._snapshot()
+        return None
+
+    def add_to_cart(self, asin: str, qty: int) -> Snapshot | None:
+        if not ASIN_RE.match(asin):  # it goes into a selector below
+            raise ValueError(f"not an ASIN: {asin!r}")
+        forms = self.page.locator(f"form[action*='{ADD_FORM_ACTION}']").filter(
+            has=self.page.locator(f"input[value='{asin}']")
+        )
+        for i in range(forms.count()):
+            form = forms.nth(i)
+            controls = form.locator("[type=submit], button")
+            allowed = [
+                controls.nth(j)
+                for j in range(controls.count())
+                if control_allowed(controls.nth(j).evaluate(DESCRIBE_JS))
+            ]
+            if not allowed:
+                continue
+            if form.evaluate(SET_QTY_JS, qty) == 0 and qty != 1:
+                continue  # can't set the quantity: don't add the wrong amount
+            allowed[0].click()
+            self.page.wait_for_load_state("domcontentloaded")
+            return self._snapshot()
         return None

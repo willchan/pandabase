@@ -34,7 +34,7 @@ def price_cents(asin: str) -> int:
 
 
 class FakeAmazon:
-    """Synthetic product, add-to-cart confirm and "added" pages, generated from the URL."""
+    """Synthetic product (with its add-to-cart form), add-URL confirm, cart and search pages."""
 
     def __init__(self, log: Path | None) -> None:
         self.log = log
@@ -124,7 +124,13 @@ class FakeAmazon:
             )
             html = (
                 f'<html><head><script type="application/ld+json">{ld}</script></head>'
-                f"<body><h1>Synthetic product {escape(asin)}</h1></body></html>"
+                f"<body><h1>Synthetic product {escape(asin)}</h1>"
+                '<form action="/cart/add-to-cart/ref=dp_start" method="post">'
+                f'<input type="hidden" name="items[0.base][asin]" value="{escape(asin)}">'
+                '<select name="items[0.base][quantity]"><option value="1">1</option></select>'
+                '<input type="submit" name="submit.buy-now" value="Buy Now">'
+                '<input type="submit" name="submit.addToCart" value="Add to Cart"></form>'
+                "</body></html>"
             )
             return self._land(url, html)
         if parts.path == "/gp/cart/view.html":
@@ -148,6 +154,17 @@ class FakeAmazon:
             f"<html><body><h1>Added to Cart</h1><div>Cart subtotal ({n} items)</div>"
             '<a href="/gp/buy/spc/handlers/display.html">Proceed to checkout</a></body></html>',
         )
+
+    def add_to_cart(self, asin: str, qty: int) -> Snapshot | None:
+        """The product page's own add form (never its Buy Now): the cart gains `qty`."""
+        if not self.current or f"/dp/{asin}" not in urlsplit(self.current).path:
+            return None
+        self._record("clicked", self.current)
+        cart = self._cart()
+        cart[asin] = cart.get(asin, 0) + qty
+        if self.cart_file:
+            self.cart_file.write_text(json.dumps(cart))
+        return self._land(self.current, "<html><body><h1>Added to cart</h1></body></html>")
 
     def __enter__(self) -> FakeAmazon:
         return self

@@ -1,0 +1,26 @@
+<!doctype html>
+<html><head><title>Amazon.com Shopping Cart</title></head>
+<body>
+<!-- What /gp/aws/cart/add.html now does (2026-11-04): redirect here and add nothing. -->
+<div class="h3-nav"><a href="/gp/cart/view.html"><span id="nav-cart-count">3</span> Cart</a></div>
+<form action="/cart/ref=ox_sc_upd_qty" method="post">
+  <h2>Shopping Cart</h2>
+  <div data-asin="B0SYNTH099" data-itemtype="active"><a href="/dp/B0SYNTH099">Synthetic Tea</a> Qty: 3</div>
+  <input type="submit" name="proceedToRetailCheckout" value="Proceed to checkout">
+</form>
+<div class="c3-recs"><h2>Customers who bought items in your cart also bought</h2>
+  <form action="/cart/add-to-cart/ref=sc_rec_1" method="post">
+    <input type="hidden" name="items[0.base][asin]" value="B0SYNTH210">
+    <input type="hidden" name="items[0.base][quantity]" value="1">
+    <input type="hidden" name="isNeoAddToCart" value="1">
+    <a href="/dp/B0SYNTH210">Synthetic Mixing Bowl</a>
+    <button type="submit" name="submit.addToCart">Add to cart</button>
+  </form>
+  <form action="/cart/add-to-cart/ref=sc_rec_2" method="post">
+    <input type="hidden" name="items[0.base][asin]" value="B0SYNTH211">
+    <input type="hidden" name="items[0.base][quantity]" value="1">
+    <a href="/dp/B0SYNTH211">Synthetic Whisk</a>
+    <button type="submit" name="submit.addToCart">Add to cart</button>
+  </form>
+</div>
+</body></html>

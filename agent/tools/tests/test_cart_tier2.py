@@ -12,11 +12,11 @@ from urllib.parse import parse_qsl, urlsplit
 import pytest
 from conftest import FakeDriver
 
-from pandabase_tools import guard
+from pandabase_tools import dom, guard
+from pandabase_tools.cart_add import add_form, cart_state
 from pandabase_tools.cart_tier2 import (
     NOTICE,
     add,
-    cart_state,
     clean_query,
     parse_search,
     search,
@@ -26,7 +26,7 @@ from pandabase_tools.cart_tier2 import (
 from pandabase_tools.config import CartConfig
 from pandabase_tools.telemetry import Telemetry
 
-ADD = "https://www.amazon.com/gp/aws/cart/add.html"
+PRODUCT = "https://www.amazon.com/dp/"
 VIEW = "https://www.amazon.com/gp/cart/view.html"
 SEARCH = "https://www.amazon.com/s"
 
@@ -126,38 +126,55 @@ def test_cart_state_reads_count_and_active_asins_only() -> None:
     assert asins == {"B0SYNTH001", "B0SYNTH002"}
 
 
+def test_add_form_is_the_products_own_and_never_buy_now() -> None:
+    from conftest import fixture
+
+    root = dom.parse(fixture("product_add_form.html"))
+    form = add_form(root, "B0SYNTH202")
+    assert form is not None and "dp_start" in form.attrs["action"]
+    assert add_form(root, "B0SYNTH999") is None
+    assert add_form(dom.parse(fixture("product_unavailable.html")), "B0SYNTH204") is None
+    # The old add-URL confirm form isn't an add-to-cart form; a Buy-Now-only form isn't either.
+    assert add_form(dom.parse(fixture("cart_add_confirm_one.html")), "B0SYNTH202") is None
+    assert add_form(dom.parse(BUY_NOW_ONLY), "B0SYNTH202") is None
+
+
+BUY_NOW_ONLY = (
+    '<html><body><form action="/cart/add-to-cart/ref=x" method="post">'
+    '<input type="hidden" name="items[0.base][asin]" value="B0SYNTH202">'
+    '<button type="submit" id="buy-now-button">Buy now with 1-Click</button>'
+    "</form></body></html>"
+)
+P202 = PRODUCT + "B0SYNTH202"
+
+
 def _add_driver(
-    add_page: str = "cart_add_confirm_one.html",
+    product_page: str = "product_add_form.html",
     after_view: str = "cart_view_after.html",
-    confirm_page: str | None = "cart_added.html",
+    landing: tuple[str, str] | None = None,
 ) -> FakeDriver:
     views = iter(["cart_view.html", after_view])
 
     def pages(url: str) -> tuple[str, str] | None:
-        if url.startswith(ADD):
-            return (url, add_page)
+        if url.startswith(PRODUCT):
+            return (url, product_page)
         if url == VIEW:
             return (url, next(views))
         return None
 
-    def confirm(_: str) -> tuple[str, str] | None:
-        return (VIEW, confirm_page) if confirm_page else None
-
-    return FakeDriver(pages, confirm)
+    return FakeDriver(pages, add=lambda _a, _q: landing)
 
 
-def test_add_by_asin_confirms_the_cart_count_rose() -> None:
+def test_add_by_asin_from_the_product_page_confirms_the_count_rose() -> None:
     driver, tel = _add_driver(), Telemetry()
-    out = add(driver, "B0SYNTH202", 1, "amazon", CartConfig(), tel)
+    out = add(driver, "B0SYNTH202", 2, "amazon", CartConfig(), tel)
     assert out["outcome"] == "added", out
     assert (out["cart_count_before"], out["cart_count_after"]) == (3, 4)
-    assert driver.clicks == 1
-    adds = [u for u in driver.opened if u.startswith(ADD)]
-    assert len(adds) == 1
-    assert parse_qsl(urlsplit(adds[0]).query) == [("ASIN.1", "B0SYNTH202"), ("Quantity.1", "1")]
+    assert driver.opened == [VIEW, P202, VIEW]
+    assert driver.added == [("B0SYNTH202", 2)] and driver.clicks == 1
     driver.assert_never_checkout()
     assert tel.metrics("cart_tier2_line") == [
-        {"asin": "B0SYNTH202", "vendor": "amazon", "quantity": 1, "outcome": "added"}
+        {"asin": "B0SYNTH202", "vendor": "amazon", "quantity": 2, "outcome": "added"}
     ]
 
 
@@ -174,7 +191,7 @@ def test_saved_for_later_or_recommended_is_not_in_the_cart(asin: str) -> None:
     driver = _add_driver()
     out = add(driver, asin, 1, "amazon", CartConfig(), Telemetry())
     assert out["outcome"] != "already_in_cart"
-    assert any(u.startswith(ADD) for u in driver.opened)
+    assert PRODUCT + asin in driver.opened
 
 
 def test_add_unverified_when_the_count_did_not_rise() -> None:
@@ -183,17 +200,17 @@ def test_add_unverified_when_the_count_did_not_rise() -> None:
     assert (out["outcome"], out["reason"]) == ("failed", "unverified")
 
 
-def test_add_never_clicks_a_buy_now_only_form() -> None:
-    driver = _add_driver(add_page="cart_add_buy_now_only.html")
+@pytest.mark.parametrize("page", ["product_unavailable.html", BUY_NOW_ONLY])
+def test_add_clicks_nothing_without_an_add_form(page: str) -> None:
+    driver = _add_driver(product_page=page)
     out = add(driver, "B0SYNTH202", 1, "amazon", CartConfig(), Telemetry())
-    assert (out["outcome"], out["reason"]) == ("failed", "layout_changed")
+    assert (out["outcome"], out["reason"]) == ("failed", "no_add_form")
     assert driver.clicks == 0
 
 
 def test_add_redirected_to_checkout_is_refused() -> None:
     spc = "https://www.amazon.com/gp/buy/spc/handlers/display.html"
-    driver = _add_driver()
-    driver.confirm = lambda _: (spc, "cart_added.html")
+    driver = _add_driver(landing=(spc, "cart_added.html"))
     out = add(driver, "B0SYNTH202", 1, "amazon", CartConfig(), Telemetry())
     assert (out["outcome"], out["reason"]) == ("failed", "refused_checkout")
 
@@ -220,3 +237,17 @@ def test_add_rejects_bad_input_before_opening_anything(asin: str, qty: int) -> N
     with pytest.raises(ValueError):
         add(driver, asin, qty, "amazon", CartConfig(tier2_max_qty=10), Telemetry())
     assert driver.opened == []
+
+
+def test_whole_foods_add_checks_the_whole_foods_cart() -> None:
+    wf_cart = "https://www.amazon.com/cart/localmarket"
+    views = iter(["cart_view.html", "cart_view_after.html"])
+    driver = FakeDriver(
+        lambda u: (
+            (u, "product_add_form.html")
+            if u == P202
+            else ((u, next(views)) if u == wf_cart else None)
+        )
+    )
+    out = add(driver, "B0SYNTH202", 1, "wholefoods", CartConfig(), Telemetry())
+    assert out["outcome"] == "added" and driver.opened == [wf_cart, P202, wf_cart]

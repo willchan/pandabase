@@ -1,9 +1,12 @@
 """Saturday cart build (DESIGN §6, PRD §4.1): price checks, tier-1 injection, cart result.
 
-Tier 1 opens `https://www.amazon.com/gp/aws/cart/add.html?ASIN.1=…&Quantity.1=…` (batched per
-vendor), checks which ASINs the confirm page offers, clicks the single confirm control and looks
-for an "added" signal. Lines it can't do this way — no ASIN, a vendor not enabled for tier 1, an
-ASIN the page didn't offer, an unrecognized page — come back as `needs_agent` for the skill's
+Tier 1 adds each line with an ASIN from its product page (`cart_add.add_one`: the ASIN's own
+add-to-cart form, verified by the cart count rising; `cart.tier1_method = "product_page"`). The
+older method (`add_url`) opens `https://www.amazon.com/gp/aws/cart/add.html?ASIN.1=…` (batched
+per vendor), checks which ASINs the confirm page offers, clicks the single confirm control and
+looks for an "added" signal; since 2026-11-04 Amazon redirects that link to the cart, which reads
+as "layout changed". Lines it can't do — no ASIN, a vendor not enabled for tier 1, no add form
+(unavailable), an unverified add — come back as `needs_agent` for the skill's
 tier-2 fallback (`cart search` / `cart add` in `cart_tier2.py`). Errors are `failed`. Nothing
 here goes near checkout (`guard`), and a build resumes from its state file instead of adding
 lines to the cart twice.
@@ -24,8 +27,8 @@ from pathlib import Path
 from typing import Any, Literal
 from urllib.parse import urlencode, urlsplit
 
+from . import cart_add, dom, guard
 from . import contracts as c
-from . import dom, guard
 from .api import ApiClient
 from .browser import Driver, NotSignedIn, Snapshot, control_allowed
 from .config import CartConfig
@@ -166,7 +169,14 @@ def _has_submit(form: dom.Node) -> bool:
 
 
 def analyze_add_page(snapshot: Snapshot) -> AddPage:
-    """What an add-to-cart page offers. Keys off the form action, `ASIN.n` inputs and text."""
+    """What an add-to-cart page offers. Keys off the form action, `ASIN.n` inputs and text.
+
+    Only the add page itself is a confirm page: since 2026-11-04 the add URL redirects to the cart,
+    whose recommendation carousels carry `/cart/add-to-cart` forms of *other* ASINs. Read as a
+    confirm page, that made every line `not_offered`; it's `layout_changed`.
+    """
+    if urlsplit(snapshot.url).path != urlsplit(ADD_URL).path:
+        return AddPage("layout_changed", frozenset())
     root = dom.parse(snapshot.html)
     forms = [f for f in _add_forms(root) if _has_submit(f)]
     if forms:
@@ -215,10 +225,21 @@ def inject(
     sleep: Callable[[float], None] = time.sleep,
 ) -> InjectResult:
     result = InjectResult()
-    for n, batch in enumerate(batches(lines, cfg.batch_size)):
+
+    def add(group: list[LineOutcome]) -> list[LineOutcome]:
+        if cfg.tier1_method == "product_page":
+            return [_add_from_product_page(driver, group[0], tel)]
+        return _inject_batch(driver, group, tel)
+
+    groups = (
+        [[x] for x in lines]
+        if cfg.tier1_method == "product_page"
+        else batches(lines, cfg.batch_size)
+    )
+    for n, batch in enumerate(groups):
         if n:
             sleep(cfg.page_delay_seconds)
-        for line in _inject_batch(driver, batch, tel):
+        for line in add(batch):
             tel.emit(
                 "cart_tier1_line",
                 asin=line.asin,
@@ -230,6 +251,25 @@ def inject(
             )
             result.put(line)
     return result
+
+
+def _add_from_product_page(driver: Driver, line: LineOutcome, tel: Telemetry) -> LineOutcome:
+    try:
+        res = cart_add.add_one(
+            driver, line.asin or "", purchase_qty(line.quantity), tel, line.vendor
+        )
+    except ValueError as err:  # not an ASIN we'd put in a URL
+        line.outcome, line.reason = "failed", str(err)[:200]
+        return line
+    if res.outcome == "added":
+        line.outcome, line.reason = "added", None
+    elif res.outcome == "already_in_cart":
+        line.outcome, line.reason = "added", "already_in_cart"
+    elif res.reason == "not_signed_in" or (res.reason or "").startswith("refused_"):
+        line.outcome, line.reason = "failed", res.reason
+    else:  # no add form (unavailable), unverified, page errors: the agent may find another way
+        line.outcome, line.reason = "needs_agent", res.reason
+    return line
 
 
 def _set(lines: list[LineOutcome], outcome: Outcome, reason: str | None) -> list[LineOutcome]:

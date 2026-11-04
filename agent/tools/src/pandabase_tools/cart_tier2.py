@@ -9,9 +9,10 @@ checkout documents, the profile lock):
 - `search` — open one search-results page (Amazon or the Whole Foods storefront) and return up to
   N candidates as JSON. No clicks. Page text is cleaned, truncated per field and labelled
   untrusted (`NOTICE`); the model picks a candidate by ASIN.
-- `add` — add one ASIN through the tier-1 add-to-cart URL and confirm control (never a product
-  page's buy box), then confirm on the cart page that the count rose. An ASIN already in the
-  cart isn't added again, so a re-run after a crash can't double a line.
+- `add` — add one ASIN through `cart_add.add_one`, the same path tier 1 uses: its product page's
+  own add-to-cart form (never Buy Now), then the cart page must show the count rose. An ASIN
+  already in the cart isn't added again, so a re-run after a crash can't double a line. Nothing
+  from the product page is returned to the model.
 """
 
 from __future__ import annotations
@@ -22,14 +23,13 @@ from dataclasses import asdict, dataclass
 from typing import Any, Literal
 from urllib.parse import urlencode
 
-from . import dom, guard
-from .browser import Driver, NotSignedIn
-from .cart_injector import PRICE_TEXT, UNAVAILABLE_TEXT, LineOutcome, _inject_batch
+from . import cart_add, dom, guard
+from .browser import Driver
+from .cart_injector import PRICE_TEXT, UNAVAILABLE_TEXT
 from .config import CartConfig
 from .telemetry import Telemetry
 
 SEARCH_URL = "https://www.amazon.com/s"
-CART_URL = "https://www.amazon.com/gp/cart/view.html"
 # Search scope per store: Whole Foods is a department of amazon.com (`i=wholefoods`).
 STORES: dict[str, str | None] = {"amazon": None, "wholefoods": "wholefoods"}
 Store = Literal["amazon", "wholefoods"]
@@ -49,7 +49,6 @@ SIZE = re.compile(
     re.I,
 )
 SPONSORED = re.compile(r"\bsponsored\b", re.I)
-SUBTOTAL_COUNT = re.compile(r"subtotal\s*\(\s*(\d+)\s+items?\s*\)", re.I)
 
 
 def clean_query(query: str) -> str:
@@ -175,77 +174,23 @@ def search(
 # Add ------------------------------------------------------------------------------------------
 
 
-def cart_state(html: str) -> tuple[int | None, set[str]]:
-    """(item count, ASINs in the active cart). Saved-for-later and recommendations don't count:
-    only `data-asin` rows inside a cart form whose `data-itemtype` isn't `saved`."""
-    root = dom.parse(html)
-    count: int | None = None
-    for node in root.iter():
-        if node.attrs.get("id") == "nav-cart-count":
-            digits = re.sub(r"\D", "", node.text())
-            count = int(digits) if digits else None
-            break
-    if count is None:
-        m = SUBTOTAL_COUNT.search(root.text())
-        count = int(m.group(1)) if m else None
-    asins: set[str] = set()
-    for form in root.find_all("form"):
-        if "/cart" not in form.attrs.get("action", ""):
-            continue
-        for node in form.iter():
-            asin = node.attrs.get("data-asin", "")
-            if ASIN.match(asin) and node.attrs.get("data-itemtype", "active") == "active":
-                asins.add(asin)
-    return count, asins
-
-
 def add(
     driver: Driver, asin: str, qty: int, store: str, cfg: CartConfig, tel: Telemetry
 ) -> dict[str, Any]:
+    """One ASIN the model chose, added through the same guarded product-page path as tier 1."""
     if not ASIN.match(asin):
         raise ValueError(f"not an ASIN: {asin!r} (10 upper-case letters/digits)")
     if not 1 <= qty <= cfg.tier2_max_qty:
         raise ValueError(f"--qty must be 1..{cfg.tier2_max_qty}")
     if store not in STORES:
         raise ValueError(f"unknown store {store!r} (amazon or wholefoods)")
-    out: dict[str, Any] = {
-        "asin": asin,
-        "quantity": qty,
-        "store": store,
-        "outcome": "failed",
-        "reason": None,
-        "cart_count_before": None,
-        "cart_count_after": None,
-    }
-    try:
-        before, in_cart = cart_state(driver.open(CART_URL).html)
-        out["cart_count_before"] = before
-        if asin in in_cart:
-            out["outcome"] = "already_in_cart"
-        else:
-            line = LineOutcome(0, asin, qty, None, None, asin, store, None, "added")
-            _inject_batch(driver, [line], tel)
-            if line.outcome != "added":
-                out["reason"] = line.reason
-            else:
-                after, now_in = cart_state(driver.open(CART_URL).html)
-                out["cart_count_after"] = after
-                rose = before is not None and after is not None and after > before
-                if rose or (asin in now_in and before is None):
-                    out["outcome"] = "added"
-                else:
-                    tel.emit("selector_error", selector="cart_count", error="unverified")
-                    out["reason"] = "unverified"
-    except NotSignedIn:
-        out["reason"] = "not_signed_in"
-    except guard.UnsafeUrl as err:
-        out["reason"] = f"refused_{err.reason}"
+    res = cart_add.add_one(driver, asin, qty, tel, store)
     tel.emit(
         "cart_tier2_line",
         asin=asin,
         vendor=store,
         quantity=qty,
-        outcome=out["outcome"],
-        error=out["reason"],
+        outcome=res.outcome,
+        error=res.reason,
     )
-    return out
+    return {"asin": asin, "quantity": qty, "store": store, **asdict(res)}

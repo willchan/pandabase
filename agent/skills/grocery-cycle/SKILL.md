@@ -130,7 +130,7 @@ pandabase-tools cart build
 ```
 
 It moves the cycle to `building`, checks prices for lines that need it, adds every line it can
-through Amazon's add-to-cart URL in the cart member's Chromium (tier 1), and prints
+from its product page in the cart member's Chromium (tier 1), and prints
 `{status, added, needs_agent, failed}`. Re-running is safe (it never adds a line twice).
 
 - `status: "skipped"` → post "⏸️ Away on build day — no cart this week." and do §1.
