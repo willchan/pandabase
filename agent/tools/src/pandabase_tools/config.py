@@ -43,6 +43,11 @@ class CartConfig(BaseModel):
     tier1_vendors: list[str] = Field(default_factory=lambda: ["amazon"])
     max_price_checks: int = Field(default=20, ge=0, le=200)
     page_delay_seconds: float = Field(default=1.5, ge=0)
+    # Tier 2 (`cart search` / `cart add`): candidates per search, characters of page text per
+    # field returned to the model, and the most units one `cart add` may put in the cart.
+    tier2_search_limit: int = Field(default=5, ge=1, le=10)
+    tier2_title_chars: int = Field(default=160, ge=40, le=300)
+    tier2_max_qty: int = Field(default=10, ge=1, le=50)
 
 
 class ReceiptsConfig(BaseModel):

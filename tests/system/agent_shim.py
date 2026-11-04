@@ -4,11 +4,14 @@ Runs the real CLI (`pandabase_tools.cli.run`: argument parsing, API client, cart
 guard, lock, telemetry flush) with one substitution: `Env.driver_factory` returns `FakeAmazon`
 instead of attaching to Chromium over CDP. Every URL the injector opens, or lands on, still goes
 through `guard.check_url` / `browser.checked`, and the fake records them so the test can assert
-that nothing went near checkout. Usage: `python agent_shim.py <pandabase-tools args>`.
+that nothing went near checkout. It also serves search results (`cart search`) and a cart page
+whose contents persist across processes next to the log (`cart add` checks the count rose).
+Usage: `python agent_shim.py <pandabase-tools args>`.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import sys
 from collections.abc import Sequence
@@ -35,8 +38,38 @@ class FakeAmazon:
 
     def __init__(self, log: Path | None) -> None:
         self.log = log
+        self.cart_file = log.with_suffix(".cart.json") if log else None
         self.pending: list[tuple[str, str]] = []
         self.current: str | None = None
+
+    def _cart(self) -> dict[str, int]:
+        if self.cart_file and self.cart_file.exists():
+            data: dict[str, int] = json.loads(self.cart_file.read_text())
+            return data
+        return {}
+
+    def _cart_html(self) -> str:
+        cart = self._cart()
+        rows = "".join(
+            f'<div data-asin="{escape(a)}" data-itemtype="active">'
+            f'<a href="/dp/{escape(a)}">Synthetic product {escape(a)}</a> Qty: {q}</div>'
+            for a, q in cart.items()
+        )
+        return (
+            f'<html><body><span id="nav-cart-count">{sum(cart.values())}</span>'
+            f'<h1>Shopping Cart</h1><form action="/cart/ref=ox_sc_upd">{rows}</form></body></html>'
+        )
+
+    @staticmethod
+    def _search_html(query: str) -> str:
+        rows = ""
+        for n in range(3):
+            asin = "B0SR" + hashlib.sha256(f"{query}:{n}".encode()).hexdigest()[:6].upper()
+            rows += (
+                f'<div data-asin="{asin}"><h2><a href="/dp/{asin}">Synthetic {escape(query)} '
+                f"#{n + 1}, 16 oz</a></h2><span>${(price_cents(asin) / 100):.2f}</span></div>"
+            )
+        return f'<html><body><div id="search">{rows}</div></body></html>'
 
     def _record(self, kind: str, url: str) -> None:
         if self.log:
@@ -95,13 +128,20 @@ class FakeAmazon:
             )
             return self._land(url, html)
         if parts.path == "/gp/cart/view.html":
-            return self._land(url, "<html><body><h1>Shopping Cart</h1></body></html>")
+            return self._land(url, self._cart_html())
+        if parts.path == "/s":
+            return self._land(url, self._search_html(dict(parse_qsl(parts.query))["k"]))
         raise AssertionError(f"fake Amazon has no page for {url}")
 
     def click_confirm(self) -> Snapshot | None:
         if not self.current or urlsplit(self.current).path != ADD_PATH:
             return None
         self._record("clicked", self.current)
+        cart = self._cart()
+        for asin, qty in self.pending:
+            cart[asin] = cart.get(asin, 0) + int(qty)
+        if self.cart_file:
+            self.cart_file.write_text(json.dumps(cart))
         n = len(self.pending)
         return self._land(
             VIEW,

@@ -429,7 +429,7 @@ purchase or an older count, low otherwise (`web/lib/domain/lookup.ts`).
 Candidates = products of the item with stance ≠ rejected and vendor in the cart vendor set.
 
 1. One candidate → choose it.
-2. Several → `needs_price_check = true`; the agent reads current prices (tier 2 browser) and posts
+2. Several → `needs_price_check = true`; `cart build` reads current prices on the product pages and posts
    `price_quotes`. Missing quotes fall back to `last_price_cents`.
 3. `preferred` = stance preferred, else highest `preference_score`, else most `times_bought`
    (ties by id). If the preferred or cheapest price is unknown, choose `preferred`.
@@ -641,7 +641,7 @@ with `AGENT_API_TOKEN`. Discord I/O (thread creation, replies, ✅ reactions) us
 
 | Skill | Trigger | Does |
 |---|---|---|
-| `grocery-cycle` | automations Fri 18:00, Sat 10:00, Mon 09:00; replies in the cycle thread | Open cycles (thread per cycle), record list edits/skips/away/other-store, Friday nudge (incl. freezer), Saturday build (`cart build` → tier-2 fallback in the agent's browser → `cart finish` → summary) |
+| `grocery-cycle` | automations Fri 18:00, Sat 10:00, Mon 09:00; replies in the cycle thread | Open cycles (thread per cycle), record list edits/skips/away/other-store, Friday nudge (incl. freezer), Saturday build (`cart build` → tier-2 fallback with `cart search` / `cart add`, never the browser tool → `cart finish` → summary) |
 | `discord-intake` | photo or inventory text in `#pandabase` | Photos: `photo submit` (classify, upload, create job); text purchases, "we're out", "froze X", "never buy X" → inventory events / product reject. Job results are posted by a **command automation** (`pandabase-tools jobs replies` every 5 min, no model call) |
 | `digital-receipt-scraper` | automations daily 21:00 (cart member), Sun 21:00 (other member); backfill on request | `receipts sweep` per member profile → `/api/receipts/ingest`; agent extracts zero-ASIN pages; a finished backfill ends with `POST /api/catalog/merge-suggestions/run` |
 | `item-lookup` | "do we have X?" anywhere the bot is addressed | `/api/items/lookup` → `matches[0].text` |
@@ -664,11 +664,27 @@ JSON on stdout; exit 0 ok, 1 error, 2 usage, 3 profile locked, 4 refused URL):
   name fallback) and verify ("added to cart" text, or a cart page without an add form).
   Outputs `{added, needs_agent, failed}`; a page with no add form and no "added" signal is
   "layout changed" → whole batch `needs_agent` + `selector_error`. Lines without an ASIN, free
-  text, and vendors not enabled for tier 1 go straight to `needs_agent`; the skill adds them via
-  OpenClaw's browser (tier 2), then `cart finish` posts `cart-result`. A build state file makes
+  text, and vendors not enabled for tier 1 go straight to `needs_agent`; the skill adds them with
+  `cart search` / `cart add` (tier 2, below), then `cart finish` posts `cart-result`. A build state file makes
   re-runs resume without adding a line twice. Whole Foods via the add URL is **unverified**:
   `cart.wholefoods_tier1` defaults to `false` (WF lines → `needs_agent`) until `make smoke`
   proves it.
+- `cart_tier2.py` (`cart search`, `cart add`) — tier 2 on the same guarded CDP driver, so the
+  agent never needs OpenClaw's `browser` tool (§10 #52). `cart search --query Q [--store
+  amazon|wholefoods] [--limit N]` opens one results page (`/s?k=…`, Whole Foods `&i=wholefoods`;
+  the query is reduced to words first) and returns ≤ `cart.tier2_search_limit` (5) candidates
+  `{asin, title, size, price_cents, unit_price, availability, sponsored}` — a result is the nearest
+  `data-asin` block, else the widest ancestor mentioning only that ASIN; swatch links inside
+  another result are not candidates. No clicks. Page text is untrusted: control/format characters
+  stripped, one line, ≤ `cart.tier2_title_chars` (160) per field, under a `notice` saying it is
+  data, not instructions; the model chooses by ASIN. `cart add --asin X --qty N` reads the cart
+  page (`nav-cart-count`, else "Subtotal (N items)"; active rows = `data-asin` in a `/cart` form,
+  not `data-itemtype="saved"`): an ASIN already there is `already_in_cart` (a re-run never
+  doubles a line). Otherwise it uses tier 1's add-to-cart URL + confirm click for that one ASIN
+  (never a product page's buy box) and re-reads the cart: `added` only if the count rose,
+  else `failed: unverified`. ASIN must be 10 upper-case alphanumerics, `1 ≤ qty ≤
+  cart.tier2_max_qty` (10). Telemetry `cart_tier2_search {store, results}` and `cart_tier2_line
+  {asin, vendor, quantity, outcome, error}`.
 - `receipt_parser.py` (`receipts sweep [--backfill]`) — attaches over CDP to a member's profile.
   Collect phase: walk order history newest-first (`orderID=` links; card = widest ancestor
   mentioning only that order) back to the cursor date minus a 14-day overlap (no cursor: 30
@@ -684,18 +700,26 @@ JSON on stdout; exit 0 ok, 1 error, 2 usage, 3 profile locked, 4 refused URL):
   description → default `paper_receipt`), presigned upload, `POST /api/jobs`;
   `--media-key --job-type` re-files a photo a human corrected.
 - `guard.py` — every URL the tools open, and every page they land on, must be `https` on
-  `www.amazon.com`/`amazon.com` and not match checkout/payment/slot/sign-in patterns; the CDP
-  driver also installs it as a Playwright route that aborts such document requests. The tools
+  `www.amazon.com`/`amazon.com` and not match checkout/payment/slot/sign-in patterns (Buy Now's
+  `handle-buy-box`, `buy-now`, `/turbo…`, `/1-click` count as checkout); the CDP driver also
+  installs it as a Playwright route that aborts such document requests. The only control the
+  driver ever clicks is an add-to-cart confirm, and `browser.control_allowed` refuses any whose
+  id/name/value/label/text says Buy Now, 1-Click, Turbo, checkout, place order or subscribe, or
+  whose form action fails the guard (the injector's page analysis applies the same rule). The tools
   never launch a browser, sign in, or store credentials (signed out → `not_signed_in`).
-- `lock.py` — per-profile lease file in the state dir: commands hold it while driving a profile;
-  the agent takes it (`lock acquire`/`release`) around tier-2 browsing.
+- `lock.py` — per-profile lease file in the state dir: every browser command (including
+  `cart search` / `cart add`) holds it while driving a profile; `lock acquire`/`release` remain
+  for a human doing manual work on a profile.
 
 Config: `agent/pandabase.config.example.json` — API base URL, web URL, household TZ, channel IDs
 (`cycle_channel`, `intake_channel`, `ops_channel` — all `#pandabase` in v1), members ↔ Discord
 IDs ↔ profile name (+ `cart_member`, `receipt_sweep`), tool tunables (`cart.*`, `receipts.*`),
 state and diagnostics dirs. `agent/profiles.example.json` maps profiles to CDP URLs
-(`http://127.0.0.1:<port>`), user-data dirs and the matching OpenClaw browser profile (an
-`attachOnly` remote-CDP profile on the same port, for tier 2). `agent/cron.example.json`
+(`http://127.0.0.1:<port>`) and user-data dirs (an old `openclaw_browser_profile` key is accepted and
+ignored: tier 2 moved into the tools). The agent's OpenClaw config should deny
+`["group:web", "browser"]` (`tools.deny`, in `agent/openclaw.pandabase.example.json5`): a local
+reply model with raw web/browser tools next to a signed-in Amazon session is the injection path
+§10 #52 closes. `agent/cron.example.json`
 documents the OpenClaw automations (`openclaw automations add --cron … --tz
 America/Los_Angeles --session isolated --message "Use $<skill>: …"`; one command payload).
 OpenClaw keeps automations in its own state DB, so M8 registers them with the CLI. Skills are
@@ -741,7 +765,8 @@ error?}` from every server action. The report reads these client metrics (payloa
 `vlm_inference {model, prompt_version, latency_ms, totals_check, parse_failure}`,
 `vlm_parse_failure`, `selector_error {selector, error, page}`, `price_lookup_failed {asin,
 product_id, error}`, `cart_tier1_line {asin, item_id, product_id, vendor, outcome, error}`,
-`clarifying_question {question}`, `photo_classified {job_type, basis}` and `photo_reclassified
+`cart_tier2_search {store, results}`, `cart_tier2_line {asin, vendor, quantity, outcome, error}`
+(cart-injection extract and tool counts), `clarifying_question {question}`, `photo_classified {job_type, basis}` and `photo_reclassified
 {to_job_type}` (UX section: photos by classification basis and human re-files). The agent
 tools also emit `receipt_sweep {member, mode, pages, ingested, duplicates, pending, needs_agent,
 errors, complete}` (stored for ad-hoc queries; no report section). The worker's `vlm_inference` /
@@ -932,7 +957,7 @@ Setup is the README checklist; every step is a `make` target over an idempotent 
   `make install-agent-cron` (list, then `edit` by name or `add`; receipt sweeps generated per
   member from `receipt_sweep`; the job-replies command payload runs `scripts/ops/agent-run.sh`,
   which reads the token from `.env` so it isn't stored in OpenClaw's automation DB). Gateway
-  config (Discord channel policy, Ollama media model, browser profiles) is a reviewed
+  config (Discord channel policy, Ollama media model, `tools.deny` for web/browser) is a reviewed
   `openclaw config patch` from `agent/openclaw.pandabase.example.json5`.
 - **launchd:** one Chromium LaunchAgent per profile (`ops/launchd/com.pandabase.chromium.plist.template`,
   loopback-only DevTools port, `KeepAlive`), and `com.pandabase.ollama-env` re-applying
@@ -977,7 +1002,7 @@ docker-compose.yml (+ docker-compose.build.yml), Makefile, CLAUDE.md, README.md,
 |---|---|---|
 | 1 | One household, `member` table, Google allowlist | Two users; no tenancy complexity; need Discord↔Google identity mapping for attribution |
 | 2 | Ship a skill pack for the existing OpenClaw, not a new deployment | Family agent already runs on the Mac Mini; OpenClaw skills are `SKILL.md`, not YAML workflows |
-| 3 | Cart tier 1 = add-to-cart URL by ASIN; tier 2 = agent's LLM browser | Minimizes DOM coupling; agent self-heals when Amazon changes |
+| 3 | Cart tier 1 = add-to-cart URL by ASIN; tier 2 = the agent picks an ASIN from guarded search results (was: agent's LLM browser; see #52) | Minimizes DOM coupling; the model only judges which product matches |
 | 4 | Tools attach via CDP to existing logged-in profiles | No credential/2FA handling in PandaBase; shares the agent's session |
 | 5 | Cart only, never checkout | Safety; humans keep control of spend |
 | 6 | Ingest only Delivered/Picked-up orders; dedupe by order id | Substitutions are reflected; acquisition date is real; retries safe |
@@ -1026,3 +1051,4 @@ docker-compose.yml (+ docker-compose.build.yml), Makefile, CLAUDE.md, README.md,
 | 49 | Vercel Preview has its own API tokens, cron secret, `AUTH_SECRET`, allowlist and R2 bucket (scoped token); only the Google client, R2 account id and time zone are shared | Previews run unreviewed PR code, so a preview secret must be worthless on production and previews must not reach the household's photos; the Google secret alone can't sign anyone in (redirect URIs + `AUTH_SECRET`) |
 | 50 | PR previews are tested end to end (tier A′) by re-running tier A's steps in a remote mode against the real deployment, triggered by Vercel's `repository_dispatch` (reported as a commit status), on a preview DB that each run resets — guarded by two independent "preview" signals; reported, not required yet | Tier A can't see Vercel, Turso or R2; reusing its steps keeps one test of the week; the dispatch waits for the real build without polling, and runs `main`'s workflow definition; requiring it waits until it has proven stable |
 | 51 | Production gets a read-only smoke after every web deploy that reports (job, Discord, telemetry) but never rolls back | A smoke that can write could damage the household's data; rollback has side effects (Vercel stops auto-promoting, old env vars) that a human should choose; the Mac Mini already rolls back its own worker |
+| 52 | Tier 2 runs only through `pandabase-tools cart search` / `cart add` on the guarded CDP driver; the agent's OpenClaw denies `group:web` and `browser` | A local model with a raw browser on the signed-in Amazon profile could be steered by product-page text to Buy Now / checkout (OpenClaw's browser has no URL denylist; audit `models.small_params`). Search returns size-limited, labelled-untrusted JSON; add is by ASIN through tier 1's guarded path with Buy Now controls deny-listed and the cart count verified |

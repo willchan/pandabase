@@ -1,9 +1,9 @@
 """Per-profile lease lock: one driver per Chromium profile at a time (DESIGN §6).
 
 A lease is a JSON file `{owner, pid, expires_at}` in the state dir. The tools take it for the
-duration of a command (`pid` = this process); the agent takes it explicitly with
-`pandabase-tools lock acquire` before driving the profile through OpenClaw's browser tool for
-tier-2 fallback, and releases it after. A lease whose expiry passed or whose process is gone is
+duration of a command (`pid` = this process), tier 2's `cart search` / `cart add` included; a
+human doing manual work on a profile can take it with `pandabase-tools lock acquire` and release
+it after. A lease whose expiry passed or whose process is gone is
 stale and may be taken over. Read-modify-write is serialized with `flock` on a sidecar file.
 """
 

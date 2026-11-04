@@ -10,9 +10,11 @@ and closes only that tab. Tests use a fixture-backed fake with the same protocol
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass
 from types import TracebackType
 from typing import TYPE_CHECKING, Protocol, Self
+from urllib.parse import urljoin
 
 from . import guard
 
@@ -23,6 +25,35 @@ if TYPE_CHECKING:
 # Located by form action and input type, with an accessible-name fallback — no class names.
 CONFIRM_SELECTOR = "form[action*='/cart/add'] [type=submit], form[action*='/cart/add'] button"
 CONFIRM_NAME = re.compile(r"^\s*(continue|add to (your )?cart|add all to cart)\s*$", re.I)
+# Controls that must never be clicked, whatever page we're on and whatever the model asked for:
+# Buy Now / 1-Click / Turbo checkout / anything that orders or checks out. Matched against a
+# control's id, name, value, label and text; its form's action also has to pass the URL guard.
+DENY_CONTROL = re.compile(
+    r"buy[\s._-]*now|turbo|check[\s_-]*out|place[\s_-]*(?:your[\s_-]*)?order|"
+    r"(?:1|one)[\s_-]*click|buy[\s_-]*box|subscribe",
+    re.I,
+)
+DESCRIBE_JS = """e => ({
+  id: e.id || "", name: e.getAttribute("name") || "", value: e.value || "",
+  "aria-label": e.getAttribute("aria-label") || "", title: e.getAttribute("title") || "",
+  text: (e.innerText || e.textContent || "").slice(0, 200),
+  formaction: e.getAttribute("formaction") || "",
+  form_action: e.form ? (e.form.getAttribute("action") || "") : ""
+})"""
+_DESC_TEXT = ("id", "name", "value", "aria-label", "title", "text")
+
+
+def control_allowed(desc: Mapping[str, str]) -> bool:
+    """May the tools click this control? Never Buy Now / 1-Click / checkout (PRD §3 #4)."""
+    if DENY_CONTROL.search(" ".join(desc.get(k) or "" for k in _DESC_TEXT)):
+        return False
+    for key in ("formaction", "form_action"):
+        target = desc.get(key) or ""
+        if target and guard.classify_url(urljoin("https://www.amazon.com/", target)):
+            return False
+        if DENY_CONTROL.search(target):
+            return False
+    return True
 
 
 @dataclass(frozen=True)
@@ -112,11 +143,15 @@ class CdpDriver:
         return self._snapshot()
 
     def click_confirm(self) -> Snapshot | None:
-        control = self.page.locator(CONFIRM_SELECTOR)
-        if control.count() == 0:
-            control = self.page.get_by_role("button", name=CONFIRM_NAME)
-        if control.count() == 0:
-            return None
-        control.first.click()
-        self.page.wait_for_load_state("domcontentloaded")
-        return self._snapshot()
+        """Click the first add-to-cart control that passes `control_allowed`; never Buy Now."""
+        for found in (
+            self.page.locator(CONFIRM_SELECTOR),
+            self.page.get_by_role("button", name=CONFIRM_NAME),
+        ):
+            for i in range(found.count()):
+                control = found.nth(i)
+                if control_allowed(control.evaluate(DESCRIBE_JS)):
+                    control.click()
+                    self.page.wait_for_load_state("domcontentloaded")
+                    return self._snapshot()
+        return None

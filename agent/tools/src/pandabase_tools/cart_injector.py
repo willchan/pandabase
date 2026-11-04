@@ -4,8 +4,9 @@ Tier 1 opens `https://www.amazon.com/gp/aws/cart/add.html?ASIN.1=…&Quantity.1=
 vendor), checks which ASINs the confirm page offers, clicks the single confirm control and looks
 for an "added" signal. Lines it can't do this way — no ASIN, a vendor not enabled for tier 1, an
 ASIN the page didn't offer, an unrecognized page — come back as `needs_agent` for the skill's
-tier-2 fallback (OpenClaw browser tool). Errors are `failed`. Nothing here goes near checkout
-(`guard`), and a build resumes from its state file instead of adding lines to the cart twice.
+tier-2 fallback (`cart search` / `cart add` in `cart_tier2.py`). Errors are `failed`. Nothing
+here goes near checkout (`guard`), and a build resumes from its state file instead of adding
+lines to the cart twice.
 """
 
 from __future__ import annotations
@@ -26,7 +27,7 @@ from urllib.parse import urlencode, urlsplit
 from . import contracts as c
 from . import dom, guard
 from .api import ApiClient
-from .browser import Driver, NotSignedIn, Snapshot
+from .browser import Driver, NotSignedIn, Snapshot, control_allowed
 from .config import CartConfig
 from .telemetry import Telemetry
 
@@ -153,8 +154,13 @@ def _add_forms(root: dom.Node) -> list[dom.Node]:
 
 
 def _has_submit(form: dom.Node) -> bool:
+    """Does the form have a submit the driver may click (not Buy Now / 1-Click / checkout)?"""
+    action = form.attrs.get("action", "")
     return any(
-        n.tag == "button" or (n.tag == "input" and n.attrs.get("type", "").lower() == "submit")
+        (n.tag == "button" or (n.tag == "input" and n.attrs.get("type", "").lower() == "submit"))
+        and control_allowed(
+            {**n.attrs, "text": n.text(), "form_action": action}  # same fields as DESCRIBE_JS
+        )
         for n in form.iter()
     )
 

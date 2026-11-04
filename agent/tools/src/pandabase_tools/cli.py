@@ -27,9 +27,9 @@ from zoneinfo import ZoneInfo
 from pydantic import BaseModel, ValidationError
 
 from . import api as api_mod
-from . import cart_injector, contracts, guard, photos, receipt_parser
+from . import cart_injector, cart_tier2, contracts, guard, photos, receipt_parser
 from . import config as config_mod
-from .browser import CdpDriver, Driver
+from .browser import CdpDriver, Driver, NotSignedIn
 from .lock import ProfileLock, ProfileLocked
 from .telemetry import Telemetry
 
@@ -172,6 +172,33 @@ def cmd_cart_finish(env: Env) -> Any:
         return cart_injector.finish(env.api, a.cycle_id, state, tier2, a.order_id or None)
     except ValueError as err:
         raise CliError({"error": str(err)}) from err
+
+
+def cmd_cart_search(env: Env) -> Any:
+    """Tier 2: search candidates as JSON (one results page, no clicks)."""
+    a = env.args
+    member = _member(env, a.member)
+    profile = env.loaded.profile(member)
+    with (
+        env.lock().held(member.profile, "cart search"),
+        env.driver_factory(profile.cdp_url) as driver,
+    ):
+        try:
+            return cart_tier2.search(driver, a.query, a.store, env.cfg.cart, env.tel, a.limit)
+        except NotSignedIn as err:
+            raise CliError({"error": "not_signed_in", "member": member.name}) from err
+
+
+def cmd_cart_add(env: Env) -> Any:
+    """Tier 2: add one ASIN via the guarded add-to-cart path and check the cart count rose."""
+    a = env.args
+    member = _member(env, a.member)
+    profile = env.loaded.profile(member)
+    with (
+        env.lock().held(member.profile, "cart add"),
+        env.driver_factory(profile.cdp_url) as driver,
+    ):
+        return cart_tier2.add(driver, a.asin, a.qty, a.store, env.cfg.cart, env.tel)
 
 
 def cmd_cart_url(env: Env) -> Any:
@@ -405,6 +432,18 @@ def build_parser() -> argparse.ArgumentParser:
     f.add_argument("--outcomes", help='{"<line index>": "tier2"|"failed"}')
     f.add_argument("--order-id", action="append")
     f.set_defaults(fn=cmd_cart_finish)
+    se = cart.add_parser("search", help="tier 2: search results as JSON candidates (no clicks)")
+    se.add_argument("--member", help="default: the cart member")
+    se.add_argument("--query", required=True)
+    se.add_argument("--store", choices=sorted(cart_tier2.STORES), default="amazon")
+    se.add_argument("--limit", type=int, help="≤ cart.tier2_search_limit")
+    se.set_defaults(fn=cmd_cart_search)
+    ad = cart.add_parser("add", help="tier 2: add one ASIN (guarded add-to-cart, never checkout)")
+    ad.add_argument("--member", help="default: the cart member")
+    ad.add_argument("--asin", required=True)
+    ad.add_argument("--qty", type=int, default=1)
+    ad.add_argument("--store", choices=sorted(cart_tier2.STORES), default="amazon")
+    ad.set_defaults(fn=cmd_cart_add)
     u = cart.add_parser("url", help="print the tier-1 add-to-cart URL (smoke)")
     u.add_argument("asin", nargs="+", metavar="ASIN[:QTY]")
     u.set_defaults(fn=cmd_cart_url)
@@ -455,7 +494,7 @@ def build_parser() -> argparse.ArgumentParser:
     te.add_argument("--payload", help="JSON object")
     te.set_defaults(fn=cmd_telemetry_emit)
 
-    lk = sub.add_parser("lock", help="per-profile lease (tier-2 browser work)")
+    lk = sub.add_parser("lock", help="per-profile lease (manual browser work on a profile)")
     lk_sub = lk.add_subparsers(dest="lock_cmd", required=True)
     la = lk_sub.add_parser("acquire")
     la.add_argument("--member", required=True)

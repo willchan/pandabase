@@ -1086,6 +1086,14 @@ branch `claude/system-e2e`). Details, the bugs found and the security review are
   (GHCR's default for a public repo's package): the Mac Mini needs no `read:packages` token or
   `docker login`, so README step 15.4 is now "nothing to do". The guide's unverified list became
   *Notes from the first run*.
+- **Guarded tier 2 (follow-up PR, 2026-11-04):** the first Mac setup's OpenClaw audit flagged
+  `models.small_params` (a local 27B reply model with web/browser tools, no sandbox, next to the
+  signed-in Amazon Chromium), so `browser` and `group:web` were denied and tier 2 stopped working.
+  Tier 2 now runs through `pandabase-tools cart search` / `cart add` (DESIGN §6, §10 #52) and the
+  skill forbids the browser tool; `openclaw.pandabase.example.json5` ships the deny list and no
+  longer defines browser profiles. Not verified here: live Amazon / Whole Foods search markup
+  (`data-asin` results, `nav-cart-count`, `data-itemtype` cart rows) and whether the add URL puts a
+  Whole Foods ASIN in the Whole Foods cart — the owner tries `cart search` / `cart add` on the Mac.
 - **Members on first sign-in (follow-up PR):** `currentMember()` creates the `member` row for an
   allowed email on its first page view (`ensureMember`; DESIGN §3.1, §10 #42), replacing the
   `NotAMember` dead end. The API still answers 403 `not a household member` for a session without

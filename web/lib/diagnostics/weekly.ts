@@ -622,7 +622,13 @@ export async function renderWeekly(
 
   // 6. Cart injection ----------------------------------------------------------------------------
   const cartLines = metric("cart_line_result");
-  const toolErrors = metric("selector_error", "price_lookup_failed", "cart_tier1_line");
+  const toolErrors = metric(
+    "selector_error",
+    "price_lookup_failed",
+    "cart_tier1_line",
+    "cart_tier2_search",
+    "cart_tier2_line",
+  );
   extracts["cart_injection.jsonl"] = [...cartLines, ...toolErrors].map((t) => ({
     at: t.at,
     metric: t.metric,

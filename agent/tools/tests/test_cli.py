@@ -355,3 +355,47 @@ def test_main_prints_json(capsys: pytest.CaptureFixture[str]) -> None:
     assert json.loads(capsys.readouterr().out)["url"].startswith(
         "https://www.amazon.com/gp/aws/cart/add.html?"
     )
+
+
+def test_cart_search_and_add_commands(config: Path) -> None:
+    """Tier 2 through the guarded tools: search (no clicks), then add one ASIN by id."""
+    from pandabase_tools.cart_tier2 import search_url
+
+    api = FakeApi({"POST /api/telemetry": lambda b: {"accepted": len(b["events"])}})
+    url = search_url("cake flour", "wholefoods")
+    driver = FakeDriver({url: (url, "search_results.html")})
+    argv = ["cart", "search", "--query", "cake flour", "--store", "wholefoods", "--limit", "2"]
+    code, out = run(config, argv, api, driver)
+    assert code == 0, out
+    assert [c["asin"] for c in out["candidates"]] == ["B0SYNTH201", "B0SYNTH202"]
+    assert driver.clicks == 0
+
+    views = iter(["cart_view.html", "cart_view_after.html"])
+    add_driver = FakeDriver(
+        lambda u: (
+            (u, "cart_add_confirm_one.html")
+            if u.startswith(ADD)
+            else ((u, next(views)) if u == VIEW else None)
+        ),
+        lambda _: (VIEW, "cart_added.html"),
+    )
+    argv = ["cart", "add", "--member", "will", "--asin", "B0SYNTH202", "--qty", "1"]
+    code, out = run(config, argv, api, add_driver)
+    assert code == 0 and out["outcome"] == "added", out
+    add_driver.assert_never_checkout()
+    metrics = [e["metric_type"] for b in api.bodies("POST /api/telemetry") for e in b["events"]]
+    assert metrics == ["cart_tier2_search", "cart_tier2_line"]
+
+
+def test_cart_add_takes_the_profile_lock(config: Path) -> None:
+    code, _ = run(
+        config, ["lock", "acquire", "--member", "will", "--owner", "receipts"], FakeApi({})
+    )
+    assert code == 0
+    code, out = run(config, ["cart", "add", "--asin", "B0SYNTH202"], FakeApi({}), FakeDriver({}))
+    assert code == 3 and out["owner"] == "receipts"
+
+
+def test_cart_add_rejects_a_bad_asin(config: Path) -> None:
+    code, out = run(config, ["cart", "add", "--asin", "../checkout"], FakeApi({}), FakeDriver({}))
+    assert code == 1 and "ASIN" in out["error"]

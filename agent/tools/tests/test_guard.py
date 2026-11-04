@@ -7,7 +7,7 @@ from dataclasses import dataclass
 import pytest
 
 from pandabase_tools import guard
-from pandabase_tools.browser import CdpDriver, NotSignedIn, Snapshot, checked
+from pandabase_tools.browser import CdpDriver, NotSignedIn, Snapshot, checked, control_allowed
 from pandabase_tools.cart_injector import add_url
 
 CHECKOUT = [
@@ -115,3 +115,100 @@ def test_cdp_driver_refuses_before_navigating() -> None:
     driver = CdpDriver("http://127.0.0.1:9222")  # never entered: no browser needed
     with pytest.raises(guard.UnsafeUrl):
         driver.open(CHECKOUT[1])
+
+
+# Tier 2 (`cart add`) shares this guard: Buy Now / 1-Click / Turbo checkout are refused too.
+BUY_NOW = [
+    "https://www.amazon.com/gp/product/handle-buy-box/ref=dp_start-bbf_1_glance",
+    "https://www.amazon.com/checkout/turbo/entry?asin=B0SYNTH001",
+    "https://www.amazon.com/gp/buy-now/B0SYNTH001",
+    "https://www.amazon.com/gp/turbo/checkout",
+    "https://www.amazon.com/gp/1-click/order",
+]
+
+
+@pytest.mark.parametrize("url", BUY_NOW)
+def test_refuses_buy_now_and_one_click(url: str) -> None:
+    assert guard.classify_url(url) == "checkout"
+
+
+def test_search_pages_are_allowed() -> None:
+    assert guard.classify_url("https://www.amazon.com/s?k=cake+flour&i=wholefoods") is None
+
+
+DENIED_CONTROLS = [
+    {"name": "submit.buy-now", "value": "Buy Now"},
+    {"id": "turbo-checkout-pyo-button", "text": "Place your order"},
+    {"text": "Buy now with 1-Click"},
+    {"name": "proceedToRetailCheckout", "value": "Proceed to checkout"},
+    {"value": "Continue", "form_action": "/gp/product/handle-buy-box/ref=x"},
+    {"value": "Continue", "formaction": "/gp/buy/spc/handlers/display.html"},
+]
+ALLOWED_CONTROLS = [
+    {"name": "add", "value": "Continue", "form_action": "/gp/aws/cart/add.html"},
+    {"text": "Add to cart", "form_action": "/gp/aws/cart/add.html"},
+]
+
+
+@pytest.mark.parametrize("desc", DENIED_CONTROLS)
+def test_buy_now_and_checkout_controls_are_never_clickable(desc: dict[str, str]) -> None:
+    assert not control_allowed(desc)
+
+
+@pytest.mark.parametrize("desc", ALLOWED_CONTROLS)
+def test_add_to_cart_controls_are_clickable(desc: dict[str, str]) -> None:
+    assert control_allowed(desc)
+
+
+class _Loc:
+    """Just enough of a Playwright locator for `CdpDriver.click_confirm`."""
+
+    def __init__(self, descs: list[dict[str, str]], clicked: list[int], base: int = 0) -> None:
+        self.descs, self.clicked, self.base = descs, clicked, base
+
+    def count(self) -> int:
+        return len(self.descs)
+
+    def nth(self, i: int) -> _Loc:
+        return _Loc([self.descs[i]], self.clicked, self.base + i)
+
+    def evaluate(self, _js: str) -> dict[str, str]:
+        return self.descs[0]
+
+    def click(self) -> None:
+        self.clicked.append(self.base)
+
+
+class _Page:
+    def __init__(self, descs: list[dict[str, str]]) -> None:
+        self.descs = descs
+        self.clicked: list[int] = []
+        self.url = "https://www.amazon.com/gp/cart/view.html"
+
+    def locator(self, _sel: str) -> _Loc:
+        return _Loc(self.descs, self.clicked)
+
+    def get_by_role(self, *_a: object, **_k: object) -> _Loc:
+        return _Loc([], self.clicked)
+
+    def wait_for_load_state(self, *_a: object) -> None:
+        return None
+
+    def content(self) -> str:
+        return ""
+
+
+def test_cdp_click_confirm_skips_buy_now_and_clicks_continue() -> None:
+    driver = CdpDriver("http://127.0.0.1:9222")
+    page = _Page([DENIED_CONTROLS[0], ALLOWED_CONTROLS[0]])
+    driver._page = page  # type: ignore[assignment]
+    assert driver.click_confirm() is not None
+    assert page.clicked == [1]
+
+
+def test_cdp_click_confirm_clicks_nothing_when_only_buy_now() -> None:
+    driver = CdpDriver("http://127.0.0.1:9222")
+    page = _Page([DENIED_CONTROLS[0], DENIED_CONTROLS[2]])
+    driver._page = page  # type: ignore[assignment]
+    assert driver.click_confirm() is None
+    assert page.clicked == []
