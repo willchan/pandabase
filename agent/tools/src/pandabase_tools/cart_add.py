@@ -2,10 +2,12 @@
 
 Amazon's `/gp/aws/cart/add.html?ASIN.1=…` stopped adding anything (2026-11-04: it redirects to
 the cart), so each line is added the way a person would: open `/dp/{ASIN}` and use *that ASIN's
-own* add control — its add-to-cart form (action `/cart/add-to-cart…`, an input whose value is the
-ASIN, an allowed submit), or on a Whole Foods page the buy-box widget bound to the ASIN (no form
-there; the page's only add forms are sponsored `spAddToCart` ads, which are never used).
-`browser.control_allowed` never lets Buy Now / 1-Click / Turbo / subscribe be the control. Then
+own* add control — the buy box's "Add to cart" (a `handle-buy-box` form; only its
+`submit.add-to-cart` button, never Buy Now, never the subscription form's), else its add-to-cart
+form (action `/cart/add-to-cart…`, carrying that ASIN alone, not sponsored), or on a Whole Foods
+page the buy-box widget bound to the ASIN (no form there; the page's only add forms are sponsored
+`spAddToCart` ads, which are never used). `browser.control_allowed` / `buy_box_add_allowed`
+never let Buy Now / 1-Click / Turbo / subscribe be the control. Then
 re-read the vendor's cart and count it as added only if the ASIN is now one of its active rows
 (`#nav-cart-count` is not trusted: live, it jumped 1 → 4 for one item). An ASIN already in the
 active cart is not added again, so a re-run never doubles a line. Every navigation goes through
@@ -23,6 +25,8 @@ from .browser import (
     ADD_FORM_ACTION,
     ASIN_INPUT,
     ASIN_RE,
+    BUY_BOX_ADD_NAME,
+    BUY_BOX_FORM_ACTION,
     SPONSORED_FORM,
     WF_BUTTON_ID,
     WF_BUY_BOX_IDS,
@@ -30,8 +34,10 @@ from .browser import (
     WF_WIDGET_ID,
     Driver,
     NotSignedIn,
+    buy_box_add_allowed,
     buy_box_bound,
     control_allowed,
+    subscription_form,
 )
 from .telemetry import Telemetry
 
@@ -82,6 +88,34 @@ def sponsored(form: dom.Node) -> bool:
     )
 
 
+def _carried_asins(form: dom.Node) -> set[str]:
+    return {
+        n.attrs.get("value", "")
+        for n in form.iter()
+        if n.tag == "input" and ASIN_INPUT.search(n.attrs.get("name", ""))
+    }
+
+
+def buy_box_add(root: dom.Node, asin: str) -> dom.Node | None:
+    """The buy box's own "Add to cart" for `asin` (`CdpDriver` applies the same rule): the
+    `submit.add-to-cart` control of a `handle-buy-box` form carrying `asin` alone and no
+    subscription, passing `buy_box_add_allowed`. Buy Now in the same form is never it."""
+    for form in root.find_all("form"):
+        if BUY_BOX_FORM_ACTION not in form.attrs.get("action", ""):
+            continue
+        names = [
+            n.attrs.get("name", "") for n in form.iter() if n.tag in ("input", "select", "button")
+        ]
+        if _carried_asins(form) != {asin} or subscription_form(names):
+            continue
+        for control in _submits(form):
+            if control.attrs.get("name") == BUY_BOX_ADD_NAME and buy_box_add_allowed(
+                _describe(control)
+            ):
+                return control
+    return None
+
+
 def add_form(root: dom.Node, asin: str) -> dom.Node | None:
     """The add-to-cart form for `asin` with a control the driver may click, if the page has one.
     Sponsored ads are never it, even for the same ASIN."""
@@ -89,12 +123,7 @@ def add_form(root: dom.Node, asin: str) -> dom.Node | None:
         action = form.attrs.get("action", "")
         if ADD_FORM_ACTION not in action or sponsored(form):
             continue
-        carried = {
-            n.attrs.get("value", "")
-            for n in form.iter()
-            if n.tag == "input" and ASIN_INPUT.search(n.attrs.get("name", ""))
-        }
-        if carried != {asin}:
+        if _carried_asins(form) != {asin}:
             continue  # not this ASIN's, or a bundle with others in it
         if any(
             control_allowed({**n.attrs, "text": n.text(), "form_action": action})
@@ -143,9 +172,9 @@ def wf_add_control(root: dom.Node, asin: str, page_url: str | None = None) -> do
 
 
 def add_control(root: dom.Node, asin: str, page_url: str | None = None) -> dom.Node | None:
-    """`asin`'s own add control on its product page (at `page_url`): its add form, else a Whole
-    Foods buy box."""
-    return add_form(root, asin) or wf_add_control(root, asin, page_url)
+    """`asin`'s own add control on its product page (at `page_url`): its buy box's "Add to cart",
+    else its add-to-cart form, else a Whole Foods buy box."""
+    return buy_box_add(root, asin) or add_form(root, asin) or wf_add_control(root, asin, page_url)
 
 
 def cart_state(html: str) -> tuple[int | None, set[str]]:

@@ -20,6 +20,7 @@ form's `action`, `ASIN.n` inputs, and visible text.
 | `product_wholefoods.html` | Whole Foods product page: buy-box widget (no form), sponsored `spAddToCart` ads (one for the same item), another item's widget outside the buy box |
 | `product_wholefoods_pickup.html` | Whole Foods pickup offer as seen live: widget ids without the ASIN inside `#buybox`, an `<input type=submit>` add control, an unnamed quantity input, the cart flyout's checkout forms |
 | `product_bundle_ad.html` | Amazon page as seen live: buy-box form posting to `handle-buy-box`, a sponsored `sspa` bundle form with this ASIN and two others, a comparison-table form |
+| `product_buy_box.html` | Amazon buy box: three `handle-buy-box` forms (subscription first, one-time with Buy Now, wishlist) + a sponsored bundle; only one-time "Add to cart" may be clicked |
 | `product_unavailable.html` | product page with no add form for its own ASIN |
 | `search_no_results.html` | tier-2 search with no results |
 | `orders_list_p1.html`, `orders_list_p2.html` | order history, two pages |

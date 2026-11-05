@@ -188,7 +188,8 @@ P401 = "https://www.amazon.com/dp/B0SYNTH401"
 def test_a_sponsored_bundle_form_is_never_the_add_form() -> None:
     root = dom.parse(BUNDLE_PAGE)
     assert add_form(root, "B0SYNTH401") is None
-    assert add_control(root, "B0SYNTH401", P401) is None
+    control = add_control(root, "B0SYNTH401", P401)  # the buy box's own add, not the bundle
+    assert control is not None and control.attrs["name"] == "submit.add-to-cart"
     # A multi-item form isn't the item's own even when it isn't marked sponsored.
     unmarked = BUNDLE_PAGE.replace("sspa_dk_detail_sbb_crt", "dp_bundle_1")
     assert add_form(dom.parse(unmarked), "B0SYNTH401") is None
@@ -200,11 +201,68 @@ def test_a_sponsored_bundle_form_is_never_the_add_form() -> None:
     assert add_form(dom.parse(single), "B0SYNTH401") is None
 
 
-def test_bundle_page_adds_nothing() -> None:
-    driver = _driver(BUNDLE_PAGE, [_cart([], 0), _cart([], 0)], product_url=P401)
+def test_bundle_page_adds_only_the_item_through_its_buy_box() -> None:
+    driver = _driver(BUNDLE_PAGE, [_cart([], 0), _cart(["B0SYNTH401"], 1)], product_url=P401)
     out = add_one(driver, "B0SYNTH401", 1, Telemetry(), "amazon")
-    assert (out.outcome, out.reason) == ("failed", "no_add_form")
-    assert driver.clicks == 0
+    assert out.outcome == "added"
+    [control] = driver.controls
+    assert (control.attrs["name"], control.attrs["value"]) == ("submit.add-to-cart", "Add to cart")
+
+
+# Amazon's own "Add to cart" is in the buy box form, which posts to handle-buy-box: the same
+# endpoint as Buy Now. Only that one button may be used (owner decision, 2026-11-05): a control
+# named `submit.add-to-cart` in a handle-buy-box form carrying only this ASIN, not the
+# subscription form's (`snsAsin`, "Add subscription to cart"), never Buy Now, never a formaction.
+BUY_BOX = "B0SYNTH501"
+P501 = "https://www.amazon.com/dp/" + BUY_BOX
+BUY_BOX_PAGE = fixture("product_buy_box.html")
+
+
+def test_buy_box_add_is_the_one_time_add_to_cart() -> None:
+    control = add_control(dom.parse(BUY_BOX_PAGE), BUY_BOX, P501)
+    assert control is not None
+    assert (control.attrs["id"], control.attrs["name"]) == (
+        "add-to-cart-button",
+        "submit.add-to-cart",
+    )
+
+
+@pytest.mark.parametrize(
+    ("change", "why"),
+    [
+        (('name="submit.add-to-cart" id="add-to-cart-button"', 'name="submit.buy-now"'), "buy now"),
+        (('id="add-to-cart-button"', 'id="add-to-cart-button" formaction="/checkout/turbo"'), "fa"),
+        (('name="offerListingID"', 'name="snsAsin"'), "a subscription form"),
+        (('value="synthOffer501"', 'value="B0SYNTH599"'), "x"),  # not an ASIN-named input
+        (('id="add-to-cart-button" value="Add to cart"', 'value="Buy now"'), "buy now text"),
+    ],
+)
+def test_buy_box_add_refusals(change: tuple[str, str], why: str) -> None:
+    page = BUY_BOX_PAGE.replace(*change)
+    assert page != BUY_BOX_PAGE
+    control = add_control(dom.parse(page), BUY_BOX, P501)
+    if why == "x":  # harmless edits: the one-time add is still found
+        assert control is not None and control.attrs["value"] == "Add to cart"
+    else:
+        assert control is None, why
+
+
+def test_buy_box_form_carrying_another_asin_is_not_this_items() -> None:
+    other = BUY_BOX_PAGE.replace(
+        '<input type="hidden" name="offerListingID"',
+        '<input type="hidden" name="items[1.base][asin]" value="B0SYNTH599">\n'
+        '    <input type="hidden" name="offerListingID"',
+    )
+    assert add_control(dom.parse(other), BUY_BOX, P501) is None
+    assert add_control(dom.parse(BUY_BOX_PAGE), "B0SYNTH599", P501) is None
+
+
+def test_buy_box_add_end_to_end() -> None:
+    driver = _driver(BUY_BOX_PAGE, [_cart([], 0), _cart([BUY_BOX], 1)], product_url=P501)
+    out = add_one(driver, BUY_BOX, 2, Telemetry(), "amazon")
+    assert out.outcome == "added"
+    assert driver.added == [(BUY_BOX, 2)]
+    assert [c.attrs["id"] for c in driver.controls] == ["add-to-cart-button"]
 
 
 def test_other_new_items_in_the_cart_fail_the_add_and_are_named() -> None:
@@ -354,7 +412,60 @@ def test_cdp_wont_add_a_wrong_quantity_through_a_widget(browser_page: Any) -> No
     assert browser_page.evaluate("window.__clicked") == []
 
 
-def test_cdp_never_clicks_a_bundle_or_the_handle_buy_box_form(browser_page: Any) -> None:
+def test_cdp_clicks_the_buy_box_add_never_the_bundle(browser_page: Any) -> None:
     driver = _live(browser_page, BUNDLE_PAGE, url=P401)
-    assert driver.add_to_cart("B0SYNTH401", 1) is None
+    assert driver.add_to_cart("B0SYNTH401", 1) is not None
+    assert browser_page.evaluate("window.__clicked") == ["addToCart | "]  # value="Add to cart"
+    assert browser_page.evaluate("window.__clickedIn") == ["buybox"]
+
+
+def test_cdp_clicks_only_the_one_time_buy_box_add_with_the_quantity(browser_page: Any) -> None:
+    driver = _live(browser_page, BUY_BOX_PAGE, url=P501)
+    assert driver.add_to_cart(BUY_BOX, 2) is not None
+    assert browser_page.evaluate("window.__clicked") == ["addToCart | "]
+    assert (
+        browser_page.eval_on_selector("form:has(#add-to-cart-button) select", "e => e.value") == "2"
+    )
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        ('name="submit.add-to-cart" id="add-to-cart-button"', 'name="submit.buy-now"'),
+        ('name="offerListingID"', 'name="snsAsin"'),
+        ('id="add-to-cart-button"', 'id="add-to-cart-button" formaction="/checkout/turbo"'),
+        ('id="add-to-cart-button"', 'id="add-to-cart-button" style="display:none"'),
+    ],
+)
+def test_cdp_never_clicks_buy_now_or_a_subscription(
+    browser_page: Any, change: tuple[str, str]
+) -> None:
+    driver = _live(browser_page, BUY_BOX_PAGE.replace(*change), url=P501)
+    assert driver.add_to_cart(BUY_BOX, 1) is None
     assert browser_page.evaluate("window.__clicked") == []
+
+
+def test_real_form_posts_pass_the_guard_only_for_add_to_cart(browser_page: Any) -> None:
+    """Chromium sends only the pressed submit button's name: the guard tells the two apart."""
+    posts: list[tuple[str, bool]] = []
+
+    def serve(route: Any) -> None:
+        req = route.request
+        if req.method == "POST":
+            posts.append(
+                (req.post_data or "", guard.buy_box_add(req.url, req.method, req.post_data))
+            )
+            route.fulfill(body=_cart([], 0), content_type="text/html")
+        else:
+            route.fulfill(body=BUY_BOX_PAGE, content_type="text/html")
+
+    for button in ("#add-to-cart-button", "#buy-now-button", "#add-to-cart-button-sns"):
+        browser_page.unroute("**/*")
+        browser_page.route("**/*", serve)
+        browser_page.goto(P501)
+        with browser_page.expect_navigation():
+            browser_page.click(button)
+    [(add, add_ok), (buy, buy_ok), (sns, sns_ok)] = posts
+    assert "submit.add-to-cart" in add and "submit.buy-now" not in add and add_ok
+    assert "submit.buy-now" in buy and "submit.add-to-cart" not in buy and not buy_ok
+    assert "snsAsin" in sns and not sns_ok

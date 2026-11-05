@@ -1144,9 +1144,14 @@ branch `claude/system-e2e`). Details, the bugs found and the security review are
   detail_sbb_crt`) carrying that ASIN and two others — this is also the earlier "count jumped
   1 → 4". The two extra lines were removed again. Now an add form must carry only its own ASIN,
   `sspa` refs count as sponsored, and other new cart rows make the add `failed` / `extra_items`
-  (tier 1: `failed`, not `needs_agent`). Consequence: **Amazon tier 1 and 2 adds are now
-  `no_add_form`** until the buy box's `handle-buy-box` add is allowed (a guard change: permit that
-  POST only when its submitter is `submit.add-to-cart`; open decision). Whole Foods `B000P6L3K0`
+  (tier 1: `failed`, not `needs_agent`). That left Amazon adds `no_add_form`, so (owner decision,
+  2026-11-05) the buy box's own "Add to cart" is now used: only the `submit.add-to-cart` button
+  of a `handle-buy-box` form carrying this ASIN alone and not the subscription form (`snsAsin`),
+  and the browser route lets that POST through only when its form data names that submitter and
+  nothing about buy-now, checkout or subscribing (DESIGN §6 `guard.py`, §10 #54; synthetic
+  `product_buy_box.html`; a headless-Chromium test confirms a real form POST carries only the
+  pressed button's name). **Not yet verified live:** whether Amazon's add is a form POST or an
+  in-page request (both are waited on), and that the one-time add adds exactly one row. Whole Foods `B000P6L3K0`
   was found and clicked, but no row appeared in `/cart/localmarket?almBrandId=…` within the 5 s
   wait (`unverified`). Regression tests: `tests/test_cart_add.py` on a synthetic
   `product_wholefoods.html`, including the real Playwright click path in headless Chromium (the

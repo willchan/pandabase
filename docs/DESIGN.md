@@ -677,13 +677,18 @@ JSON on stdout; exit 0 ok, 1 error, 2 usage, 3 profile locked, 4 refused URL):
   `/cart/localmarket` is whichever local-market brand's grocery cart Amazon picks; active rows =
   `data-asin` in a `/cart` form that isn't an add form, not `data-itemtype="saved"`): an ASIN
   already there is `already_in_cart` (a re-run never doubles a line). Otherwise open `/dp/{ASIN}`
-  and find **that ASIN's own** add control: its add-to-cart form (action contains
+  and find **that ASIN's own** add control. First the **buy box's "Add to cart"**: Amazon's
+  buy-box form (`#addToCart`) posts to `/gp/product/handle-buy-box/…`, Buy Now's endpoint too,
+  so only its `submit.add-to-cart` button counts (`browser.buy_box_add_allowed`: that exact name,
+  no `formaction`, no Buy Now / 1-Click / checkout / subscribe words), in a form whose
+  `*asin*`-named inputs carry this ASIN alone and that is not the subscription form (live, the
+  page has several `#addToCart` forms; the Subscribe & Save one carries `snsAsin` and names its
+  "Add subscription to cart" button `submit.add-to-cart` too); the driver takes the first
+  visible one. Else its add-to-cart form (action contains
   `/cart/add-to-cart`, its `*asin*`-named inputs carry **this ASIN and no other** — a bundle
   form never counts — and a submit `control_allowed` accepts; a sponsored ad's form (`spAddToCart`
   or `sspa` in its action, id or name) never counts, even for the same ASIN; Buy Now is never the
-  control). Live, Amazon's own buy-box form posts to `/gp/product/handle-buy-box/…`, which the
-  guard refuses (Buy Now posts there too), so Amazon pages are `no_add_form` until that changes;
-  before the single-ASIN rule the add clicked a sponsored 3-item bundle ad. Else the **Whole
+  control; before the single-ASIN rule the add clicked a sponsored 3-item bundle ad). Else the **Whole
   Foods buy box**, which is a widget, not a form: a `#almAddToCart_feature_div` /
   `#core-dp-alm-atc-wf` box that is this ASIN's (`browser.buy_box_bound`): any
   `qs-widget-summary-atc-…QuantityAndCadenceSelector-<ASIN>` widget inside or around it names this
@@ -693,8 +698,8 @@ JSON on stdout; exit 0 ok, 1 error, 2 usage, 3 profile locked, 4 refused URL):
   the widget's own `qs-widget-summary-atc-…` button (the driver takes the first visible one), if
   `control_allowed`; another item's box elsewhere on the page is never it. `cart_add.add_control` decides on the parsed page;
   `CdpDriver.add_to_cart` applies the same rule with locators, sets the quantity field in the form
-  or box (a quantity > 1 with no quantity field is not added), clicks, and for the widget waits
-  (≤ `WIDGET_SETTLE_MS`, 5 s) for the network to go idle. Then re-read the cart: `added` only if
+  or box (a quantity > 1 with no quantity field is not added), clicks, and for the buy box and
+  the widget waits (≤ `WIDGET_SETTLE_MS`, 5 s) for the network to go idle. Then re-read the cart: `added` only if
   the ASIN is now in its **active rows** and no other ASIN appeared there; other new rows →
   `failed` / `extra_items` with `extra_asins` (named for a human, not removed), no row →
   `unverified` (`selector_error` `cart_rows`).
@@ -730,8 +735,15 @@ JSON on stdout; exit 0 ok, 1 error, 2 usage, 3 profile locked, 4 refused URL):
 - `guard.py` — every URL the tools open, and every page they land on, must be `https` on
   `www.amazon.com`/`amazon.com` and not match checkout/payment/slot/sign-in patterns (Buy Now's
   `handle-buy-box`, `buy-now`, `/turbo…`, `/1-click` count as checkout); the CDP driver also
-  installs it as a Playwright route that aborts such document requests. The only control the
-  driver ever clicks is an add-to-cart confirm, and `browser.control_allowed` refuses any whose
+  installs it as a Playwright route that aborts such document requests. One exception, in the
+  route only: the buy box's add-to-cart POST to `handle-buy-box` (`guard.buy_box_add`) — method
+  POST, form-encoded data containing `submit.add-to-cart`, and no other `submit.*` field (a form
+  sends only the pressed button's name, so Buy Now's POST carries `submit.buy-now` and is
+  aborted) nor any field about buy-now, checkout, 1-Click, Turbo or subscribing; the rest of the
+  URL must pass the guard. A tool never *opens* `handle-buy-box` (`check_url` still refuses it).
+  The only control the driver ever clicks is an add-to-cart control: the buy box's
+  `submit.add-to-cart` (`buy_box_add_allowed`, above), else one `browser.control_allowed` accepts —
+  it refuses any whose
   id/name/value/label/text says Buy Now, 1-Click, Turbo, checkout, place order or subscribe, or
   whose form action fails the guard (the injector's page analysis applies the same rule). The tools
   never launch a browser, sign in, or store credentials (signed out → `not_signed_in`).
@@ -1100,5 +1112,5 @@ docker-compose.yml (+ docker-compose.build.yml), Makefile, CLAUDE.md, README.md,
 | 51 | Production gets a read-only smoke after every web deploy that reports (job, Discord, telemetry) but never rolls back | A smoke that can write could damage the household's data; rollback has side effects (Vercel stops auto-promoting, old env vars) that a human should choose; the Mac Mini already rolls back its own worker |
 | 52 | Tier 2 runs only through `pandabase-tools cart search` / `cart add` on the guarded CDP driver; the agent's OpenClaw denies `group:web` and `browser` | A local model with a raw browser on the signed-in Amazon profile could be steered by product-page text to Buy Now / checkout (OpenClaw's browser has no URL denylist; audit `models.small_params`). Search returns size-limited, labelled-untrusted JSON; add is by ASIN through tier 1's guarded path with Buy Now controls deny-listed and the ASIN verified in the cart's active rows |
 | 53 | Mac mini defaults: Google Chrome for the per-member browsers, Colima allowed for Docker, the containers may reach the host only on Ollama's port, and Ollama runs with `OLLAMA_NO_CLOUD=1` | Homebrew disabled its `chromium` cask (2026-09-01) and any Chromium build speaks CDP; the worker needs only Ollama, while CDP on the host is full control of signed-in Amazon sessions; with a local reply model (photo privacy option C) no PandaBase or agent request should be able to reach a cloud model |
-| 54 | Tier 1 adds each line from its product page (`/dp/{ASIN}`, that ASIN's own `/cart/add-to-cart` form — or, for Whole Foods, its buy-box widget — never Buy Now or a sponsored ad), verified by the ASIN appearing in that vendor's cart's active rows (not the cart count); the batch add URL stays as `cart.tier1_method: add_url` | `/gp/aws/cart/add.html` began redirecting to the cart without adding (live smoke, 2026-11-04). One shared, verified path for tiers 1 and 2; the cart check makes re-runs idempotent per ASIN. Live (2026-11-04) `nav-cart-count` jumped 1 → 4 for one item, and Whole Foods pages have no add form of their own |
+| 54 | Tier 1 adds each line from its product page (`/dp/{ASIN}`, that ASIN's own add control: the buy box's `submit.add-to-cart` button, else its own single-ASIN `/cart/add-to-cart` form, or for Whole Foods its buy-box widget — never Buy Now, a subscription, a bundle or a sponsored ad), verified by the ASIN appearing in that vendor's cart's active rows (not the cart count); the batch add URL stays as `cart.tier1_method: add_url` | `/gp/aws/cart/add.html` began redirecting to the cart without adding (live smoke, 2026-11-04). One shared, verified path for tiers 1 and 2; the cart check makes re-runs idempotent per ASIN. Live (2026-11-04) `nav-cart-count` jumped 1 → 4 for one item, and Whole Foods pages have no add form of their own. Amazon's own add posts to `handle-buy-box`, Buy Now's endpoint, so the guard lets exactly that POST through when its submitter is `submit.add-to-cart` (owner decision, 2026-11-05): refusing the endpoint left only sponsored forms, and one added a 3-item bundle |
 | 55 | Interactive services do a constant number of database round trips: read in one batch, decide in memory, write in one batch inside `batchTransaction` (§8 *Database round trips*) | Each statement against remote Turso is a network request made while holding the write lock; a sequential statement per receipt line made "Confirm receipt" take seconds on long receipts (Preview E2E step 07b timed out) |

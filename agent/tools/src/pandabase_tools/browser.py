@@ -34,6 +34,13 @@ ASIN_RE = re.compile(r"^[A-Z0-9]{10}$")
 # matched against the form's action, id and name) ...
 SPONSORED_FORM = re.compile(r"spAddToCart|sspa", re.I)
 ASIN_INPUT = re.compile(r"asin", re.I)  # input names: items[0.base][asin], ASIN, snsAsin
+# ... or the page's own buy-box form (`#addToCart`, action `/gp/product/handle-buy-box`, Buy Now's
+# endpoint too): only its `submit.add-to-cart` button (`buy_box_add_allowed`), in a form carrying
+# this ASIN alone and no subscription (`snsAsin`; live, its add button has the same name), and the
+# browser lets the POST through only when that was the button pressed (`guard.buy_box_add`) ...
+BUY_BOX_FORM_ACTION = "/gp/product/handle-buy-box"
+BUY_BOX_ADD_NAME = guard.BUY_BOX_ADD_FIELD
+SUBSCRIPTION = re.compile(r"subscri|^sns|\bsns", re.I)
 # ... or, on a Whole Foods page (no form), the buy-box widget bound to the ASIN.
 WF_BUY_BOX_IDS = ("almAddToCart_feature_div", "core-dp-alm-atc-wf")
 WF_WIDGET_ID = re.compile(r"^qs-widget-summary-atc-.*QuantityAndCadenceSelector-([A-Z0-9]{10})$")
@@ -60,6 +67,7 @@ FORM_IDENT_JS = """f => ({
   ident: [f.getAttribute("action") || "", f.id || "", f.getAttribute("name") || ""].join(" "),
   asins: [...new Set([...f.querySelectorAll("input")]
     .filter(e => /asin/i.test(e.getAttribute("name") || "")).map(e => e.value))],
+  names: [...f.querySelectorAll("input, select, button")].map(e => e.getAttribute("name") || ""),
 })"""
 SET_QTY_JS = """(form, q) => {
   let n = 0;
@@ -99,6 +107,25 @@ def buy_box_bound(
     if widget_asins:
         return widget_asins == {asin}
     return in_buybox and page_asin == asin
+
+
+def subscription_form(input_names: list[str]) -> bool:
+    """A buy-box form that would add a Subscribe & Save subscription (live: an `snsAsin` input)."""
+    return any(SUBSCRIPTION.search(n) for n in input_names)
+
+
+def buy_box_add_allowed(desc: Mapping[str, str]) -> bool:
+    """The one control in a buy-box (`handle-buy-box`) form the tools may click: its plain "Add to
+    cart" (`submit.add-to-cart`). Never Buy Now / 1-Click / checkout / subscription, never a
+    button that posts elsewhere (`formaction`). The form's other checks are the caller's."""
+    if desc.get("name") != BUY_BOX_ADD_NAME or desc.get("formaction"):
+        return False
+    words = " ".join(desc.get(k) or "" for k in _DESC_TEXT if k != "name")
+    if DENY_CONTROL.search(words) or SUBSCRIPTION.search(words):
+        return False
+    action = urljoin("https://www.amazon.com/", desc.get("form_action") or "")
+    # The action itself must be handle-buy-box and nothing else unsafe (`guard.buy_box_add`).
+    return guard.buy_box_add(action, "POST", f"{BUY_BOX_ADD_NAME}=")
 
 
 def control_allowed(desc: Mapping[str, str]) -> bool:
@@ -185,7 +212,11 @@ class CdpDriver:
 
     def _route(self, route: Route) -> None:
         request = route.request
-        if request.resource_type == "document" and guard.classify_url(request.url):
+        if (
+            request.resource_type == "document"
+            and guard.classify_url(request.url)
+            and not guard.buy_box_add(request.url, request.method, request.post_data)
+        ):
             self.blocked.append(request.url)
             route.abort("blockedbyclient")
         else:
@@ -223,7 +254,45 @@ class CdpDriver:
         """`asin`'s own add form, else its Whole Foods buy-box widget (`cart_add.add_control`)."""
         if not ASIN_RE.match(asin):  # it goes into a selector below
             raise ValueError(f"not an ASIN: {asin!r}")
-        return self._add_by_form(asin, qty) or self._add_by_widget(asin, qty)
+        return (
+            self._add_by_buy_box(asin, qty)
+            or self._add_by_form(asin, qty)
+            or self._add_by_widget(asin, qty)
+        )
+
+    def _add_by_buy_box(self, asin: str, qty: int) -> Snapshot | None:
+        """The buy box's own "Add to cart" (`buy_box_add_allowed`), in a visible `handle-buy-box`
+        form that carries `asin` alone and no subscription. Same rule as `cart_add.buy_box_add`;
+        the browser route lets only that button's POST through."""
+        forms = self.page.locator(f"form[action*='{BUY_BOX_FORM_ACTION}']").filter(
+            has=self.page.locator(f"input[value='{asin}']")
+        )
+        for i in range(forms.count()):
+            form = forms.nth(i)
+            ident = form.evaluate(FORM_IDENT_JS)
+            if ident["asins"] != [asin] or subscription_form(ident["names"]):
+                continue
+            controls = form.locator(f"[name='{BUY_BOX_ADD_NAME}']:is(input, button)")
+            control = next(
+                (
+                    c
+                    for c in (controls.nth(j) for j in range(controls.count()))
+                    if c.is_visible() and buy_box_add_allowed(c.evaluate(DESCRIBE_JS))
+                ),
+                None,
+            )
+            if control is None:
+                continue
+            if form.evaluate(SET_QTY_JS, qty) == 0 and qty != 1:
+                continue  # can't set the quantity: don't add the wrong amount
+            control.click()
+            # A form POST (lands on the cart) or an in-page add: either way, wait a bounded time.
+            self.page.wait_for_load_state("domcontentloaded")
+            self._settle()
+            if guard.is_buy_box_url(self.page.url):  # the add's own response, rendered in place
+                return Snapshot(self.page.url, self.page.content())
+            return self._snapshot()
+        return None
 
     def _add_by_form(self, asin: str, qty: int) -> Snapshot | None:
         forms = self.page.locator(f"form[action*='{ADD_FORM_ACTION}']").filter(
