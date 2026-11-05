@@ -2,8 +2,9 @@
 
 Every URL a tool opens, and every URL the browser lands on after a click, passes `check_url`.
 Anything that isn't plain Amazon `https`, or that looks like checkout, payment or sign-in, is
-refused before the request is made. `CdpDriver` also installs this as a Playwright route so a
-redirect or script-initiated navigation to checkout is aborted in the browser itself.
+refused before the request is made (Buy Now, 1-Click and Turbo checkout count as checkout).
+`CdpDriver` also installs this as a Playwright route so a redirect or script-initiated navigation to
+checkout is aborted in the browser itself.
 """
 
 from __future__ import annotations
@@ -31,7 +32,13 @@ CHECKOUT_PATTERNS: tuple[re.Pattern[str], ...] = tuple(
         r"/gp/cart/desktop/go-to",
         r"/alm/(?:byg|checkout|confirm)",  # Whole Foods / Fresh checkout flow
         r"/afx/(?:checkout|slot)",  # delivery/pickup slot selection precedes checkout
+        r"handle-buy-box",  # product-page buy box: the form behind "Buy Now"
+        r"buy-?now",
     )
+)
+# Path-only: these words can legitimately appear in a search query ("turbo" dog food).
+CHECKOUT_PATH_PATTERNS: tuple[re.Pattern[str], ...] = tuple(
+    re.compile(p) for p in (r"/turbo", r"/(?:1|one)-?click")
 )
 # We never sign in: a sign-in page means the profile's session expired; a human fixes it.
 SIGNIN_PATTERNS: tuple[re.Pattern[str], ...] = (
@@ -58,7 +65,9 @@ def classify_url(url: str) -> str | None:
         return "host"
     path = unquote(parts.path).lower()
     target = path + "?" + unquote(parts.query).lower()
-    if any(p.search(target) for p in CHECKOUT_PATTERNS):
+    if any(p.search(target) for p in CHECKOUT_PATTERNS) or any(
+        p.search(path) for p in CHECKOUT_PATH_PATTERNS
+    ):
         return "checkout"
     if any(p.search(path) for p in SIGNIN_PATTERNS):
         return "signin"

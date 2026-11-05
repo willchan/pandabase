@@ -10,7 +10,7 @@ from typing import Any
 import httpx
 import pytest
 
-from pandabase_tools import guard
+from pandabase_tools import cart_add, dom, guard
 from pandabase_tools.api import ApiClient
 from pandabase_tools.browser import Snapshot, checked
 
@@ -32,19 +32,24 @@ class FakeDriver:
         self,
         pages: dict[str, Page] | Callable[[str], Page | None],
         confirm: Callable[[str], Page | None] | None = None,
+        add: Callable[[str, int], Page | None] | None = None,
     ) -> None:
         self.pages = pages
         self.confirm = confirm
+        self.add = add
         self.opened: list[str] = []
         self.landed: list[str] = []
         self.clicks = 0
+        self.added: list[tuple[str, int]] = []
         self.current: str | None = None
+        self.html = ""
 
     def _land(self, page: Page) -> Snapshot:
-        url, name = page
+        url, name = page  # `name` is a fixture file, or inline HTML when it starts with "<"
         self.landed.append(url)
         self.current = url
-        return checked(Snapshot(url, fixture(name)))
+        self.html = name if name.lstrip().startswith("<") else fixture(name)
+        return checked(Snapshot(url, self.html))
 
     def open(self, url: str) -> Snapshot:
         guard.check_url(url)  # what CdpDriver does before page.goto
@@ -59,6 +64,15 @@ class FakeDriver:
         page = self.confirm(self.current or "") if self.confirm else None
         return None if page is None else self._land(page)
 
+    def add_to_cart(self, asin: str, qty: int) -> Snapshot | None:
+        """What `CdpDriver.add_to_cart` does: submit this ASIN's own add form, never Buy Now."""
+        if cart_add.add_form(dom.parse(self.html), asin) is None:
+            return None
+        self.clicks += 1
+        self.added.append((asin, qty))
+        page = self.add(asin, qty) if self.add else None
+        return self._land(page) if page else checked(Snapshot(self.current or "", self.html))
+
     def __enter__(self) -> FakeDriver:
         return self
 
@@ -68,6 +82,66 @@ class FakeDriver:
     def assert_never_checkout(self) -> None:
         for url in self.opened + self.landed:
             assert guard.classify_url(url) != "checkout", url
+
+
+PRODUCT = "https://www.amazon.com/dp/"
+VIEW_URL = "https://www.amazon.com/gp/cart/view.html"
+
+
+def product_html(asin: str, *, available: bool = True) -> str:
+    """A synthetic product page: its own add form (Buy Now inside it) + a related item's form."""
+    own = (
+        f'<form action="/cart/add-to-cart/ref=dp_start" method="post">'
+        f'<input type="hidden" name="items[0.base][asin]" value="{asin}">'
+        '<select name="items[0.base][quantity]"><option value="1">1</option></select>'
+        '<input type="submit" name="submit.buy-now" value="Buy Now">'
+        '<input type="submit" name="submit.addToCart" value="Add to Cart"></form>'
+        if available
+        else "<div>Currently unavailable.</div>"
+    )
+    return (
+        f"<html><body><h1>Synthetic product {asin}</h1><span>$4.99</span>{own}"
+        '<form action="/cart/add-to-cart/ref=dp_rec" method="post">'
+        '<input type="hidden" name="items[0.base][asin]" value="B0SYNTH210">'
+        '<button type="submit" name="submit.addToCart">Add to cart</button></form></body></html>'
+    )
+
+
+class FakeShop:
+    """A stateful synthetic Amazon: product pages, add-to-cart, and a cart page whose count
+    follows what was added (`stuck=True`: adds don't land, as if Amazon ignored them)."""
+
+    def __init__(
+        self, cart: dict[str, int] | None = None, unavailable: frozenset[str] = frozenset()
+    ) -> None:
+        self.cart = dict(cart or {})
+        self.unavailable = unavailable
+        self.stuck = False
+        self.driver = FakeDriver(self.page, add=self.add)
+
+    def cart_html(self) -> str:
+        rows = "".join(
+            f'<div data-asin="{a}" data-itemtype="active"><a href="/dp/{a}">{a}</a> Qty: {q}</div>'
+            for a, q in self.cart.items()
+        )
+        count = sum(self.cart.values())
+        return (
+            f'<html><body><span id="nav-cart-count">{count}</span>'
+            f'<form action="/cart/ref=ox_sc_upd">{rows}</form></body></html>'
+        )
+
+    def page(self, url: str) -> Page | None:
+        if url == VIEW_URL:
+            return (url, self.cart_html())
+        if url.startswith(PRODUCT):
+            asin = url[len(PRODUCT) :].split("/")[0]
+            return (url, product_html(asin, available=asin not in self.unavailable))
+        return None
+
+    def add(self, asin: str, qty: int) -> Page | None:
+        if not self.stuck:
+            self.cart[asin] = self.cart.get(asin, 0) + qty
+        return None
 
 
 class FakeApi:

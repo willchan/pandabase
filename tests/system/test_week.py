@@ -10,6 +10,7 @@ never on wording the model would produce.
 from __future__ import annotations
 
 import json
+import math
 import re
 from typing import Any
 
@@ -439,15 +440,45 @@ def test_11_saturday_build(stack: Stack) -> None:
     again = stack.skill(GC, "pandabase-tools cart build", shim=True)
     assert {x["index"] for x in again["added"]} == set(added)
 
-    # Tier 2: the agent holds the profile lock while it browses, then reports.
-    lock = stack.skill(GC, "lock acquire", cart_member="alex")
-    busy = stack.skill(GC, "pandabase-tools cart build", shim=True, expect=3)
+    # Tier 2 through the guarded tools only (no browser tool): search → pick an ASIN → add.
+    # Cake flour plays the "uncertain" line the agent skips.
+    outcomes: dict[str, str] = {}
+    for i, line in agent.items():
+        if i == cake:
+            outcomes[str(i)] = "failed"
+            continue
+        store = "wholefoods" if line["vendor"] == "wholefoods" else "amazon"
+        query = line["free_text"] or line["name"]
+        flags = {"--query": query, "--store": store}
+        found = stack.skill(GC, "cart search", shim=True, flags=flags)
+        assert "untrusted" in found["notice"].lower() and found["candidates"], found
+        pick = next(x for x in found["candidates"] if x["availability"] == "available")
+        res = stack.skill(
+            GC,
+            "cart add",
+            shim=True,
+            asin=pick["asin"],
+            qty=str(max(1, math.ceil(line["quantity"]))),
+            flags={"--store": store},
+        )
+        assert res["outcome"] == "added" and res["cart_count_after"] > res["cart_count_before"]
+        again_add = stack.skill(
+            GC, "cart add", shim=True, asin=pick["asin"], qty="1", flags={"--store": store}
+        )
+        assert again_add["outcome"] == "already_in_cart"  # a re-run never doubles a line
+        outcomes[str(i)] = "tier2"
+    # Each browser command holds the profile lock while it runs; a held lease refuses them.
+    lock = stack.tools(["lock", "acquire", "--member", "alex", "--owner", "receipts"])
+    busy = stack.skill(GC, "cart search", shim=True, expect=3, flags={"--query": "x"})
     assert busy["error"] == "profile_locked"
-    outcomes = {str(i): ("failed" if i == cake else "tier2") for i in agent}
+    stack.tools(["lock", "release", "--member", "alex", "--token", lock["token"]])
     finished = stack.skill(GC, "cart finish", c=c, flags={"--outcomes": json.dumps(outcomes)})
     assert finished["status"] == "ready"
     assert finished["counts"] == {"tier1": len(added), "tier2": len(agent) - 1, "failed": 1}
-    stack.skill(GC, "lock release", cart_member="alex", token=lock["token"])
+    tier2 = [x["payload"] for x in stack.telemetry("cart_tier2_line", t)]
+    assert sorted(x["outcome"] for x in tier2) == sorted(
+        ["added"] * (len(agent) - 1) + ["already_in_cart"] * (len(agent) - 1)
+    )
 
     cyc = stack.one("select * from grocery_cycle where id = ?", c)
     assert cyc["status"] == "ready" and cyc["built_at"]
@@ -467,9 +498,9 @@ def test_11_saturday_build(stack: Stack) -> None:
     # Never near checkout: every page the injector opened or landed on passed the guard.
     pages = [json.loads(x) for x in stack.amazon_log.read_text().splitlines()]
     assert pages and all("checkout" not in p["url"] and "/gp/buy/" not in p["url"] for p in pages)
-    assert {p["url"].split("?")[0] for p in pages if p["kind"] == "clicked"} == {
-        "https://www.amazon.com/gp/aws/cart/add.html"
-    }
+    # Tiers 1 and 2 add from product pages (the add URL stopped working, 2026-11-04).
+    clicked = [p["url"] for p in pages if p["kind"] == "clicked"]
+    assert clicked and all(u.startswith("https://www.amazon.com/dp/") for u in clicked)
 
 
 @preview
@@ -616,7 +647,7 @@ def test_17_telemetry_from_every_component(stack: Stack) -> None:
     print("TELEMETRY", by_source)
     want = {
         "worker": {"worker_heartbeat", "vlm_inference", "worker_job_failed"},
-        "agent": {"photo_classified", "cart_tier1_line"},
+        "agent": {"photo_classified", "cart_tier1_line", "cart_tier2_search", "cart_tier2_line"},
         "state_engine": {"cycle_opened", "cycle_transition", "job_created", "job_finished",
                          "cart_line_result", "review_resolved", "receipt_line_match"},
         "api": {"api_request"},

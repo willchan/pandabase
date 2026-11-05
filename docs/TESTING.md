@@ -67,7 +67,7 @@ test. Name resolution follows the skills' written rule (`matches[0].item_id` whe
 | 8 | Trash Cam photo | provisional `consumed` on Oat Milk, reply, back in the plan |
 | 9 | "bought chicken thighs and avocados" | one manual receipt, `manual`/`confirmed` lines, idempotent |
 | 10 | "froze the chicken thighs" | `moved` fridge → freezer with the bought quantity, freezer aging |
-| 11 | Saturday build | `building`, price checks + quotes, tier 1 on Amazon lines, WF + free text → `needs_agent`, resume adds nothing twice, `lock acquire` makes a concurrent build exit 3, `cart finish` → `ready`, `cart_result`, `cart_line_result` / `cart_tier1_line`, only `no_asin` price failures, **no checkout URL ever opened** |
+| 11 | Saturday build | `building`, price checks + quotes, tier 1 on Amazon lines from their product pages (the add form, never Buy Now), WF + free text → `needs_agent`, resume adds nothing twice, tier 2 via the skill's `cart search` → `cart add` (labelled-untrusted candidates, count rose, a repeat add is `already_in_cart`), a held lease makes `cart search` exit 3, `cart finish` → `ready`, `cart_result`, `cart_line_result` / `cart_tier1_line` / `cart_tier2_line`, only `no_asin` price failures, **no checkout URL ever opened** |
 | 12 | `receipts ingest` (synthetic order) | closes the cycle (`order_ingested`), ASIN matches, new unverified item, replay + `external_order_id` dedupe, cursor |
 | 13 | next cycle opens | new open cycle, later week |
 | 14 | merge suggestions round trip | `merge-suggestions/run` → worker (text model) → `merge_suggestion` review for the new item, telemetry |
@@ -151,7 +151,12 @@ members are `alex@example.com` / `sam@example.com`, which is what the preview's 
 lists; the UI step signs in as Sam with a session cookie (`__Secure-authjs.session-token` over
 https) minted from the preview `AUTH_SECRET`. The run's photos and keyframes are deleted from
 `pandabase-media-preview` at the end (the keys recorded on the jobs it created, then checked gone);
-`preview-target.sh` refuses a bucket whose name lacks `preview`.
+`preview-target.sh` refuses a bucket whose name lacks `preview`. **Expected noise:** the seed's
+queued Trash Cam job points at `seed/trash-cam/3.mp4`, which no bucket holds (on purpose: tier A's
+step 17 asserts it fails). Its id ends in the same 16 characters every run (seeded RNG), and the
+worker claims it first and logs `media download failed: HTTP 404` three times in its first ~12 s,
+then fails it with a `failed_job` review (+1 on Cleanup, a line in step 16's report). Step 17
+isn't in the shortened week, so in A′ nothing asserts on it; the harness prints a note at startup.
 
 **The shortened week** = the steps marked `@preview` in `test_week.py`: 0 (stack up, worker
 heartbeat), 1 (open cycle), 2–3 (adds, skip, qty), 5 (lookup), 6 (nudge + check-in), 7 (paper
@@ -343,8 +348,12 @@ session without the environment's `AUTH_SECRET` — a leak means rotating it, no
 6. **CDP on loopback is full control of a signed-in Amazon session** for any local process on the
    Mac Mini (single-user machine; Chrome checks the `Host` header and WebSocket origins against
    DNS rebinding).
-7. **Tier-2 "never checkout" is a skill rule**: OpenClaw's browser tool has no URL denylist (M7
-   Notes). Our tools enforce the guard in code; checkout still needs a human's "Place your order".
+7. **Tier 2 relies on the agent's OpenClaw config denying `browser` and `group:web`** (README
+   step 11): OpenClaw's browser tool has no URL denylist (M7 Notes), so with it enabled a
+   prompt-injected model could still reach checkout. Tier 2 itself uses only `cart search` /
+   `cart add`, which enforce the guard and the Buy Now control deny-list in code (DESIGN §10 #52);
+   checkout still needs a human's "Place your order". Search-result text reaches the model (size-
+   limited, labelled untrusted): the worst it can steer is *which* ASIN gets added.
 8. **`preview-migrate.yml` and `preview-e2e.yml` run same-repo PR code with the `preview`
    environment's secrets** (fork PRs are excluded; `preview-e2e.yml` runs `main`'s workflow, then
    the PR's code): the preview database, the preview bucket and the preview tokens, all synthetic

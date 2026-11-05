@@ -306,7 +306,7 @@ then connect the bot as OpenClaw's docs describe.
 
 ```sh
 cp agent/openclaw.pandabase.example.json5 agent/openclaw.pandabase.json5
-# edit: guild id, #pandabase id, both members' Discord ids, browser profile names (= profiles.json)
+# edit: guild id, #pandabase id, both members' Discord ids
 openclaw gateway stop
 openclaw config patch --file agent/openclaw.pandabase.json5 --dry-run   # read the diff
 openclaw config patch --file agent/openclaw.pandabase.json5
@@ -317,10 +317,16 @@ openclaw gateway restart    # if it said so
 make install-agent-cron     # the automations from agent/cron.example.json (idempotent)
 ```
 
-The patch sets the `#pandabase` channel policy, local photo descriptions on Ollama, and the
-agent's browser profiles (attach-only to the step-10 Chromiums). It names `qwen3.5:9b`: if you
-change `OLLAMA_VLM_MODEL`, change it there too. Arrays in a patch replace: if
-you already had `tools.media.models` or Ollama models configured, merge those lists by hand.
+The patch sets the `#pandabase` channel policy, local photo descriptions on Ollama, and
+**`tools.deny: ["group:web", "browser"]`** (recommended; keep it). The agent never browses: the
+Saturday cart's tier 2 runs through `pandabase-tools cart search` / `cart add`, which attach to the
+step-10 Chromium with the checkout guard on. OpenClaw's browser tool has no URL denylist, so a
+local model with it next to a signed-in Amazon session could be talked into Buy Now by a product
+page (`openclaw security audit` flags this as `models.small_params`). If you configured
+`pandabase-<member>` browser profiles from an older version of this file, you can remove them.
+The patch names `qwen3.5:9b`: if you change `OLLAMA_VLM_MODEL`, change it there too. Arrays in a
+patch replace: if you already had `tools.media.models`, `tools.deny` or Ollama models configured,
+merge those lists by hand.
 
 Exec policy: OpenClaw's default host exec mode works as is. If you run `tools.exec.mode:
 "allowlist"`, allowlist `pandabase-tools` (the only command the skills run).
@@ -494,7 +500,7 @@ model instead: it never leaves the Mac. That's option C below, with two conditio
   to `2` in `ops/launchd/com.pandabase.ollama-env.plist` and re-run `make install-ollama-env`.
 
 Small local models are weaker than cloud ones at multi-step tool use; the Saturday cart build
-(tier-2 browsing for lines the add-to-cart link couldn't handle) is the most demanding job, so
+(tier-2 search-and-pick for lines the add-to-cart link couldn't handle) is the most demanding job, so
 use the most capable model your memory allows and watch the first few builds.
 
 The options below matter only if the reply model is a cloud model.

@@ -1104,6 +1104,20 @@ branch `claude/system-e2e`). Details, the bugs found and the security review are
   (GHCR's default for a public repo's package): the Mac Mini needs no `read:packages` token or
   `docker login`, so README step 15.4 is now "nothing to do". The guide's unverified list became
   *Notes from the first run*.
+- **Guarded tier 2 (follow-up PR, 2026-11-04):** the first Mac setup's OpenClaw audit flagged
+  `models.small_params` (a local 27B reply model with web/browser tools, no sandbox, next to the
+  signed-in Amazon Chromium), so `browser` and `group:web` were denied and tier 2 stopped working.
+  Tier 2 now runs through `pandabase-tools cart search` / `cart add` (DESIGN §6, §10 #52) and the
+  skill forbids the browser tool; `openclaw.pandabase.example.json5` ships the deny list and no
+  longer defines browser profiles; `install-agent-cron` no longer passes `browser` in the
+  automations' `--tools` (re-run it to update existing jobs). **Tier 1 moved to product pages in the same PR:** the Mac's
+  `SMOKE_CART=1` run (2026-11-04) showed `/gp/aws/cart/add.html` now redirects to the cart and adds
+  nothing (read as `not_offered` because of the cart's recommendation forms; regression test). Both
+  tiers now share `cart_add.add_one` (DESIGN §10 #54); `cart.tier1_method: add_url` keeps the old
+  path. Not verified here (owner on the Mac): live search markup (`data-asin` results), the cart
+  page (`nav-cart-count`, `data-itemtype` rows) incl. Whole Foods' `/cart/localmarket`, and that
+  the product page's add form posts to `/cart/add-to-cart…` (if it's `handle-buy-box`, the guard
+  refuses it and every add is `no_add_form` — safe, but then tier 1 needs another look).
 - **Members on first sign-in (follow-up PR):** `currentMember()` creates the `member` row for an
   allowed email on its first page view (`ensureMember`; DESIGN §3.1, §10 #42), replacing the
   `NotAMember` dead end. The API still answers 403 `not a household member` for a session without
