@@ -6,7 +6,7 @@ from collections.abc import Callable
 from typing import Any
 from urllib.parse import parse_qsl, urlsplit
 
-from conftest import FakeDriver, fixture
+from conftest import FakeDriver, FakeShop, fixture
 
 from pandabase_tools import contracts as c
 from pandabase_tools.browser import Snapshot
@@ -27,6 +27,7 @@ from pandabase_tools.config import CartConfig
 from pandabase_tools.telemetry import Telemetry
 
 ADD = "https://www.amazon.com/gp/aws/cart/add.html"
+ADD_URL_CFG = CartConfig(tier1_method="add_url")  # the batch add-URL path (dead since 2026-11-04)
 VIEW = "https://www.amazon.com/gp/cart/view.html"
 
 
@@ -113,7 +114,8 @@ def test_confirm_page_analysis() -> None:
     page = analyze_add_page(Snapshot(ADD, fixture("cart_add_confirm.html")))
     assert page.kind == "confirm"
     assert page.offered == {"B0SYNTH001", "B0SYNTH002"}  # 003 is unavailable
-    assert analyze_add_page(Snapshot(VIEW, fixture("cart_added.html"))).kind == "added"
+    # Only the add page itself counts: a redirect elsewhere, even saying "added", is unverified.
+    assert analyze_add_page(Snapshot(VIEW, fixture("cart_added.html"))).kind == "layout_changed"
     changed = analyze_add_page(Snapshot(ADD, fixture("cart_add_layout_changed.html")))
     assert changed.kind == "layout_changed"
 
@@ -147,7 +149,7 @@ def _lines() -> list[LineOutcome]:
 
 def test_inject_classifies_added_needs_agent_failed(no_sleep: Callable[[float], None]) -> None:
     driver, tel = _driver(), Telemetry()
-    res = inject(driver, _lines(), CartConfig(), tel, no_sleep)
+    res = inject(driver, _lines(), ADD_URL_CFG, tel, no_sleep)
     assert [x.name for x in res.added] == ["oats", "towels"]
     assert {x.name: x.reason for x in res.needs_agent} == {
         "water": "not_offered",
@@ -163,7 +165,7 @@ def test_inject_classifies_added_needs_agent_failed(no_sleep: Callable[[float], 
 
 def test_layout_changed_falls_back_to_the_agent(no_sleep: Callable[[float], None]) -> None:
     driver, tel = _driver(add_page="cart_add_layout_changed.html"), Telemetry()
-    res = inject(driver, _lines(), CartConfig(), tel, no_sleep)
+    res = inject(driver, _lines(), ADD_URL_CFG, tel, no_sleep)
     assert res.added == [] and res.failed == []
     assert {x.reason for x in res.needs_agent} == {"layout_changed"}
     assert driver.clicks == 0
@@ -174,14 +176,14 @@ def test_unverified_after_click_goes_to_the_agent(no_sleep: Callable[[float], No
     # No "added" message and not a cart page: we can't tell, so the agent checks.
     driver = _driver(confirm_page="cart_add_layout_changed.html", landing=ADD)
     tel = Telemetry()
-    res = inject(driver, _lines(), CartConfig(), tel, no_sleep)
+    res = inject(driver, _lines(), ADD_URL_CFG, tel, no_sleep)
     assert {x.name: x.reason for x in res.needs_agent}["oats"] == "unverified"
     assert tel.metrics("selector_error")[0]["selector"] == "cart_add_result"
 
 
 def test_confirm_control_missing(no_sleep: Callable[[float], None]) -> None:
     driver, tel = _driver(confirm_page=""), Telemetry()
-    res = inject(driver, _lines(), CartConfig(), tel, no_sleep)
+    res = inject(driver, _lines(), ADD_URL_CFG, tel, no_sleep)
     assert {x.name: x.reason for x in res.needs_agent}["oats"] == "confirm_not_found"
 
 
@@ -191,7 +193,7 @@ def test_redirect_to_checkout_after_click_is_refused(no_sleep: Callable[[float],
 
     spc = "https://www.amazon.com/gp/buy/spc/handlers/display.html"
     driver = FakeDriver(pages, lambda _: (spc, "cart_added.html"))
-    res = inject(driver, _lines(), CartConfig(), Telemetry(), no_sleep)
+    res = inject(driver, _lines(), ADD_URL_CFG, Telemetry(), no_sleep)
     assert {x.reason for x in res.failed} == {"refused_checkout"}
     assert len(driver.opened) == 1  # nothing else was opened after landing there
 
@@ -199,7 +201,7 @@ def test_redirect_to_checkout_after_click_is_refused(no_sleep: Callable[[float],
 def test_signed_out_profile_fails_without_logging_in(no_sleep: Callable[[float], None]) -> None:
     signin = "https://www.amazon.com/ap/signin?openid.return_to=cart"
     driver = FakeDriver(lambda url: (signin, "cart_add_confirm.html"))
-    res = inject(driver, _lines(), CartConfig(), Telemetry(), no_sleep)
+    res = inject(driver, _lines(), ADD_URL_CFG, Telemetry(), no_sleep)
     assert {x.reason for x in res.failed} == {"not_signed_in"}
     assert driver.clicks == 0
 
@@ -310,3 +312,60 @@ def test_no_asin_candidates_dont_use_up_the_price_check_budget(
     driver = FakeDriver(lambda url: (url, "product_jsonld.html"))
     quotes = price_checks(driver, preds, CartConfig(max_price_checks=1), Telemetry(), no_sleep)
     assert [q.product_id for q in quotes] == ["P1"]
+
+
+def test_add_url_redirected_to_the_cart_is_layout_changed_not_not_offered() -> None:
+    """Regression (live smoke, 2026-11-04): `/gp/aws/cart/add.html?ASIN.1=…` now redirects to the
+    cart page and adds nothing. The cart's recommendation carousels have `/cart/add-to-cart`
+    forms with submit buttons, so the page was read as a confirm page that didn't offer our ASIN
+    (`not_offered`). Anything but the add page itself is not a confirm page."""
+    page = analyze_add_page(Snapshot(VIEW, fixture("cart_view_recs.html")))
+    assert page.kind == "layout_changed" and page.offered == frozenset()
+
+
+def test_add_url_method_redirect_goes_to_the_agent(no_sleep: Callable[[float], None]) -> None:
+    driver = FakeDriver(lambda url: (VIEW, "cart_view_recs.html"))
+    tel = Telemetry()
+    res = inject(driver, _lines(), CartConfig(tier1_method="add_url"), tel, no_sleep)
+    assert {x.reason for x in res.needs_agent} == {"layout_changed"}
+    assert driver.clicks == 0
+
+
+# Product-page path (the default since the add URL stopped working) --------------------------
+
+
+def test_tier1_adds_each_line_from_its_product_page(no_sleep: Callable[[float], None]) -> None:
+    shop = FakeShop(cart={"B0SYNTH099": 1}, unavailable=frozenset({"B0SYNTH003", "B0SYNTH009"}))
+    tel = Telemetry()
+    res = inject(shop.driver, _lines(), CartConfig(), tel, no_sleep)
+    assert [x.name for x in res.added] == ["oats", "towels"]
+    assert {x.name: x.reason for x in res.needs_agent} == {
+        "water": "no_add_form",  # unavailable: the agent may pick another product
+        "soap": "no_add_form",
+    }
+    assert shop.cart == {"B0SYNTH099": 1, "B0SYNTH001": 2, "B0SYNTH002": 1}
+    assert shop.driver.added == [("B0SYNTH001", 2), ("B0SYNTH002", 1)]
+    assert "B0SYNTH210" not in shop.cart  # the related item's form is never used
+    assert [m["outcome"] for m in tel.metrics("cart_tier1_line")] == [
+        "added",
+        "added",
+        "needs_agent",
+        "needs_agent",
+    ]
+    shop.driver.assert_never_checkout()
+
+
+def test_tier1_product_page_add_that_does_not_land_goes_to_the_agent(
+    no_sleep: Callable[[float], None],
+) -> None:
+    shop = FakeShop()
+    shop.stuck = True
+    res = inject(shop.driver, _lines()[:1], CartConfig(), Telemetry(), no_sleep)
+    assert [(x.name, x.reason) for x in res.needs_agent] == [("oats", "unverified")]
+
+
+def test_tier1_skips_a_line_already_in_the_cart(no_sleep: Callable[[float], None]) -> None:
+    shop = FakeShop(cart={"B0SYNTH001": 2})
+    res = inject(shop.driver, _lines()[:1], CartConfig(), Telemetry(), no_sleep)
+    assert [(x.name, x.reason) for x in res.added] == [("oats", "already_in_cart")]
+    assert shop.driver.added == [] and shop.cart == {"B0SYNTH001": 2}

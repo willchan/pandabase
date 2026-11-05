@@ -4,7 +4,9 @@ Runs with the agent tools' venv (`scripts/smoke/run.sh` calls it). Attaches over
 member's Chromium, holds that profile's lock, and for each ASIN:
 
 1. refuses an ASIN that is already in a cart (deleting it afterwards would remove yours too);
-2. runs the real `cart_injector.inject` on a one-line cart (quantity 1);
+2. runs the real `cart_injector.inject` on a one-line cart (quantity 1), with the configured
+   `cart.tier1_method` (default `product_page`: the ASIN's own add-to-cart form, verified by the
+   cart count; the `url` printed below is only the legacy add-URL for reference);
 3. finds the line on the cart page and clicks its Delete control, then re-checks it's gone.
 
 Never touches checkout: every page goes through `guard` like the tools themselves. Prints one JSON

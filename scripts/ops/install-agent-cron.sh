@@ -15,7 +15,7 @@ need openclaw jq
 load_agent_env
 [ -f "$PANDABASE_CONFIG" ] || die "missing $PANDABASE_CONFIG — run 'make install-agent-tools'"
 CRON_FILE="$ROOT/agent/cron.example.json"
-TOOLS_LIST="exec,read,write,message,browser"
+TOOLS_LIST="exec,read,write,message"  # no browser: tier 2 is `pandabase-tools cart search/add` (DESIGN §10 #52)
 tz="$(jq -r '.tz' "$CRON_FILE")"
 intake="$(jq -r '.discord.intake_channel' "$PANDABASE_CONFIG")"
 # Empty-array expansions use ${a[@]+"${a[@]}"}: macOS /bin/bash 3.2 with `set -u` calls an empty

@@ -54,12 +54,4 @@
     },
   },
 
-  // Tier-2 cart fallback: the agent's browser attaches to each member's running Chromium (the
-  // LaunchAgents from `make install-chromium`) and never launches its own. Ports = profiles.json.
-  browser: {
-    profiles: {
-      "pandabase-<member1>": { cdpUrl: "http://127.0.0.1:9222", attachOnly: true },
-      "pandabase-<member2>": { cdpUrl: "http://127.0.0.1:9223", attachOnly: true },
-    },
-  },
 }
