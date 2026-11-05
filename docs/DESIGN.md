@@ -834,6 +834,20 @@ rejected (≥ 5 answered, < 50% accepted)) and keeps the top 3.
 
 Timestamps stored UTC; `HOUSEHOLD_TZ=America/Los_Angeles` defines "today" and schedules.
 
+### Database round trips
+
+Production and preview reach Turso over the network, so each statement in an interactive
+transaction is its own request, sent while the transaction holds the database's write lock. A
+service that runs once per receipt line (or item, or event) therefore gets slower with the size of
+its input and blocks every other writer for that long. Services on the interactive path keep their
+round trips **constant**: inside `batchTransaction` (`web/lib/repo/db.ts`), a write transaction
+whose handle can also `batch`, they read what they need in one batch, decide in memory with the
+pure domain functions, then send every write in one batch. Statements that need to see those
+writes, such as the `inventory_state` re-projection reads (`inventoryStateReads` /
+`inventoryStateWrites`), go at the end of that same batch. `answerReceiptReview` ("Confirm
+receipt") takes 5 round trips for any receipt; before this it took about 3 per line (27 for 2
+lines, 46 for 8). `web/test/roundTrips.ts` counts round trips, so a test can pin this down.
+
 ### Continuous deployment (M9)
 
 - **Web:** `.github/workflows/deploy.yml` runs on `workflow_run` of CI completing on `main`
@@ -1068,3 +1082,4 @@ docker-compose.yml (+ docker-compose.build.yml), Makefile, CLAUDE.md, README.md,
 | 52 | Tier 2 runs only through `pandabase-tools cart search` / `cart add` on the guarded CDP driver; the agent's OpenClaw denies `group:web` and `browser` | A local model with a raw browser on the signed-in Amazon profile could be steered by product-page text to Buy Now / checkout (OpenClaw's browser has no URL denylist; audit `models.small_params`). Search returns size-limited, labelled-untrusted JSON; add is by ASIN through tier 1's guarded path with Buy Now controls deny-listed and the cart count verified |
 | 53 | Mac mini defaults: Google Chrome for the per-member browsers, Colima allowed for Docker, the containers may reach the host only on Ollama's port, and Ollama runs with `OLLAMA_NO_CLOUD=1` | Homebrew disabled its `chromium` cask (2026-09-01) and any Chromium build speaks CDP; the worker needs only Ollama, while CDP on the host is full control of signed-in Amazon sessions; with a local reply model (photo privacy option C) no PandaBase or agent request should be able to reach a cloud model |
 | 54 | Tier 1 adds each line from its product page (`/dp/{ASIN}`, that ASIN's own `/cart/add-to-cart` form, Buy Now deny-listed), verified by the cart count rising; the batch add URL stays as `cart.tier1_method: add_url` | `/gp/aws/cart/add.html` began redirecting to the cart without adding (live smoke, 2026-11-04). One shared, verified path for tiers 1 and 2; the cart check makes re-runs idempotent per ASIN |
+| 55 | Interactive services do a constant number of database round trips: read in one batch, decide in memory, write in one batch inside `batchTransaction` (§8 *Database round trips*) | Each statement against remote Turso is a network request made while holding the write lock; a sequential statement per receipt line made "Confirm receipt" take seconds on long receipts (Preview E2E step 07b timed out) |

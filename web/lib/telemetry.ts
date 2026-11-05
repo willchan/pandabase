@@ -18,7 +18,17 @@ export async function emitTelemetry<T extends TelemetryEntry>(
   at: string,
   extra: Record<string, unknown> = {},
 ): Promise<void> {
-  if (entries.length === 0) return;
+  for (const w of telemetryWrites(q, source, entries, at, extra)) await w;
+}
+
+/** `emitTelemetry`'s inserts (100 rows each), unsent, for services that batch (`batchThen`). */
+export function telemetryWrites<T extends TelemetryEntry>(
+  q: Q,
+  source: TelemetrySource,
+  entries: readonly T[],
+  at: string,
+  extra: Record<string, unknown> = {},
+) {
   const rows = entries.map(({ metric, ...payload }: TelemetryEntry) => ({
     id: ulid(Date.parse(at)),
     source,
@@ -26,9 +36,11 @@ export async function emitTelemetry<T extends TelemetryEntry>(
     payload: { ...payload, ...extra },
     createdAt: at,
   }));
+  const out = [];
   for (let i = 0; i < rows.length; i += 100) {
-    await q.insert(systemTelemetry).values(rows.slice(i, i + 100));
+    out.push(q.insert(systemTelemetry).values(rows.slice(i, i + 100)));
   }
+  return out;
 }
 
 /** API latency middleware row; never fails the request. */

@@ -332,11 +332,10 @@ def test_07b_confirm_receipt_in_web_ui(stack: Stack) -> None:
         loaded = "i => i.complete && i.naturalWidth > 0"
         wait_for("the receipt photo to load", lambda: img.evaluate(loaded), timeout=15)
         page.get_by_role("button", name="Confirm receipt").click()
-        # Against a preview's remote Turso the action (dozens of sequential round trips in one
-        # transaction, ~3 per receipt line) can outlast Playwright's 5 s default: tier A' saw
-        # "Confirming…" still pending at 5 s. 15 s is headroom, not a fix for that latency.
+        # The action takes a constant 5 database round trips (DESIGN §8 *Database round trips*);
+        # when it took ~3 per receipt line, tier A' saw "Confirming…" still pending at 5 s.
         try:
-            expect(page).to_have_url(re.compile(r"/cleanup\?done=receipt"), timeout=15_000)
+            expect(page).to_have_url(re.compile(r"/cleanup\?done=receipt"))
         except Exception:
             # Slow or stuck? `ui_action` is logged when the action returns (with its latencyMs);
             # no row means it never finished. Kept with SYSTEM_KEEP, like 07b-cleanup above.
