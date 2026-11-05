@@ -1118,6 +1118,26 @@ branch `claude/system-e2e`). Details, the bugs found and the security review are
   page (`nav-cart-count`, `data-itemtype` rows) incl. Whole Foods' `/cart/localmarket`, and that
   the product page's add form posts to `/cart/add-to-cart…` (if it's `handle-buy-box`, the guard
   refuses it and every add is `no_add_form` — safe, but then tier 1 needs another look).
+- **Whole Foods buy box and cart verification (follow-up PR, 2026-11-04):** the live test after
+  the guarded-tier-2 PR found two bugs in `cart_add`. (1) Every Whole Foods add was `no_add_form`
+  (`cart add --asin B000P6L3K0 --store wholefoods`): the buy box is a widget
+  (`#almAddToCart_feature_div` / `#core-dp-alm-atc-wf`, a `qs-widget-summary-atc-…
+  QuantityAndCadenceSelector-<ASIN>` widget, `#freshAddToCartButton`), and the page's only add
+  forms are sponsored `spAddToCart` ads. The tools now click that box's own button, scoped to the
+  box and the ASIN, through `control_allowed` and the guard; sponsored forms are never an add form
+  (DESIGN §6). (2) `added` came from `nav-cart-count`, which jumped 1 → 4 for one Amazon item
+  while the cart held 8; it now requires the ASIN in the vendor's cart's active rows. The Whole
+  Foods cart URL gained `almBrandId=VUZHIFdob2xlIEZvb2Rz` (base64 "UFG Whole Foods", the id the
+  guard tests and Amazon's Whole Foods storefront links use): bare `/cart/localmarket` is whichever
+  local-market brand's cart Amazon picks. Regression tests: `tests/test_cart_add.py` on a synthetic
+  `product_wholefoods.html`, including the real Playwright click path in headless Chromium (the
+  `python` CI job now installs Chromium for agent/tools). **Not verified here, no live Amazon run
+  (owner on the Mac):** that the `almBrandId` cart lists Whole Foods rows as `data-asin` /
+  `data-itemtype` in a `/cart…` form; that `#freshAddToCartButton` holds a `<button>`/`<input>`
+  (a clickable `<span>` alone isn't found → `no_add_form`, safe); that the quantity control is
+  inside the box (otherwise WF quantities > 1 aren't added); and that the widget's add finishes
+  within the 5 s network-idle wait (otherwise `unverified`). `make smoke` with `SMOKE_CART=1` and a
+  WF ASIN checks all four; then `cart.wholefoods_tier1` can be turned on.
 - **Members on first sign-in (follow-up PR):** `currentMember()` creates the `member` row for an
   allowed email on its first page view (`ensureMember`; DESIGN §3.1, §10 #42), replacing the
   `NotAMember` dead end. The API still answers 403 `not a household member` for a session without

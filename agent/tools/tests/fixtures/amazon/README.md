@@ -17,6 +17,7 @@ form's `action`, `ASIN.n` inputs, and visible text.
 | `search_results.html` | tier-2 search results: sponsored, size swatch, unavailable, an injection-style title, a legacy row |
 | `cart_view_recs.html` | where `/gp/aws/cart/add.html` lands now: the cart, unchanged, with recommendation add forms |
 | `product_add_form.html` | product page with the add-to-cart form (Buy Now inside it) and a related-item form |
+| `product_wholefoods.html` | Whole Foods product page: buy-box widget (no form), sponsored `spAddToCart` ads (one for the same item), another item's widget outside the buy box |
 | `product_unavailable.html` | product page with no add form for its own ASIN |
 | `search_no_results.html` | tier-2 search with no results |
 | `orders_list_p1.html`, `orders_list_p2.html` | order history, two pages |

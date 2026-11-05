@@ -238,14 +238,22 @@ class _Many:
 
 
 class _Form:
-    def __init__(self, controls: list[dict[str, str]], qty_fields: int, log: list[str]) -> None:
+    def __init__(
+        self,
+        controls: list[dict[str, str]],
+        qty_fields: int,
+        log: list[str],
+        ident: str = "/cart/add-to-cart/ref=dp_start addToCart",
+    ) -> None:
         self.controls = [_Ctl(d, log) for d in controls]
-        self.qty_fields, self.log = qty_fields, log
+        self.qty_fields, self.log, self.ident = qty_fields, log, ident
 
     def locator(self, _sel: str) -> _Many:
         return _Many(self.controls)
 
-    def evaluate(self, _js: str, qty: int) -> int:
+    def evaluate(self, _js: str, qty: int | None = None) -> int | str:
+        if qty is None:  # FORM_IDENT_JS: the form's action, id and name
+            return self.ident
         self.log.append(f"qty:{qty}")
         return self.qty_fields
 
@@ -277,6 +285,15 @@ def test_cdp_add_to_cart_sets_qty_and_never_clicks_buy_now() -> None:
     assert driver.add_to_cart("B0SYNTH202", 2) is not None
     assert log == ["qty:2", "click:submit.addToCart"]  # the Buy-Now-only form was passed over
     assert "input[value='B0SYNTH202']" in page.selectors
+
+
+def test_cdp_add_to_cart_passes_over_a_sponsored_form_for_the_same_asin() -> None:
+    log: list[str] = []
+    add = {"name": "submit.addToCart", "value": "Add to cart"}
+    ad = _Form([add], 1, log, ident="/cart/add-to-cart/ref=spAddToCart_dp_1  spAddToCart")
+    driver = CdpDriver("http://127.0.0.1:9222")
+    driver._page = _FormPage([ad])  # type: ignore[assignment]
+    assert driver.add_to_cart("B0SYNTH202", 1) is None and log == []
 
 
 def test_cdp_add_to_cart_wont_add_a_wrong_quantity() -> None:

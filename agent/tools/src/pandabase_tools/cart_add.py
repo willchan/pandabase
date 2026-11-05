@@ -1,10 +1,13 @@
 """Add one ASIN to the cart from its product page — the add path tiers 1 and 2 share (DESIGN §6).
 
 Amazon's `/gp/aws/cart/add.html?ASIN.1=…` stopped adding anything (2026-11-04: it redirects to
-the cart), so each line is added the way a person would: open `/dp/{ASIN}`, submit *that ASIN's
-own* add-to-cart form (action `/cart/add-to-cart…`, an input whose value is the ASIN, an allowed
-submit — `browser.control_allowed` never lets Buy Now / 1-Click / Turbo be the control), then
-re-read the cart page and count it as added only if the cart count rose. An ASIN already in the
+the cart), so each line is added the way a person would: open `/dp/{ASIN}` and use *that ASIN's
+own* add control — its add-to-cart form (action `/cart/add-to-cart…`, an input whose value is the
+ASIN, an allowed submit), or on a Whole Foods page the buy-box widget bound to the ASIN (no form
+there; the page's only add forms are sponsored `spAddToCart` ads, which are never used).
+`browser.control_allowed` never lets Buy Now / 1-Click / Turbo / subscribe be the control. Then
+re-read the vendor's cart and count it as added only if the ASIN is now one of its active rows
+(`#nav-cart-count` is not trusted: live, it jumped 1 → 4 for one item). An ASIN already in the
 active cart is not added again, so a re-run never doubles a line. Every navigation goes through
 the guard; no page text is returned to the model.
 """
@@ -16,14 +19,27 @@ from dataclasses import dataclass
 from typing import Literal
 
 from . import dom, guard
-from .browser import ADD_FORM_ACTION, ASIN_RE, Driver, NotSignedIn, control_allowed
+from .browser import (
+    ADD_FORM_ACTION,
+    ASIN_RE,
+    SPONSORED_FORM,
+    WF_BUTTON_ID,
+    WF_BUY_BOX_IDS,
+    WF_WIDGET_ID,
+    Driver,
+    NotSignedIn,
+    control_allowed,
+)
 from .telemetry import Telemetry
 
 PRODUCT_URL = "https://www.amazon.com/dp/{asin}"
 CART_URL = "https://www.amazon.com/gp/cart/view.html"
-# Whole Foods items live in their own cart (the smoke check reads the same page). Unverified live:
-# whether `nav-cart-count` there counts the Whole Foods cart (README smoke; PLAN Notes).
-CART_URLS = {"amazon": CART_URL, "wholefoods": "https://www.amazon.com/cart/localmarket"}
+# Whole Foods items live in their own cart. `/cart/localmarket` alone shows the grocery cart of
+# whichever local-market brand Amazon picks (Amazon Fresh or Whole Foods); `almBrandId` is base64
+# "UFG Whole Foods", the id Amazon's Whole Foods storefront links carry. Not yet seen live with
+# Whole Foods rows on it (PLAN Notes); the smoke check reads the same URL.
+WF_CART_URL = "https://www.amazon.com/cart/localmarket?almBrandId=VUZHIFdob2xlIEZvb2Rz"
+CART_URLS = {"amazon": CART_URL, "wholefoods": WF_CART_URL}
 SUBTOTAL_COUNT = re.compile(r"subtotal\s*\(\s*(\d+)\s+items?\s*\)", re.I)
 
 AddResult = Literal["added", "already_in_cart", "failed"]
@@ -45,11 +61,29 @@ def _submits(form: dom.Node) -> list[dom.Node]:
     ]
 
 
+def _describe(node: dom.Node) -> dict[str, str]:
+    """What `browser.DESCRIBE_JS` reports for a control, from the parsed page."""
+    form = next((a for a in node.ancestors() if a.tag == "form"), None)
+    return {
+        **node.attrs,
+        "text": node.text(),
+        "form_action": form.attrs.get("action", "") if form else "",
+    }
+
+
+def sponsored(form: dom.Node) -> bool:
+    """A sponsored ad's add form (`spAddToCart`): never this page's add control."""
+    return bool(
+        SPONSORED_FORM.search(" ".join(form.attrs.get(k, "") for k in ("action", "id", "name")))
+    )
+
+
 def add_form(root: dom.Node, asin: str) -> dom.Node | None:
-    """The add-to-cart form for `asin` with a control the driver may click, if the page has one."""
+    """The add-to-cart form for `asin` with a control the driver may click, if the page has one.
+    Sponsored ads are never it, even for the same ASIN."""
     for form in root.find_all("form"):
         action = form.attrs.get("action", "")
-        if ADD_FORM_ACTION not in action:
+        if ADD_FORM_ACTION not in action or sponsored(form):
             continue
         if not any(n.tag == "input" and n.attrs.get("value") == asin for n in form.iter()):
             continue
@@ -61,9 +95,44 @@ def add_form(root: dom.Node, asin: str) -> dom.Node | None:
     return None
 
 
+def _widget_asin(node: dom.Node) -> str | None:
+    m = WF_WIDGET_ID.match(node.attrs.get("id", ""))
+    return m.group(1) if m else None
+
+
+def wf_add_control(root: dom.Node, asin: str) -> dom.Node | None:
+    """A Whole Foods buy box's add button for `asin` (`CdpDriver` applies the same rule).
+
+    The buy box (`#almAddToCart_feature_div` / `#core-dp-alm-atc-wf`) must be bound to this ASIN
+    and no other: the `qs-widget-summary-atc-…QuantityAndCadenceSelector-<ASIN>` widgets inside it
+    or around it name only `asin`. The control is the first button/input in (or being)
+    `#freshAddToCartButton` inside that box, and it must pass `control_allowed`. Another item's
+    widget elsewhere on the page (same button id) and sponsored ads are never it.
+    """
+    for box in root.iter():
+        if box.attrs.get("id") not in WF_BUY_BOX_IDS:
+            continue
+        bound = {a for n in [*box.iter(), *box.ancestors()] if (a := _widget_asin(n))}
+        if bound != {asin}:
+            continue
+        for holder in box.iter():
+            if holder.attrs.get("id") != WF_BUTTON_ID:
+                continue
+            control = next((c for c in holder.iter() if c.tag in ("button", "input")), None)
+            if control is not None and control_allowed(_describe(control)):
+                return control
+    return None
+
+
+def add_control(root: dom.Node, asin: str) -> dom.Node | None:
+    """`asin`'s own add control on its product page: its add form, else a Whole Foods buy box."""
+    return add_form(root, asin) or wf_add_control(root, asin)
+
+
 def cart_state(html: str) -> tuple[int | None, set[str]]:
     """(item count, ASINs in the active cart). Saved-for-later and recommendations don't count:
-    only `data-asin` rows inside a cart form whose `data-itemtype` isn't `saved`."""
+    only `data-asin` rows inside a cart form whose `data-itemtype` isn't `saved`. The count
+    (`#nav-cart-count`, else "Subtotal (N items)") is reported, never used to decide an add."""
     root = dom.parse(html)
     count: int | None = None
     for node in root.iter():
@@ -102,7 +171,7 @@ def add_one(
             out.outcome = "already_in_cart"
             return out
         page = driver.open(guard.check_url(url))
-        if add_form(dom.parse(page.html), asin) is None:
+        if add_control(dom.parse(page.html), asin) is None:
             tel.emit("selector_error", selector="product_add_form", error="not_found", page=url)
             out.reason = "no_add_form"
             return out
@@ -112,13 +181,12 @@ def add_one(
             return out
         after, now_in = cart_state(driver.open(cart_url).html)
         out.cart_count_after = after
-        # No count on the page: fall back to the ASIN appearing in the active cart.
-        known = before is not None and after is not None
-        rose = (after or 0) > (before or 0) if known else asin in now_in
-        if rose:
+        # Only the ASIN in this vendor's active rows counts: `nav-cart-count` jumped 1 → 4 for one
+        # Amazon item while the cart held 8 (live, 2026-11-04).
+        if asin in now_in:
             out.outcome = "added"
         else:
-            tel.emit("selector_error", selector="cart_count", error="unverified", page=url)
+            tel.emit("selector_error", selector="cart_rows", error="unverified", page=url)
             out.reason = "unverified"
     except NotSignedIn:
         out.reason = "not_signed_in"

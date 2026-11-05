@@ -672,16 +672,27 @@ JSON on stdout; exit 0 ok, 1 error, 2 usage, 3 profile locked, 4 refused URL):
   `failed`. A build state file makes re-runs resume without adding a line twice. Whole Foods
   tier 1 is **unverified**: `cart.wholefoods_tier1` defaults to `false` (WF lines →
   `needs_agent`) until `make smoke` proves it.
-- `cart_add.py` — the one add path tiers 1 and 2 share. Read the cart page (Amazon
-  `/gp/cart/view.html`, Whole Foods `/cart/localmarket`; count from `nav-cart-count`, else
-  "Subtotal (N items)"; active rows = `data-asin` in a `/cart` form that isn't an add form, not
-  `data-itemtype="saved"`): an ASIN already there is `already_in_cart` (a re-run never doubles a
-  line). Otherwise open `/dp/{ASIN}`, find **that ASIN's own** add-to-cart form (action contains
+- `cart_add.py` — the one add path tiers 1 and 2 share. Read the vendor's cart (Amazon
+  `/gp/cart/view.html`; Whole Foods `/cart/localmarket?almBrandId=VUZHIFdob2xlIEZvb2Rz` — bare
+  `/cart/localmarket` is whichever local-market brand's grocery cart Amazon picks; active rows =
+  `data-asin` in a `/cart` form that isn't an add form, not `data-itemtype="saved"`): an ASIN
+  already there is `already_in_cart` (a re-run never doubles a line). Otherwise open `/dp/{ASIN}`
+  and find **that ASIN's own** add control: its add-to-cart form (action contains
   `/cart/add-to-cart`, an input whose value is the ASIN, a submit `control_allowed` accepts —
-  related-item forms carry other ASINs; Buy Now is never the control), set its quantity field
-  (`CdpDriver.add_to_cart`; a quantity > 1 with no quantity field is not added), submit, and
-  re-read the cart: `added` only if the count rose (no count: the ASIN appears), else
-  `unverified`. No add form → `no_add_form`. Nothing from the product page reaches the model.
+  related-item forms carry other ASINs; a sponsored ad's form (`spAddToCart` in its action, id or
+  name) never counts, even for the same ASIN; Buy Now is never the control), else the **Whole
+  Foods buy box**, which is a widget, not a form: a `#almAddToCart_feature_div` /
+  `#core-dp-alm-atc-wf` box whose `qs-widget-summary-atc-…QuantityAndCadenceSelector-<ASIN>`
+  widgets (inside or around it) name this ASIN and no other, and the first button/input of
+  `#freshAddToCartButton` inside it, if `control_allowed` (another item's widget elsewhere on the
+  page, same button id, is never it). `cart_add.add_control` decides on the parsed page;
+  `CdpDriver.add_to_cart` applies the same rule with locators, sets the quantity field in the form
+  or box (a quantity > 1 with no quantity field is not added), clicks, and for the widget waits
+  (≤ `WIDGET_SETTLE_MS`, 5 s) for the network to go idle. Then re-read the cart: `added` only if
+  the ASIN is now in its **active rows**, else `unverified` (`selector_error` `cart_rows`).
+  `nav-cart-count` / "Subtotal (N items)" is reported (`cart_count_before/after`) but never
+  decides: live it jumped 1 → 4 for one item. No add control → `no_add_form`. Nothing from the
+  product page reaches the model.
 - `cart_tier2.py` (`cart search`, `cart add`) — tier 2 on the same guarded CDP driver, so the
   agent never needs OpenClaw's `browser` tool (§10 #52). `cart search --query Q [--store
   amazon|wholefoods] [--limit N]` opens one results page (`/s?k=…`, Whole Foods `&i=wholefoods`;
@@ -1079,7 +1090,7 @@ docker-compose.yml (+ docker-compose.build.yml), Makefile, CLAUDE.md, README.md,
 | 49 | Vercel Preview has its own API tokens, cron secret, `AUTH_SECRET`, allowlist and R2 bucket (scoped token); only the Google client, R2 account id and time zone are shared | Previews run unreviewed PR code, so a preview secret must be worthless on production and previews must not reach the household's photos; the Google secret alone can't sign anyone in (redirect URIs + `AUTH_SECRET`) |
 | 50 | PR previews are tested end to end (tier A′) by re-running tier A's steps in a remote mode against the real deployment, triggered by Vercel's `repository_dispatch` (reported as a commit status), on a preview DB that each run resets — guarded by two independent "preview" signals; reported, not required yet | Tier A can't see Vercel, Turso or R2; reusing its steps keeps one test of the week; the dispatch waits for the real build without polling, and runs `main`'s workflow definition; requiring it waits until it has proven stable |
 | 51 | Production gets a read-only smoke after every web deploy that reports (job, Discord, telemetry) but never rolls back | A smoke that can write could damage the household's data; rollback has side effects (Vercel stops auto-promoting, old env vars) that a human should choose; the Mac Mini already rolls back its own worker |
-| 52 | Tier 2 runs only through `pandabase-tools cart search` / `cart add` on the guarded CDP driver; the agent's OpenClaw denies `group:web` and `browser` | A local model with a raw browser on the signed-in Amazon profile could be steered by product-page text to Buy Now / checkout (OpenClaw's browser has no URL denylist; audit `models.small_params`). Search returns size-limited, labelled-untrusted JSON; add is by ASIN through tier 1's guarded path with Buy Now controls deny-listed and the cart count verified |
+| 52 | Tier 2 runs only through `pandabase-tools cart search` / `cart add` on the guarded CDP driver; the agent's OpenClaw denies `group:web` and `browser` | A local model with a raw browser on the signed-in Amazon profile could be steered by product-page text to Buy Now / checkout (OpenClaw's browser has no URL denylist; audit `models.small_params`). Search returns size-limited, labelled-untrusted JSON; add is by ASIN through tier 1's guarded path with Buy Now controls deny-listed and the ASIN verified in the cart's active rows |
 | 53 | Mac mini defaults: Google Chrome for the per-member browsers, Colima allowed for Docker, the containers may reach the host only on Ollama's port, and Ollama runs with `OLLAMA_NO_CLOUD=1` | Homebrew disabled its `chromium` cask (2026-09-01) and any Chromium build speaks CDP; the worker needs only Ollama, while CDP on the host is full control of signed-in Amazon sessions; with a local reply model (photo privacy option C) no PandaBase or agent request should be able to reach a cloud model |
-| 54 | Tier 1 adds each line from its product page (`/dp/{ASIN}`, that ASIN's own `/cart/add-to-cart` form, Buy Now deny-listed), verified by the cart count rising; the batch add URL stays as `cart.tier1_method: add_url` | `/gp/aws/cart/add.html` began redirecting to the cart without adding (live smoke, 2026-11-04). One shared, verified path for tiers 1 and 2; the cart check makes re-runs idempotent per ASIN |
+| 54 | Tier 1 adds each line from its product page (`/dp/{ASIN}`, that ASIN's own `/cart/add-to-cart` form — or, for Whole Foods, its buy-box widget — never Buy Now or a sponsored ad), verified by the ASIN appearing in that vendor's cart's active rows (not the cart count); the batch add URL stays as `cart.tier1_method: add_url` | `/gp/aws/cart/add.html` began redirecting to the cart without adding (live smoke, 2026-11-04). One shared, verified path for tiers 1 and 2; the cart check makes re-runs idempotent per ASIN. Live (2026-11-04) `nav-cart-count` jumped 1 → 4 for one item, and Whole Foods pages have no add form of their own |
 | 55 | Interactive services do a constant number of database round trips: read in one batch, decide in memory, write in one batch inside `batchTransaction` (§8 *Database round trips*) | Each statement against remote Turso is a network request made while holding the write lock; a sequential statement per receipt line made "Confirm receipt" take seconds on long receipts (Preview E2E step 07b timed out) |

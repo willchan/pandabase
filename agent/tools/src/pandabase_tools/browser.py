@@ -9,6 +9,7 @@ and closes only that tab. Tests use a fixture-backed fake with the same protocol
 
 from __future__ import annotations
 
+import contextlib
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -25,9 +26,31 @@ if TYPE_CHECKING:
 # Located by form action and input type, with an accessible-name fallback — no class names.
 CONFIRM_SELECTOR = "form[action*='/cart/add'] [type=submit], form[action*='/cart/add'] button"
 CONFIRM_NAME = re.compile(r"^\s*(continue|add to (your )?cart|add all to cart)\s*$", re.I)
-# Product-page add (tiers 1 and 2, `cart_add`): the ASIN's own add-to-cart form.
+# Product-page add (tiers 1 and 2, `cart_add`): the ASIN's own add-to-cart form ...
 ADD_FORM_ACTION = "/cart/add-to-cart"
 ASIN_RE = re.compile(r"^[A-Z0-9]{10}$")
+# ... never a sponsored ad's (matched against the form's action, id and name) ...
+SPONSORED_FORM = re.compile(r"spAddToCart", re.I)
+# ... or, on a Whole Foods page (no form), the buy-box widget bound to the ASIN.
+WF_BUY_BOX_IDS = ("almAddToCart_feature_div", "core-dp-alm-atc-wf")
+WF_WIDGET_ID = re.compile(r"^qs-widget-summary-atc-.*QuantityAndCadenceSelector-([A-Z0-9]{10})$")
+WF_BUTTON_ID = "freshAddToCartButton"
+# The widget adds without a page load; wait (bounded) for its request before re-reading the cart.
+WIDGET_SETTLE_MS = 5_000
+WIDGET_BOUND_JS = r"""box => {
+  const re = /^qs-widget-summary-atc-.*QuantityAndCadenceSelector-([A-Z0-9]{10})$/;
+  const asins = new Set();
+  for (let n = box.parentElement; n; n = n.parentElement) {
+    const m = re.exec(n.id || ""); if (m) asins.add(m[1]);
+  }
+  for (const n of box.querySelectorAll("[id^='qs-widget-summary-atc-']")) {
+    const m = re.exec(n.id); if (m) asins.add(m[1]);
+  }
+  return [...asins];
+}"""
+FORM_IDENT_JS = (
+    """f => [f.getAttribute("action") || "", f.id || "", f.getAttribute("name") || ""].join(" ")"""
+)
 SET_QTY_JS = """(form, q) => {
   let n = 0;
   for (const el of form.querySelectorAll("input, select")) {
@@ -177,13 +200,19 @@ class CdpDriver:
         return None
 
     def add_to_cart(self, asin: str, qty: int) -> Snapshot | None:
+        """`asin`'s own add form, else its Whole Foods buy-box widget (`cart_add.add_control`)."""
         if not ASIN_RE.match(asin):  # it goes into a selector below
             raise ValueError(f"not an ASIN: {asin!r}")
+        return self._add_by_form(asin, qty) or self._add_by_widget(asin, qty)
+
+    def _add_by_form(self, asin: str, qty: int) -> Snapshot | None:
         forms = self.page.locator(f"form[action*='{ADD_FORM_ACTION}']").filter(
             has=self.page.locator(f"input[value='{asin}']")
         )
         for i in range(forms.count()):
             form = forms.nth(i)
+            if SPONSORED_FORM.search(form.evaluate(FORM_IDENT_JS)):
+                continue  # a sponsored ad, even for this ASIN
             controls = form.locator("[type=submit], button")
             allowed = [
                 controls.nth(j)
@@ -198,3 +227,29 @@ class CdpDriver:
             self.page.wait_for_load_state("domcontentloaded")
             return self._snapshot()
         return None
+
+    def _add_by_widget(self, asin: str, qty: int) -> Snapshot | None:
+        """The Whole Foods buy box bound to `asin` alone; its first control in
+        `#freshAddToCartButton`, if `control_allowed`. Same rule as `cart_add.wf_add_control`."""
+        boxes = self.page.locator(", ".join(f"[id='{b}']" for b in WF_BUY_BOX_IDS))
+        for i in range(boxes.count()):
+            box = boxes.nth(i)
+            if box.evaluate(WIDGET_BOUND_JS) != [asin]:
+                continue
+            control = box.locator(
+                f"[id='{WF_BUTTON_ID}']:is(button, input), [id='{WF_BUTTON_ID}'] :is(button, input)"
+            ).first
+            if control.count() == 0 or not control_allowed(control.evaluate(DESCRIBE_JS)):
+                continue
+            if box.evaluate(SET_QTY_JS, qty) == 0 and qty != 1:
+                continue  # can't set the quantity: don't add the wrong amount
+            control.click()
+            self._settle()
+            return self._snapshot()
+        return None
+
+    def _settle(self) -> None:
+        from playwright.sync_api import TimeoutError as PlaywrightTimeout
+
+        with contextlib.suppress(PlaywrightTimeout):  # never idle: the cart check decides
+            self.page.wait_for_load_state("networkidle", timeout=WIDGET_SETTLE_MS)

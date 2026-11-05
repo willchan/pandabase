@@ -41,6 +41,7 @@ class FakeDriver:
         self.landed: list[str] = []
         self.clicks = 0
         self.added: list[tuple[str, int]] = []
+        self.controls: list[dom.Node] = []  # what `add_to_cart` clicked
         self.current: str | None = None
         self.html = ""
 
@@ -65,10 +66,13 @@ class FakeDriver:
         return None if page is None else self._land(page)
 
     def add_to_cart(self, asin: str, qty: int) -> Snapshot | None:
-        """What `CdpDriver.add_to_cart` does: submit this ASIN's own add form, never Buy Now."""
-        if cart_add.add_form(dom.parse(self.html), asin) is None:
+        """What `CdpDriver.add_to_cart` does: this ASIN's own add form, else its Whole Foods buy
+        box; never Buy Now, never a sponsored ad."""
+        control = cart_add.add_control(dom.parse(self.html), asin)
+        if control is None:
             return None
         self.clicks += 1
+        self.controls.append(control)
         self.added.append((asin, qty))
         page = self.add(asin, qty) if self.add else None
         return self._land(page) if page else checked(Snapshot(self.current or "", self.html))
