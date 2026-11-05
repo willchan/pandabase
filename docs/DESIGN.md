@@ -641,7 +641,7 @@ with `AGENT_API_TOKEN`. Discord I/O (thread creation, replies, ✅ reactions) us
 
 | Skill | Trigger | Does |
 |---|---|---|
-| `grocery-cycle` | automations Fri 18:00, Sat 10:00, Mon 09:00; replies in the cycle thread | Open cycles (thread per cycle), record list edits/skips/away/other-store, Friday nudge (incl. freezer), Saturday build (`cart build` → tier-2 fallback with `cart search` / `cart add`, never the browser tool → `cart finish` → summary) |
+| `grocery-cycle` | automations Fri 18:00, Sat 10:00, Mon 09:00; replies in the cycle thread | Open cycles (thread per cycle), record list edits/skips/away/other-store, Friday nudge (incl. freezer), Saturday build (`cart build` → a `layout_alert` goes once to the ops channel → tier-2 fallback with `cart search` / `cart add`, never the browser tool → `cart finish` → summary). The Fri 15:00 add-button check is a **command automation** (`pandabase-tools cart probe --reply` → ops channel, `NO_REPLY` when fine) |
 | `discord-intake` | photo or inventory text in `#pandabase` | Photos: `photo submit` (classify, upload, create job); text purchases, "we're out", "froze X", "never buy X" → inventory events / product reject. Job results are posted by a **command automation** (`pandabase-tools jobs replies` every 5 min, no model call) |
 | `digital-receipt-scraper` | automations daily 21:00 (cart member), Sun 21:00 (other member); backfill on request | `receipts sweep` per member profile → `/api/receipts/ingest`; agent extracts zero-ASIN pages; a finished backfill ends with `POST /api/catalog/merge-suggestions/run` |
 | `item-lookup` | "do we have X?" anywhere the bot is addressed | `/api/items/lookup` → `matches[0].text` |
@@ -720,6 +720,19 @@ JSON on stdout; exit 0 ok, 1 error, 2 usage, 3 profile locked, 4 refused URL):
   is `cart_add.add_one` for that ASIN (`added`, `already_in_cart`, or `failed` with a reason).
   ASIN must be 10 upper-case alphanumerics, `1 ≤ qty ≤ cart.tier2_max_qty` (10). Telemetry `cart_tier2_search {store, results}` and `cart_tier2_line
   {asin, vendor, quantity, outcome, error}`.
+- `layout_watch.py` — notices Amazon layout breakage (§10 #56). **Build alert:** after tier 1,
+  `cart build` returns `layout_alert {page_failures, attempted, reasons, asins}` when at least
+  `cart.layout_alert_min_lines` (2) of the lines tier 1 tried this run were not added for a page
+  reason (`no_add_form`, `unverified`, and the add-URL path's `layout_changed`, `not_offered`,
+  `confirm_not_found`) and they are at least `cart.layout_alert_share` (½) of them. Sign-in, guard
+  refusals, `extra_items` and exceptions (timeouts) don't count. It is raised once per cycle
+  (kept in the build state file; a re-run returns `null` with `layout_alert_already_raised`) and
+  emits `cart_layout_alert {cycle_id, …}`; the skill posts it to `ops_channel`. **Weekly check:**
+  `cart probe` opens `/dp/<ASIN>` for `cart.probe_asins.amazon` and `.wholefoods`, and reports per
+  store `found` (landed on that `/dp/` page and `cart_add.add_control` finds its control) or a
+  reason (`no_add_form`, `not_product_page`, `not_signed_in`, `refused_*`, an exception name),
+  telemetry `cart_probe {store, asin, found, reason}`. It clicks nothing and opens no cart page;
+  it takes the profile lock (busy → "skipped" line with `--reply`).
 - `receipt_parser.py` (`receipts sweep [--backfill]`) — attaches over CDP to a member's profile.
   Collect phase: walk order history newest-first (`orderID=` links; card = widest ancestor
   mentioning only that order) back to the cursor date minus a 14-day overlap (no cursor: 30
@@ -803,7 +816,9 @@ error?}` from every server action. The report reads these client metrics (payloa
 `vlm_parse_failure`, `selector_error {selector, error, page}`, `price_lookup_failed {asin,
 product_id, error}`, `cart_tier1_line {asin, item_id, product_id, vendor, outcome, error}`,
 `cart_tier2_search {store, results}`, `cart_tier2_line {asin, vendor, quantity, outcome, error}`
-(cart-injection extract and tool counts), `clarifying_question {question}`, `photo_classified {job_type, basis}` and `photo_reclassified
+(cart-injection extract and tool counts), `cart_layout_alert {cycle_id, page_failures, attempted,
+reasons}` (summary finding above all others) and `cart_probe {store, asin, found, reason}`
+(per-store found / not-found table and a finding per miss; both in the cart-injection extract), `clarifying_question {question}`, `photo_classified {job_type, basis}` and `photo_reclassified
 {to_job_type}` (UX section: photos by classification basis and human re-files). The agent
 tools also emit `receipt_sweep {member, mode, pages, ingested, duplicates, pending, needs_agent,
 errors, complete}` (stored for ad-hoc queries; no report section). The worker's `vlm_inference` /
@@ -835,7 +850,8 @@ sha, outcome, previous_sha?, reason?, run_url?, host?}` — posted with the agen
    up to now — each also a `worker_gap` row in the `vlm` extract with the heartbeats and merge
    metrics)
 5. Product choice (switches, overrides, threshold drift)
-6. Cart injection (tier-1 success, tier-2 fallbacks, failures with selector/error)
+6. Cart injection (tier-1 success, tier-2 fallbacks, failures with selector/error, layout alerts
+   and the weekly add-button check)
 7. UX friction (expired items, answered reviews by kind/outcome with median age, clarifying
    questions, slow routes)
 8. Deploys (per component: deploys, succeeded, failed/rolled back; Mac Mini rollbacks; every
@@ -1111,3 +1127,4 @@ docker-compose.yml (+ docker-compose.build.yml), Makefile, CLAUDE.md, README.md,
 | 53 | Mac mini defaults: Google Chrome for the per-member browsers, Colima allowed for Docker, the containers may reach the host only on Ollama's port, and Ollama runs with `OLLAMA_NO_CLOUD=1` | Homebrew disabled its `chromium` cask (2026-09-01) and any Chromium build speaks CDP; the worker needs only Ollama, while CDP on the host is full control of signed-in Amazon sessions; with a local reply model (photo privacy option C) no PandaBase or agent request should be able to reach a cloud model |
 | 54 | Tier 1 adds each line from its product page (`/dp/{ASIN}`, that ASIN's own add control: the buy box's `submit.add-to-cart` button, else its own single-ASIN `/cart/add-to-cart` form, or for Whole Foods its buy-box widget — never Buy Now, a subscription, a bundle or a sponsored ad), verified by the ASIN appearing in that vendor's cart's active rows (not the cart count); the batch add URL stays as `cart.tier1_method: add_url` | `/gp/aws/cart/add.html` began redirecting to the cart without adding (live smoke, 2026-11-04). One shared, verified path for tiers 1 and 2; the cart check makes re-runs idempotent per ASIN. Live (2026-11-04) `nav-cart-count` jumped 1 → 4 for one item, and Whole Foods pages have no add form of their own. The buy-box form posts to `handle-buy-box` (Buy Now's endpoint, still refused), but its "Add to cart" button posts to `/cart/add-to-cart` through `formaction`, so that one button is used (owner decision, 2026-11-05): refusing the whole buy box left only sponsored forms, and one added a 3-item bundle |
 | 55 | Interactive services do a constant number of database round trips: read in one batch, decide in memory, write in one batch inside `batchTransaction` (§8 *Database round trips*) | Each statement against remote Turso is a network request made while holding the write lock; a sequential statement per receipt line made "Confirm receipt" take seconds on long receipts (Preview E2E step 07b timed out) |
+| 56 | Amazon layout breakage is watched two ways: a build alert (≥ 2 tier-1 lines and ≥ half of them failed for a page reason, once per cycle, to the ops channel) and a Friday 15:00 add-button check on one Amazon and one Whole Foods page that clicks nothing | Amazon changes pages without notice (the add URL died 2026-11-04); one odd line is noise, most of a build is a layout. The check reuses tier 1's own `add_control` rule, so it tests what Saturday will do, and runs a day early with two page loads (live runs had already drawn a `/checkpoint`) |

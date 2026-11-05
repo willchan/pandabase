@@ -261,6 +261,7 @@ missing; both gitignored). Edit `agent/pandabase.config.json`:
 | `members[]` | `name`, `discord_id`, `profile` (= key in `profiles.json`), `cart_member` (exactly one `true`), `receipt_sweep` (`daily`/`weekly`/`off`) — match step 7 |
 | `diagnostics_dir` | already the repo's `diagnostics/` (gitignored) |
 | `cart.wholefoods_tier1` | leave `false` until step 13 says otherwise |
+| `cart.probe_asins` | `{"amazon": "<ASIN>", "wholefoods": "<ASIN>"}`: one everyday, rarely-out-of-stock product per store for the Friday add-button check (`cart probe`); its page is opened weekly, nothing is clicked |
 
 Make sure `~/.local/bin` is on your `PATH`. The OpenClaw gateway needs it too: if `openclaw
 skills check` (step 11) reports `pandabase-tools` missing, link it into a directory the gateway
@@ -397,8 +398,8 @@ asks the State Engine for merge suggestions (backfilled products start as unveri
 show up in *Cleanup → Merges* and nobody has to answer them. Then check
 the *Pantry* page: items should show purchase history and estimates.
 
-You're done. From here the automations run the week: Friday 18:00 nudge, Saturday 10:00 cart
-build, nightly receipt sweeps, Sunday 23:00 diagnostics (see [PRD §4](docs/PRD.md)).
+You're done. From here the automations run the week: Friday 15:00 add-button check (silent
+unless Amazon's layout broke), Friday 18:00 nudge, Saturday 10:00 cart build, nightly receipt sweeps, Sunday 23:00 diagnostics (see [PRD §4](docs/PRD.md)).
 
 ---
 

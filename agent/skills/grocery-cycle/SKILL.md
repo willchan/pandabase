@@ -137,6 +137,13 @@ from its product page in the cart member's Chromium (tier 1), and prints
 - `status: "no_cycle"` / `"not_current"` → do §1, then run `cart build` again once.
 - exit code 3 (`profile_locked`) → another job is using the browser; try once more in 10 minutes
   (one retry only), then post the ⚠️ summary with everything as not added.
+- `layout_alert` is not null → first post **once** to `channels.ops_channel` (not the cycle
+  thread), then carry on with the steps below as usual:
+
+  > ⚠️ **Amazon's layout probably changed** — 3 of 4 cart lines couldn't be added from their product pages (no_add_form 3). Lines go to search; the cart tools need a look.
+
+  Fill in `page_failures`, `attempted` and `reasons` from `layout_alert`. A re-run of the same
+  build returns `layout_alert: null` (it was already raised): don't post again.
 - `status: "ready"` → nothing needed the agent; post the summary.
 - `status: "needs_agent"` → tier 2 below, then the summary.
 
@@ -185,6 +192,10 @@ pandabase-tools cart finish --cycle-id <C> --outcomes '{"<index>": "tier2", "<in
 
 Use each line's `reason_text` only when the product was switched or is notable; keep it to one
 line per section, truncating with "+N more".
+
+The Friday 15:00 `pandabase-cart-probe` automation (`pandabase-tools cart probe --reply`, no
+model turn) checks one Amazon and one Whole Foods product page still have a findable add button
+and posts to the ops channel only when one doesn't. You don't run it.
 
 The cycle closes by itself when the order's digital receipt is ingested (the receipt skill posts
 it), or when someone says "done".

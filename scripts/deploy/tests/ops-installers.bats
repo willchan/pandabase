@@ -12,7 +12,7 @@ setup() {
   mkdir -p "$ROOT_DIR/agent/skills"
   cp "$REPO_SRC/agent/cron.example.json" "$ROOT_DIR/agent/"
   cat >"$ROOT_DIR/agent/pandabase.config.json" <<'JSON'
-{"discord": {"intake_channel": "123"},
+{"discord": {"intake_channel": "123", "ops_channel": "456"},
  "members": [{"name": "alex", "profile": "alex", "receipt_sweep": "weekly", "cart_member": true}]}
 JSON
   printf 'PANDABASE_CONFIG=%s\n' "$ROOT_DIR/agent/pandabase.config.json" >>"$ROOT_DIR/.env"
@@ -53,4 +53,12 @@ JSON
   OPENCLAW_AGENT=pandabase run /bin/bash "$ROOT_DIR/scripts/ops/install-agent-cron.sh"
   [ "$status" -eq 0 ]
   grep -F "pandabase-receipts-alex" "$STUB/calls" | grep -qF -- "--agent pandabase"
+}
+
+@test "install-agent-cron announces each command job to its deliver_to channel" {
+  run /bin/bash "$ROOT_DIR/scripts/ops/install-agent-cron.sh"
+  [ "$status" -eq 0 ]
+  grep -F "pandabase-job-replies" "$STUB/calls" | grep -qF -- "--to channel:123"
+  grep -F "pandabase-cart-probe" "$STUB/calls" | grep -qF -- "--to channel:456"
+  grep -F "pandabase-cart-probe" "$STUB/calls" | grep -qF -- "cart probe --reply"
 }

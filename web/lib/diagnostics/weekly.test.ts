@@ -164,6 +164,54 @@ describe("weekly diagnostics", () => {
     });
   });
 
+  it("reports Amazon layout alerts and the weekly add-button check", async () => {
+    const t = (i: number, metricType: string, payload: Record<string, unknown>) => ({
+      id: `01L${String(i).padStart(23, "0")}`,
+      source: "agent",
+      metricType,
+      payload,
+      createdAt: "2026-10-24T17:10:00.000Z",
+    });
+    await h.db.insert(systemTelemetry).values([
+      t(1, "cart_probe", { store: "amazon", asin: "B0SYNTH501", found: true }),
+      t(2, "cart_probe", {
+        store: "wholefoods",
+        asin: "B0SYNTH301",
+        found: false,
+        reason: "no_add_form",
+      }),
+      t(3, "cart_layout_alert", {
+        cycle_id: "C1",
+        page_failures: 3,
+        attempted: 4,
+        reasons: { no_add_form: 2, unverified: 1 },
+        asins: ["B0SYNTH001", "B0SYNTH002", "B0SYNTH003"],
+      }),
+    ]);
+    const report = await renderWeekly(h.db, "2026-W43", {
+      now: "2026-10-26T20:00:00.000Z",
+      config: DEFAULT_CONFIG,
+    });
+    const md = report.markdown;
+    // The alert outranks every other finding; the failed check is next.
+    expect(md).toMatch(
+      /## 1\. Summary\n\n1\. Amazon layout alert: 3 of 4 tier-1 lines failed on the page \(no_add_form 2, unverified 1\)\.\n2\. Weekly add-button check failed: wholefoods B0SYNTH301 \(no_add_form\)\./,
+    );
+    expect(md).toContain(
+      "Layout alerts: 1. Weekly add-button checks: 2 pages, 1 without an add button.",
+    );
+    expect(md).toContain("| amazon | 1 | 0 |");
+    expect(md).toContain("| wholefoods | 0 | 1 |");
+    expect(md).toContain("Add button not found: wholefoods B0SYNTH301 — no_add_form");
+    expect(md).toContain("Amazon's layout probably changed");
+    const rows = report.extracts
+      .find((e) => e.name === "cart_injection.jsonl")!
+      .jsonl.trim()
+      .split("\n")
+      .map((l) => JSON.parse(l) as { metric: string });
+    expect(rows.map((r) => r.metric)).toEqual(["cart_probe", "cart_probe", "cart_layout_alert"]);
+  });
+
   it("reports suggested merges and worker health (heartbeats, Ollama, gaps)", async () => {
     // W43 runs 2026-10-19T07:00Z → 2026-10-26T07:00Z; heartbeats every 10 min except a 2h silence.
     const start = Date.parse("2026-10-19T07:00:00.000Z");
