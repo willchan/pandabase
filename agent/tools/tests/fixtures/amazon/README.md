@@ -18,6 +18,7 @@ form's `action`, `ASIN.n` inputs, and visible text.
 | `cart_view_recs.html` | where `/gp/aws/cart/add.html` lands now: the cart, unchanged, with recommendation add forms |
 | `product_add_form.html` | product page with the add-to-cart form (Buy Now inside it) and a related-item form |
 | `product_wholefoods.html` | Whole Foods product page: buy-box widget (no form), sponsored `spAddToCart` ads (one for the same item), another item's widget outside the buy box |
+| `product_wholefoods_pickup.html` | Whole Foods pickup offer as seen live: widget ids without the ASIN inside `#buybox`, an `<input type=submit>` add control, an unnamed quantity input, the cart flyout's checkout forms |
 | `product_unavailable.html` | product page with no add form for its own ASIN |
 | `search_no_results.html` | tier-2 search with no results |
 | `orders_list_p1.html`, `orders_list_p2.html` | order history, two pages |

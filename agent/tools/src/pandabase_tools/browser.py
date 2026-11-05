@@ -17,7 +17,7 @@ from types import TracebackType
 from typing import TYPE_CHECKING, Protocol, Self
 from urllib.parse import urljoin
 
-from . import guard
+from . import dom, guard
 
 if TYPE_CHECKING:
     from playwright.sync_api import Browser, Page, Playwright, Route
@@ -35,6 +35,11 @@ SPONSORED_FORM = re.compile(r"spAddToCart", re.I)
 WF_BUY_BOX_IDS = ("almAddToCart_feature_div", "core-dp-alm-atc-wf")
 WF_WIDGET_ID = re.compile(r"^qs-widget-summary-atc-.*QuantityAndCadenceSelector-([A-Z0-9]{10})$")
 WF_BUTTON_ID = "freshAddToCartButton"
+# The page's main buy box. Live pickup offers' widget ids carry a random instance number, not the
+# ASIN (probe, 2026-11-04): such a box is bound by the page — inside `#buybox` on `/dp/<ASIN>`.
+WF_PAGE_BUY_BOX_ID = "buybox"
+# The widget's own add button, used when `#freshAddToCartButton` has no visible control.
+WF_SUMMARY_ATC = "[id^='qs-widget-summary-atc-']:is(button, input)"
 # The widget adds without a page load; wait (bounded) for its request before re-reading the cart.
 WIDGET_SETTLE_MS = 5_000
 WIDGET_BOUND_JS = r"""box => {
@@ -46,7 +51,7 @@ WIDGET_BOUND_JS = r"""box => {
   for (const n of box.querySelectorAll("[id^='qs-widget-summary-atc-']")) {
     const m = re.exec(n.id); if (m) asins.add(m[1]);
   }
-  return [...asins];
+  return {asins: [...asins], inBuybox: !!box.closest("[id='buybox']")};
 }"""
 FORM_IDENT_JS = (
     """f => [f.getAttribute("action") || "", f.id || "", f.getAttribute("name") || ""].join(" ")"""
@@ -79,6 +84,16 @@ DESCRIBE_JS = """e => ({
   form_action: e.form ? (e.form.getAttribute("action") || "") : ""
 })"""
 _DESC_TEXT = ("id", "name", "value", "aria-label", "title", "text")
+
+
+def buy_box_bound(
+    widget_asins: set[str], in_buybox: bool, page_asin: str | None, asin: str
+) -> bool:
+    """Is a Whole Foods buy box `asin`'s? Its widgets may name no ASIN but `asin`; if they name
+    none, it must be the page's main buy box on `asin`'s own product page."""
+    if widget_asins:
+        return widget_asins == {asin}
+    return in_buybox and page_asin == asin
 
 
 def control_allowed(desc: Mapping[str, str]) -> bool:
@@ -229,17 +244,22 @@ class CdpDriver:
         return None
 
     def _add_by_widget(self, asin: str, qty: int) -> Snapshot | None:
-        """The Whole Foods buy box bound to `asin` alone; its first control in
-        `#freshAddToCartButton`, if `control_allowed`. Same rule as `cart_add.wf_add_control`."""
+        """The Whole Foods buy box bound to `asin` (`buy_box_bound`); its first control in
+        `#freshAddToCartButton` (else the widget's own add button) that is visible and
+        `control_allowed`. Same rule as `cart_add.wf_add_control`."""
+        page_asin = dom.asin_from_href(self.page.url)
         boxes = self.page.locator(", ".join(f"[id='{b}']" for b in WF_BUY_BOX_IDS))
         for i in range(boxes.count()):
             box = boxes.nth(i)
-            if box.evaluate(WIDGET_BOUND_JS) != [asin]:
+            bound = box.evaluate(WIDGET_BOUND_JS)
+            if not buy_box_bound(set(bound["asins"]), bound["inBuybox"], page_asin, asin):
                 continue
-            control = box.locator(
-                f"[id='{WF_BUTTON_ID}']:is(button, input), [id='{WF_BUTTON_ID}'] :is(button, input)"
-            ).first
-            if control.count() == 0 or not control_allowed(control.evaluate(DESCRIBE_JS)):
+            candidates = (
+                box.locator(f"[id='{WF_BUTTON_ID}'] :is(button, input)").first,
+                box.locator(WF_SUMMARY_ATC).first,
+            )
+            control = next((c for c in candidates if c.count() and c.is_visible()), None)
+            if control is None or not control_allowed(control.evaluate(DESCRIBE_JS)):
                 continue
             if box.evaluate(SET_QTY_JS, qty) == 0 and qty != 1:
                 continue  # can't set the quantity: don't add the wrong amount

@@ -25,9 +25,11 @@ from .browser import (
     SPONSORED_FORM,
     WF_BUTTON_ID,
     WF_BUY_BOX_IDS,
+    WF_PAGE_BUY_BOX_ID,
     WF_WIDGET_ID,
     Driver,
     NotSignedIn,
+    buy_box_bound,
     control_allowed,
 )
 from .telemetry import Telemetry
@@ -100,33 +102,43 @@ def _widget_asin(node: dom.Node) -> str | None:
     return m.group(1) if m else None
 
 
-def wf_add_control(root: dom.Node, asin: str) -> dom.Node | None:
-    """A Whole Foods buy box's add button for `asin` (`CdpDriver` applies the same rule).
+def wf_add_control(root: dom.Node, asin: str, page_url: str | None = None) -> dom.Node | None:
+    """A Whole Foods buy box's add control for `asin` (`CdpDriver` applies the same rule).
 
-    The buy box (`#almAddToCart_feature_div` / `#core-dp-alm-atc-wf`) must be bound to this ASIN
-    and no other: the `qs-widget-summary-atc-…QuantityAndCadenceSelector-<ASIN>` widgets inside it
-    or around it name only `asin`. The control is the first button/input in (or being)
-    `#freshAddToCartButton` inside that box, and it must pass `control_allowed`. Another item's
-    widget elsewhere on the page (same button id) and sponsored ads are never it.
+    The buy box (`#almAddToCart_feature_div` / `#core-dp-alm-atc-wf`) must be `asin`'s
+    (`browser.buy_box_bound`): any `qs-widget-summary-atc-…QuantityAndCadenceSelector-<ASIN>`
+    widget inside or around it names only `asin`; if none names an ASIN (live pickup offers: the
+    ids carry a random number), it must sit in the page's `#buybox` and `page_url` must be
+    `/dp/<asin>`. The control is the first button/input of `#freshAddToCartButton` in that box,
+    else the widget's own `qs-widget-summary-atc-…` button, and must pass `control_allowed`.
+    Another item's box elsewhere on the page and sponsored ads are never it.
     """
+    page_asin = dom.asin_from_href(page_url) if page_url else None
     for box in root.iter():
         if box.attrs.get("id") not in WF_BUY_BOX_IDS:
             continue
         bound = {a for n in [*box.iter(), *box.ancestors()] if (a := _widget_asin(n))}
-        if bound != {asin}:
+        in_buybox = any(a.attrs.get("id") == WF_PAGE_BUY_BOX_ID for a in box.ancestors())
+        if not buy_box_bound(bound, in_buybox, page_asin, asin):
             continue
-        for holder in box.iter():
-            if holder.attrs.get("id") != WF_BUTTON_ID:
-                continue
-            control = next((c for c in holder.iter() if c.tag in ("button", "input")), None)
-            if control is not None and control_allowed(_describe(control)):
+        holders = [n for n in box.iter() if n.attrs.get("id") == WF_BUTTON_ID]
+        fresh = [c for h in holders for c in h.iter() if c.tag in ("button", "input")][:1]
+        summary = [
+            n
+            for n in box.iter()
+            if n.tag in ("button", "input")
+            and n.attrs.get("id", "").startswith("qs-widget-summary-atc-")
+        ][:1]
+        for control in (*fresh, *summary):
+            if control_allowed(_describe(control)):
                 return control
     return None
 
 
-def add_control(root: dom.Node, asin: str) -> dom.Node | None:
-    """`asin`'s own add control on its product page: its add form, else a Whole Foods buy box."""
-    return add_form(root, asin) or wf_add_control(root, asin)
+def add_control(root: dom.Node, asin: str, page_url: str | None = None) -> dom.Node | None:
+    """`asin`'s own add control on its product page (at `page_url`): its add form, else a Whole
+    Foods buy box."""
+    return add_form(root, asin) or wf_add_control(root, asin, page_url)
 
 
 def cart_state(html: str) -> tuple[int | None, set[str]]:
@@ -171,7 +183,7 @@ def add_one(
             out.outcome = "already_in_cart"
             return out
         page = driver.open(guard.check_url(url))
-        if add_control(dom.parse(page.html), asin) is None:
+        if add_control(dom.parse(page.html), asin, page.url) is None:
             tel.emit("selector_error", selector="product_add_form", error="not_found", page=url)
             out.reason = "no_add_form"
             return out

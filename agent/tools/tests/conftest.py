@@ -68,7 +68,7 @@ class FakeDriver:
     def add_to_cart(self, asin: str, qty: int) -> Snapshot | None:
         """What `CdpDriver.add_to_cart` does: this ASIN's own add form, else its Whole Foods buy
         box; never Buy Now, never a sponsored ad."""
-        control = cart_add.add_control(dom.parse(self.html), asin)
+        control = cart_add.add_control(dom.parse(self.html), asin, self.current)
         if control is None:
             return None
         self.clicks += 1

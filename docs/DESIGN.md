@@ -682,10 +682,13 @@ JSON on stdout; exit 0 ok, 1 error, 2 usage, 3 profile locked, 4 refused URL):
   related-item forms carry other ASINs; a sponsored ad's form (`spAddToCart` in its action, id or
   name) never counts, even for the same ASIN; Buy Now is never the control), else the **Whole
   Foods buy box**, which is a widget, not a form: a `#almAddToCart_feature_div` /
-  `#core-dp-alm-atc-wf` box whose `qs-widget-summary-atc-…QuantityAndCadenceSelector-<ASIN>`
-  widgets (inside or around it) name this ASIN and no other, and the first button/input of
-  `#freshAddToCartButton` inside it, if `control_allowed` (another item's widget elsewhere on the
-  page, same button id, is never it). `cart_add.add_control` decides on the parsed page;
+  `#core-dp-alm-atc-wf` box that is this ASIN's (`browser.buy_box_bound`): any
+  `qs-widget-summary-atc-…QuantityAndCadenceSelector-<ASIN>` widget inside or around it names this
+  ASIN and no other; when none names an ASIN (live pickup offers: the widget ids carry a random
+  instance number), the box must sit in the page's `#buybox` and the page landed on must be
+  `/dp/<ASIN>`. The control is the first button/input of `#freshAddToCartButton` in the box, else
+  the widget's own `qs-widget-summary-atc-…` button (the driver takes the first visible one), if
+  `control_allowed`; another item's box elsewhere on the page is never it. `cart_add.add_control` decides on the parsed page;
   `CdpDriver.add_to_cart` applies the same rule with locators, sets the quantity field in the form
   or box (a quantity > 1 with no quantity field is not added), clicks, and for the widget waits
   (≤ `WIDGET_SETTLE_MS`, 5 s) for the network to go idle. Then re-read the cart: `added` only if

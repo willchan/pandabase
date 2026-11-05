@@ -128,6 +128,56 @@ def test_whole_foods_add_clicks_the_buy_box_and_finds_it_in_the_whole_foods_cart
     driver.assert_never_checkout()
 
 
+# Live probe after the first fix (2026-11-04, `B000P6L3K0` still `no_add_form`): on a pickup offer
+# the widget ids carry a random instance number, never the ASIN, so binding by widget id rejected
+# the right box. The box inside the page's `#buybox` on `/dp/<ASIN>` is that ASIN's.
+PICKUP = "B0SYNTH302"
+P302 = "https://www.amazon.com/dp/" + PICKUP
+PICKUP_PAGE = fixture("product_wholefoods_pickup.html")
+
+
+def test_pickup_buy_box_without_asin_in_ids_is_bound_by_the_page() -> None:
+    root = dom.parse(PICKUP_PAGE)
+    control = add_control(root, PICKUP, P302)
+    assert control is not None and control.tag == "input"
+    assert "freshAddToCartButton" in {a.attrs.get("id") for a in control.ancestors()}
+    assert "buybox" in {a.attrs.get("id") for a in control.ancestors()}
+
+
+@pytest.mark.parametrize(
+    "landed",
+    [
+        "https://www.amazon.com/dp/B0SYNTH399",  # redirected to another product
+        "https://www.amazon.com/s?k=eggs",
+        None,  # page unknown
+    ],
+)
+def test_pickup_buy_box_needs_the_page_to_be_this_asins(landed: str | None) -> None:
+    assert add_control(dom.parse(PICKUP_PAGE), PICKUP, landed) is None
+
+
+def test_box_outside_the_buybox_is_never_bound_by_the_page() -> None:
+    no_buybox = PICKUP_PAGE.replace('<div id="buybox">', '<div id="elsewhere">')
+    assert add_control(dom.parse(no_buybox), PICKUP, P302) is None
+
+
+def test_a_widget_naming_another_asin_still_refuses_the_box() -> None:
+    other = PICKUP_PAGE.replace(
+        'id="qs-widget-summary-atc-atfc-alm-mod-dp-pickup-111222333444555-announce"',
+        'id="qs-widget-summary-atc-xQuantityAndCadenceSelector-B0SYNTH399"',
+    )
+    assert add_control(dom.parse(other), PICKUP, P302) is None
+
+
+def test_pickup_add_end_to_end() -> None:
+    driver = _driver(PICKUP_PAGE, [_cart([], 1), _cart([PICKUP], 2)], product_url=P302)
+    out = add_one(driver, PICKUP, 1, Telemetry(), "wholefoods")
+    assert (out.outcome, out.reason) == ("added", None), out
+    (clicked,) = driver.controls
+    assert clicked.tag == "input" and clicked.attrs.get("type") == "submit"
+    driver.assert_never_checkout()
+
+
 # --- Bug 2: verify by the ASIN in the cart's active rows, not by #nav-cart-count ---------------
 
 
@@ -172,12 +222,14 @@ def test_cart_state_rows_ignore_add_forms_and_saved() -> None:
 # --- The live driver's click, in a real browser on the synthetic page ------------------------
 
 RECORD_CLICKS = """() => {
-  window.__clicked = [];
+  window.__clicked = []; window.__clickedIn = [];
   document.addEventListener("click", e => {
     const el = e.target.closest("button, input");
     window.__clicked.push(
       (el.closest("[id^='qs-widget'], form")?.id || el.closest("form")?.action || "?")
       + " | " + (el.getAttribute("aria-label") || el.textContent.trim()));
+    window.__clickedIn.push(["freshAddToCartButton", "buybox"]
+      .filter(id => el.closest(`[id='${id}']`)).join("|"));
     e.preventDefault();
   }, true);
 }"""
@@ -195,8 +247,11 @@ def browser_page() -> Iterator[Any]:
         browser.close()
 
 
-def _live(page: Any, html: str) -> CdpDriver:
-    page.set_content(html)
+def _live(page: Any, html: str, url: str = P301) -> CdpDriver:
+    """`html` served at `url` (routed, no network): the driver checks the page it landed on."""
+    page.unroute("**/*")
+    page.route("**/*", lambda route: route.fulfill(body=html, content_type="text/html"))
+    page.goto(url)
     page.evaluate(RECORD_CLICKS)
     driver = CdpDriver("http://127.0.0.1:9222", timeout_ms=2_000)  # never entered
     driver._page = page
@@ -225,6 +280,27 @@ def test_cdp_never_clicks_a_sponsored_ad_for_the_same_item(browser_page: Any) ->
     )
     driver = _live(browser_page, no_buy_box)
     assert driver.add_to_cart(WF, 1) is None
+    assert browser_page.evaluate("window.__clicked") == []
+
+
+def test_cdp_clicks_the_pickup_buy_box_bound_by_the_page(browser_page: Any) -> None:
+    driver = _live(browser_page, PICKUP_PAGE, url=P302)
+    assert driver.add_to_cart(PICKUP, 1) is not None
+    assert browser_page.evaluate("window.__clicked") == ["? | "]  # the unlabelled submit input
+    assert browser_page.evaluate("window.__clickedIn") == ["freshAddToCartButton|buybox"]
+
+
+def test_cdp_pickup_box_on_another_products_page_is_not_clicked(browser_page: Any) -> None:
+    driver = _live(browser_page, PICKUP_PAGE, url="https://www.amazon.com/dp/B0SYNTH399")
+    assert driver.add_to_cart(PICKUP, 1) is None
+    assert browser_page.evaluate("window.__clicked") == []
+
+
+def test_cdp_pickup_box_wont_add_more_than_one(browser_page: Any) -> None:
+    # The live widget's quantity is an unnamed number input behind a "Qty" dropdown: unverified,
+    # so a quantity > 1 is not added rather than added wrong.
+    driver = _live(browser_page, PICKUP_PAGE, url=P302)
+    assert driver.add_to_cart(PICKUP, 2) is None
     assert browser_page.evaluate("window.__clicked") == []
 
 
