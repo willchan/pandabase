@@ -5,8 +5,9 @@ member's Chromium, holds that profile's lock, and for each ASIN:
 
 1. refuses an ASIN that is already in a cart (deleting it afterwards would remove yours too);
 2. runs the real `cart_injector.inject` on a one-line cart (quantity 1), with the configured
-   `cart.tier1_method` (default `product_page`: the ASIN's own add-to-cart form, verified by the
-   cart count; the `url` printed below is only the legacy add-URL for reference);
+   `cart.tier1_method` (default `product_page`: the ASIN's own add control — form, or the Whole
+   Foods buy box — verified by the ASIN appearing in the cart's active rows; the `url` printed
+   below is only the legacy add-URL for reference);
 3. finds the line on the cart page and clicks its Delete control, then re-checks it's gone.
 
 Never touches checkout: every page goes through `guard` like the tools themselves. Prints one JSON
@@ -24,14 +25,15 @@ import re
 import sys
 from typing import Any
 
-from pandabase_tools import cart_injector, config, guard
+from pandabase_tools import cart_add, cart_injector, config, guard
 from pandabase_tools.browser import CdpDriver, NotSignedIn
 from pandabase_tools.lock import ProfileLock, ProfileLocked
 from pandabase_tools.telemetry import Telemetry
 
+# The carts `cart_add` itself verifies against (overridable to try another URL by hand).
 CART_URLS = {
-    "amazon": os.environ.get("SMOKE_CART_URL", "https://www.amazon.com/gp/cart/view.html"),
-    "wholefoods": os.environ.get("SMOKE_WF_CART_URL", "https://www.amazon.com/cart/localmarket"),
+    "amazon": os.environ.get("SMOKE_CART_URL", cart_add.CART_URLS["amazon"]),
+    "wholefoods": os.environ.get("SMOKE_WF_CART_URL", cart_add.CART_URLS["wholefoods"]),
 }
 ASIN = re.compile(r"^[A-Z0-9]{10}$")
 # Delete controls on a cart line, most specific first (no class names).

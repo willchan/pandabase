@@ -146,6 +146,9 @@ jobs:
           enable-cache: true
           cache-dependency-glob: ${{ matrix.project }}/uv.lock
       - run: uv sync --locked
+      - name: Chromium for the CDP driver tests (tests/test_cart_add.py)
+        if: matrix.project == 'agent/tools'
+        run: uv run playwright install --with-deps chromium
       - run: uv run ruff check
       - run: uv run ruff format --check
       - run: uv run mypy .

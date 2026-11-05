@@ -1,0 +1,45 @@
+<!doctype html>
+<html><head><title>Synthetic Filament, 1 kg (buy box)</title></head>
+<body>
+<!-- Synthetic. Mimics only the structure of a live Amazon product page's buy box (probe,
+     2026-11-05): several forms share id="addToCart" and post to /gp/product/handle-buy-box, Buy
+     Now's endpoint. Only the "Add to cart" button posts elsewhere: its formaction is
+     /cart/add-to-cart. The form also carries a hidden isBuyNow field. The subscription form comes
+     first here (hidden, as live), so "the first add form" would be the wrong one; its add button
+     has the same name and id. -->
+<div class="h3-nav"><a href="/gp/cart/view.html"><span id="nav-cart-count">0</span> Cart</a></div>
+<h1>Synthetic Filament, 1 kg</h1>
+<div id="buybox">
+  <form id="addToCart" action="/gp/product/handle-buy-box/ref=dp_start-bbf_1_glance" method="post" style="display:none">
+    <input type="hidden" name="items[0.base][asin]" value="B0SYNTH501">
+    <input type="hidden" name="ASIN" value="B0SYNTH501">
+    <input type="hidden" name="snsAsin" value="B0SYNTH501">
+    <a id="go-to-cart-button-announce" href="/gp/cart/view.html">Cart</a>
+    <input type="submit" id="go-to-checkout-button-announce" value="Proceed to checkout">
+    <input type="submit" name="submit.add-to-cart" id="add-to-cart-button" value="Add subscription to cart" formaction="/cart/add-to-cart/ref=dp_start-bbf_1_glance">
+    <input type="submit" id="rcx-subscribe-submit-button-announce" value="Subscribe">
+  </form>
+  <form id="addToCart" action="/gp/product/handle-buy-box/ref=dp_start-bbf_1_glance" method="post">
+    <input type="hidden" name="items[0.base][asin]" value="B0SYNTH501">
+    <input type="hidden" name="ASIN" value="B0SYNTH501">
+    <input type="hidden" name="offerListingID" value="synthOffer501">
+    <input type="hidden" name="isBuyNow" value="0">
+    <select name="items[0.base][quantity]"><option value="1">1</option><option value="2">2</option></select>
+    <input type="submit" name="submit.buy-now" id="buy-now-button" value="Buy Now">
+    <input type="submit" name="submit.add-to-cart" id="add-to-cart-button" value="Add to cart" title="Add to Shopping Cart" formaction="/cart/add-to-cart/ref=dp_start-bbf_1_glance">
+  </form>
+  <form id="addToCart" action="/gp/product/handle-buy-box/ref=dp_start-bbf_1_glance" method="post">
+    <input type="hidden" name="items[0.base][asin]" value="B0SYNTH501">
+    <input type="hidden" name="ASIN" value="B0SYNTH501">
+    <input type="submit" name="submit.add-to-registry.wishlist" value="Add to List">
+  </form>
+</div>
+<div id="CardInstanceSynth"><h2>Sponsored: frequently bought together</h2>
+  <form action="/cart/add-to-cart/ref=sspa_dk_detail_sbb_crt?_encoding=UTF8" method="post">
+    <input type="hidden" name="items[0.base][asin]" value="B0SYNTH501">
+    <input type="hidden" name="items[1.base][asin]" value="B0SYNTH502">
+    <input type="hidden" name="items[2.base][asin]" value="B0SYNTH503">
+    <button type="submit" name="submit.addToCart">Add all 3 to Cart</button>
+  </form>
+</div>
+</body></html>

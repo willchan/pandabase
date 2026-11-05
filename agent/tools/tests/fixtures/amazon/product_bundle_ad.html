@@ -1,0 +1,33 @@
+<!doctype html>
+<html><head><title>Synthetic Filament, 1 kg</title></head>
+<body>
+<!-- Synthetic. Mimics only the structure of a live Amazon product page (probe, 2026-11-04): the buy
+     box form posts to /gp/product/handle-buy-box (Buy Now's endpoint, refused by the guard; only its
+     "Add to cart" button posts to /cart/add-to-cart, via formaction),
+     and the only /cart/add-to-cart form carrying this ASIN is a sponsored bundle ad with two more. -->
+<div class="h3-nav"><a href="/gp/cart/view.html"><span id="nav-cart-count">0</span> Cart</a></div>
+<h1>Synthetic Filament, 1 kg</h1>
+<div id="buybox">
+  <form id="addToCart" action="/gp/product/handle-buy-box/ref=dp_start-bbf_1_glance" method="post">
+    <input type="hidden" name="items[0.base][asin]" value="B0SYNTH401">
+    <input type="hidden" name="ASIN" value="B0SYNTH401">
+    <select name="items[0.base][quantity]"><option value="1">1</option></select>
+    <input type="submit" name="submit.add-to-cart" value="Add to cart" formaction="/cart/add-to-cart/ref=dp_start-bbf_1_glance">
+    <input type="submit" name="submit.buy-now" value="Buy Now">
+  </form>
+</div>
+<div id="CardInstanceSynth"><h2>Sponsored: frequently bought together</h2>
+  <form action="/cart/add-to-cart/ref=sspa_dk_detail_sbb_crt?_encoding=UTF8" method="post">
+    <input type="hidden" name="items[0.base][asin]" value="B0SYNTH401">
+    <input type="hidden" name="items[1.base][asin]" value="B0SYNTH402">
+    <input type="hidden" name="items[2.base][asin]" value="B0SYNTH403">
+    <button type="submit" name="submit.addToCart">Add all 3 to Cart</button>
+  </form>
+</div>
+<div id="comparison-table-container-6">
+  <form action="/cart/add-to-cart/ref=emc_p_m_5_i_atc_c" method="post">
+    <input type="hidden" name="items[0.base][asin]" value="B0SYNTH404">
+    <button type="submit">Add to cart</button>
+  </form>
+</div>
+</body></html>

@@ -265,7 +265,10 @@ def _add_from_product_page(driver: Driver, line: LineOutcome, tel: Telemetry) ->
         line.outcome, line.reason = "added", None
     elif res.outcome == "already_in_cart":
         line.outcome, line.reason = "added", "already_in_cart"
-    elif res.reason == "not_signed_in" or (res.reason or "").startswith("refused_"):
+    elif res.reason in ("not_signed_in", "extra_items") or (res.reason or "").startswith(
+        "refused_"
+    ):
+        # extra_items: other things landed in the cart too; a human must look, not the agent
         line.outcome, line.reason = "failed", res.reason
     else:  # no add form (unavailable), unverified, page errors: the agent may find another way
         line.outcome, line.reason = "needs_agent", res.reason

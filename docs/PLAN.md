@@ -1118,6 +1118,49 @@ branch `claude/system-e2e`). Details, the bugs found and the security review are
   page (`nav-cart-count`, `data-itemtype` rows) incl. Whole Foods' `/cart/localmarket`, and that
   the product page's add form posts to `/cart/add-to-cart…` (if it's `handle-buy-box`, the guard
   refuses it and every add is `no_add_form` — safe, but then tier 1 needs another look).
+- **Whole Foods buy box and cart verification (follow-up PR, 2026-11-04):** the live test after
+  the guarded-tier-2 PR found two bugs in `cart_add`. (1) Every Whole Foods add was `no_add_form`
+  (`cart add --asin B000P6L3K0 --store wholefoods`): the buy box is a widget
+  (`#almAddToCart_feature_div` / `#core-dp-alm-atc-wf`, a `qs-widget-summary-atc-…
+  QuantityAndCadenceSelector-<ASIN>` widget, `#freshAddToCartButton`), and the page's only add
+  forms are sponsored `spAddToCart` ads. The tools now click that box's own button, scoped to the
+  box and the ASIN, through `control_allowed` and the guard; sponsored forms are never an add form
+  (DESIGN §6). (2) `added` came from `nav-cart-count`, which jumped 1 → 4 for one Amazon item
+  while the cart held 8; it now requires the ASIN in the vendor's cart's active rows. The Whole
+  Foods cart URL gained `almBrandId=VUZHIFdob2xlIEZvb2Rz` (base64 "UFG Whole Foods", the id the
+  guard tests and Amazon's Whole Foods storefront links use): bare `/cart/localmarket` is whichever
+  local-market brand's cart Amazon picks. **Live test (same day, `SMOKE_CART=1` smoke from this
+  branch):** Amazon `added` and removed (row check works); Whole Foods `B000P6L3K0` still
+  `no_add_form`, nothing clicked. A read-only probe of that page showed a pickup offer: `#buybox` ›
+  `#pickupAddToCart_feature_div` › `#core-dp-alm-atc-wf` (no `#almAddToCart_feature_div`), widget
+  ids ending in a random instance number instead of the ASIN, `#freshAddToCartButton` holding an
+  `<input type=submit>` outside any form, and quantity as an unnamed number input behind a "Qty"
+  dropdown. So a box whose widgets name no ASIN is now bound by the page (`#buybox` on
+  `/dp/<ASIN>`; synthetic `product_wholefoods_pickup.html`), and WF quantities > 1 are not added
+  until setting that input is verified live. **Live run 2** (with before/after snapshots of both
+  carts' rows): one Amazon add of `B0FC2PF4KS` put **three** items in the cart. A read-only probe
+  showed the page's buy-box form posts to `/gp/product/handle-buy-box/…` (refused by the guard), so
+  the only form `add_form` accepted was a sponsored bundle ad (`/cart/add-to-cart/ref=sspa_dk_
+  detail_sbb_crt`) carrying that ASIN and two others — this is also the earlier "count jumped
+  1 → 4". The two extra lines were removed again. Now an add form must carry only its own ASIN,
+  `sspa` refs count as sponsored, and other new cart rows make the add `failed` / `extra_items`
+  (tier 1: `failed`, not `needs_agent`). That left Amazon adds `no_add_form`, so (owner decision,
+  2026-11-05) the buy box's own "Add to cart" is now used. **Live run 3** added nothing: a
+  read-only probe showed that button posts to `/cart/add-to-cart` through its `formaction` (the
+  form's own action, `handle-buy-box`, is only Buy Now's), and that the Whole Foods cart's rows sit
+  in a `data-name="Active Items"` block, not in a `/cart` form, so `cart_state` never saw them
+  (the cause of every WF `unverified`). Now: only the `submit.add-to-cart` button whose
+  `formaction` is `/cart/add-to-cart`, in a buy-box form carrying this ASIN alone and not the
+  subscription form (`snsAsin`); `handle-buy-box` stays refused outright (an interim guard
+  exception for it was dropped); WF active rows are read from that block (synthetic
+  `product_buy_box.html`, `cart_localmarket.html`). **Live run 4:** Amazon `B0FC2PF4KS` and
+  Whole Foods `B000P6L3K0` both `added`, no other new rows in either cart, both removed again;
+  the carts matched their before-snapshots. (In run 2 the Whole Foods add was clicked but came
+  back `unverified`: the row reader bug above.) Regression tests: `tests/test_cart_add.py` on
+  synthetic pages, including the real Playwright click path in headless Chromium (the `python`
+  CI job now installs Chromium for agent/tools). **Still not verified live:** Whole Foods
+  quantities > 1 (refused for now) and an add that takes longer than the 5 s wait (it would come
+  back `unverified`, not wrong). `cart.wholefoods_tier1` can be turned on.
 - **Members on first sign-in (follow-up PR):** `currentMember()` creates the `member` row for an
   allowed email on its first page view (`ensureMember`; DESIGN §3.1, §10 #42), replacing the
   `NotAMember` dead end. The API still answers 403 `not a household member` for a session without

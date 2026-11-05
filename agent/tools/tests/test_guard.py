@@ -2,13 +2,21 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import Any
 
 import pytest
 
 from pandabase_tools import guard
-from pandabase_tools.browser import CdpDriver, NotSignedIn, Snapshot, checked, control_allowed
+from pandabase_tools.browser import (
+    CdpDriver,
+    NotSignedIn,
+    Snapshot,
+    buy_box_add_allowed,
+    checked,
+    control_allowed,
+)
 from pandabase_tools.cart_injector import add_url
 
 CHECKOUT = [
@@ -81,11 +89,19 @@ def test_landing_on_checkout_or_signin_is_refused() -> None:
 class _Req:
     url: str
     resource_type: str
+    method: str = "GET"
+    post_data: str | None = None
 
 
 class _Route:
-    def __init__(self, url: str, resource_type: str = "document") -> None:
-        self.request = _Req(url, resource_type)
+    def __init__(
+        self,
+        url: str,
+        resource_type: str = "document",
+        method: str = "GET",
+        post_data: str | None = None,
+    ) -> None:
+        self.request = _Req(url, resource_type, method, post_data)
         self.aborted: str | None = None
         self.continued = False
 
@@ -110,6 +126,24 @@ def test_cdp_route_aborts_checkout_documents_in_the_browser() -> None:
     driver._route(img)  # type: ignore[arg-type]
     assert img.continued
     assert driver.blocked == CHECKOUT + SIGNIN
+
+
+# The buy-box form posts to handle-buy-box, Buy Now's endpoint (live, 2026-11-05). Its "Add to cart"
+# button posts to /cart/add-to-cart instead (formaction), so handle-buy-box stays refused outright:
+# whatever form data a POST there carries, the browser aborts it.
+HBB = "https://www.amazon.com/gp/product/handle-buy-box/ref=dp_start-bbf_1_glance"
+ADD_POST = "items%5B0.base%5D%5Basin%5D=B0SYNTH501&ASIN=B0SYNTH501&submit.add-to-cart=Add+to+cart"
+
+
+def test_cdp_route_aborts_every_buy_box_post() -> None:
+    driver = CdpDriver("http://127.0.0.1:9222")
+    for data in (ADD_POST, "ASIN=B0SYNTH501&submit.buy-now=Buy+Now", None):
+        route = _Route(HBB, method="POST", post_data=data)
+        driver._route(route)  # type: ignore[arg-type]
+        assert route.aborted == "blockedbyclient" and not route.continued
+    add = _Route("https://www.amazon.com/cart/add-to-cart/ref=dp_start-bbf_1_glance", method="POST")
+    driver._route(add)  # type: ignore[arg-type]
+    assert add.continued
 
 
 def test_cdp_driver_refuses_before_navigating() -> None:
@@ -159,6 +193,43 @@ def test_buy_now_and_checkout_controls_are_never_clickable(desc: dict[str, str])
 @pytest.mark.parametrize("desc", ALLOWED_CONTROLS)
 def test_add_to_cart_controls_are_clickable(desc: dict[str, str]) -> None:
     assert control_allowed(desc)
+
+
+# The buy box's own "Add to cart", as seen live: in a handle-buy-box form, posting to
+# /cart/add-to-cart through its formaction.
+BUY_BOX_ADD = {
+    "name": "submit.add-to-cart",
+    "id": "add-to-cart-button",
+    "value": "Add to cart",
+    "title": "Add to Shopping Cart",
+    "formaction": "/cart/add-to-cart/ref=dp_start-bbf_1_glance",
+    "form_action": "/gp/product/handle-buy-box/ref=dp_start-bbf_1_glance",
+}
+
+
+def test_buy_box_add_to_cart_is_the_one_buy_box_control_allowed() -> None:
+    assert not control_allowed(BUY_BOX_ADD)  # the general rule still refuses the buy box
+    assert buy_box_add_allowed(BUY_BOX_ADD)
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"name": "submit.buy-now"},
+        {"value": "Buy Now"},
+        {"value": "Add subscription to cart"},
+        {"id": "rcx-subscribe-submit-button-announce"},
+        {"text": "Buy now with 1-Click"},
+        {"formaction": ""},  # would post to handle-buy-box, which the guard aborts
+        {"formaction": "/checkout/turbo/entry"},
+        {"formaction": "/gp/product/handle-buy-box/ref=x"},
+        {"formaction": "/cart/add-to-cart/ref=x?next=/checkout"},
+        {"formaction": "https://evil.example/cart/add-to-cart/"},
+        {"form_action": "/cart/add-to-cart/ref=x"},  # not a buy-box form: `add_form`'s case
+    ],
+)
+def test_other_buy_box_controls_are_never_clickable(change: dict[str, str]) -> None:
+    assert not buy_box_add_allowed({**BUY_BOX_ADD, **change})
 
 
 class _Loc:
@@ -238,14 +309,23 @@ class _Many:
 
 
 class _Form:
-    def __init__(self, controls: list[dict[str, str]], qty_fields: int, log: list[str]) -> None:
+    def __init__(
+        self,
+        controls: list[dict[str, str]],
+        qty_fields: int,
+        log: list[str],
+        ident: str = "/cart/add-to-cart/ref=dp_start addToCart",
+    ) -> None:
         self.controls = [_Ctl(d, log) for d in controls]
-        self.qty_fields, self.log = qty_fields, log
+        self.qty_fields, self.log, self.ident = qty_fields, log, ident
+        self.asins = ["B0SYNTH202"]
 
     def locator(self, _sel: str) -> _Many:
         return _Many(self.controls)
 
-    def evaluate(self, _js: str, qty: int) -> int:
+    def evaluate(self, _js: str, qty: int | None = None) -> Any:
+        if qty is None:  # FORM_IDENT_JS: the form's action, id and name, and its ASINs
+            return {"ident": self.ident, "asins": self.asins, "names": []}
         self.log.append(f"qty:{qty}")
         return self.qty_fields
 
@@ -258,11 +338,12 @@ class _FormPage(_Page):
 
     def locator(self, sel: str) -> Any:
         self.selectors.append(sel)
-        page = self
+        action = re.search(r"form\[action\*='([^']+)'\]", sel)
+        forms = [f for f in self.forms if action is None or action.group(1) in f.ident]
 
         class _Filterable(_Many):
             def filter(self, has: object) -> _Many:
-                return _Many(page.forms)
+                return _Many(forms)
 
         return _Filterable([])
 
@@ -277,6 +358,15 @@ def test_cdp_add_to_cart_sets_qty_and_never_clicks_buy_now() -> None:
     assert driver.add_to_cart("B0SYNTH202", 2) is not None
     assert log == ["qty:2", "click:submit.addToCart"]  # the Buy-Now-only form was passed over
     assert "input[value='B0SYNTH202']" in page.selectors
+
+
+def test_cdp_add_to_cart_passes_over_a_sponsored_form_for_the_same_asin() -> None:
+    log: list[str] = []
+    add = {"name": "submit.addToCart", "value": "Add to cart"}
+    ad = _Form([add], 1, log, ident="/cart/add-to-cart/ref=spAddToCart_dp_1  spAddToCart")
+    driver = CdpDriver("http://127.0.0.1:9222")
+    driver._page = _FormPage([ad])  # type: ignore[assignment]
+    assert driver.add_to_cart("B0SYNTH202", 1) is None and log == []
 
 
 def test_cdp_add_to_cart_wont_add_a_wrong_quantity() -> None:

@@ -194,7 +194,7 @@ def test_saved_for_later_or_recommended_is_not_in_the_cart(asin: str) -> None:
     assert PRODUCT + asin in driver.opened
 
 
-def test_add_unverified_when_the_count_did_not_rise() -> None:
+def test_add_unverified_when_the_asin_is_not_in_the_cart() -> None:
     driver = _add_driver(after_view="cart_view.html")
     out = add(driver, "B0SYNTH202", 1, "amazon", CartConfig(), Telemetry())
     assert (out["outcome"], out["reason"]) == ("failed", "unverified")
@@ -240,7 +240,7 @@ def test_add_rejects_bad_input_before_opening_anything(asin: str, qty: int) -> N
 
 
 def test_whole_foods_add_checks_the_whole_foods_cart() -> None:
-    wf_cart = "https://www.amazon.com/cart/localmarket"
+    wf_cart = "https://www.amazon.com/cart/localmarket?almBrandId=VUZHIFdob2xlIEZvb2Rz"
     views = iter(["cart_view.html", "cart_view_after.html"])
     driver = FakeDriver(
         lambda u: (

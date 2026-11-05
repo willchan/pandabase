@@ -17,6 +17,11 @@ form's `action`, `ASIN.n` inputs, and visible text.
 | `search_results.html` | tier-2 search results: sponsored, size swatch, unavailable, an injection-style title, a legacy row |
 | `cart_view_recs.html` | where `/gp/aws/cart/add.html` lands now: the cart, unchanged, with recommendation add forms |
 | `product_add_form.html` | product page with the add-to-cart form (Buy Now inside it) and a related-item form |
+| `product_wholefoods.html` | Whole Foods product page: buy-box widget (no form), sponsored `spAddToCart` ads (one for the same item), another item's widget outside the buy box |
+| `product_wholefoods_pickup.html` | Whole Foods pickup offer as seen live: widget ids without the ASIN inside `#buybox`, an `<input type=submit>` add control, an unnamed quantity input, the cart flyout's checkout forms |
+| `product_bundle_ad.html` | Amazon page as seen live: buy-box form posting to `handle-buy-box`, a sponsored `sspa` bundle form with this ASIN and two others, a comparison-table form |
+| `product_buy_box.html` | Amazon buy box as seen live: three `handle-buy-box` forms (hidden subscription first, one-time with Buy Now and a hidden `isBuyNow`, wishlist) + a sponsored bundle; only the one-time "Add to cart", whose `formaction` is `/cart/add-to-cart`, may be clicked |
+| `cart_localmarket.html` | Whole Foods cart: active rows in a `data-name="Active Items"` block, not in a form; saved and recommended items outside it |
 | `product_unavailable.html` | product page with no add form for its own ASIN |
 | `search_no_results.html` | tier-2 search with no results |
 | `orders_list_p1.html`, `orders_list_p2.html` | order history, two pages |
