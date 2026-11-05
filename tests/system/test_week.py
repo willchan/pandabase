@@ -331,7 +331,21 @@ def test_07b_confirm_receipt_in_web_ui(stack: Stack) -> None:
         loaded = "i => i.complete && i.naturalWidth > 0"
         wait_for("the receipt photo to load", lambda: img.evaluate(loaded), timeout=15)
         page.get_by_role("button", name="Confirm receipt").click()
-        expect(page).to_have_url(re.compile(r"/cleanup\?done=receipt"))
+        # Against a preview's remote Turso the action (dozens of sequential round trips in one
+        # transaction, ~3 per receipt line) can outlast Playwright's 5 s default: tier A' saw
+        # "Confirming…" still pending at 5 s. 15 s is headroom, not a fix for that latency.
+        try:
+            expect(page).to_have_url(re.compile(r"/cleanup\?done=receipt"), timeout=15_000)
+        except Exception:
+            # Slow or stuck? `ui_action` is logged when the action returns (with its latencyMs);
+            # no row means it never finished. Kept with SYSTEM_KEEP, like 07b-cleanup above.
+            page.screenshot(path=str(stack.tmp / "07b-confirm.png"), full_page=True)
+            done = [x["payload"] for x in stack.telemetry("ui_action", t)]
+            resolved = [x["payload"] for x in stack.telemetry("review_resolved", t)]
+            note = f"{page.url}\n\nui_action: {done}\nreview_resolved: {resolved}"
+            (stack.tmp / "07b-confirm.txt").write_text(note)
+            print("07b confirm:", note)
+            raise
         browser.close()
     if isinstance(stack.r2, FakeR2):  # the fake bucket also shows which request fetched it
         assert any(r.method == "GET" and r.status == 200 and r.key.startswith("media/")
