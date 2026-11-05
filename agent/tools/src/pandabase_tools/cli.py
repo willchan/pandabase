@@ -16,6 +16,7 @@ import json
 import os
 import re
 import sys
+import time
 from collections.abc import Callable, Sequence
 from contextlib import AbstractContextManager
 from dataclasses import asdict
@@ -27,7 +28,7 @@ from zoneinfo import ZoneInfo
 from pydantic import BaseModel, ValidationError
 
 from . import api as api_mod
-from . import cart_injector, cart_tier2, contracts, guard, photos, receipt_parser
+from . import cart_injector, cart_tier2, contracts, guard, layout_watch, photos, receipt_parser
 from . import config as config_mod
 from .browser import CdpDriver, Driver, NotSignedIn
 from .lock import ProfileLock, ProfileLocked
@@ -199,6 +200,28 @@ def cmd_cart_add(env: Env) -> Any:
         env.driver_factory(profile.cdp_url) as driver,
     ):
         return cart_tier2.add(driver, a.asin, a.qty, a.store, env.cfg.cart, env.tel)
+
+
+def cmd_cart_probe(env: Env) -> Any:
+    """Weekly check: open one Amazon and one Whole Foods product page and confirm each ASIN's add
+    control is still found (`layout_watch.probe`). Clicks nothing. `--reply`: one line for the
+    ops channel, or `NO_REPLY` (an OpenClaw command payload)."""
+    a = env.args
+    member = _member(env, a.member)
+    profile = env.loaded.profile(member)
+    cfg = env.cfg.cart
+    try:
+        with (
+            env.lock().held(member.profile, "cart probe"),
+            env.driver_factory(profile.cdp_url) as driver,
+        ):
+            asins = {str(store): asin for store, asin in cfg.probe_asins.items()}
+            res = layout_watch.probe(driver, asins, env.tel, time.sleep, cfg.page_delay_seconds)
+    except ProfileLocked as err:
+        if not a.reply:
+            raise
+        return f"⚠️ Weekly Amazon check skipped: the cart browser was busy ({err.owner})."
+    return layout_watch.probe_reply(res) if a.reply else res
 
 
 def cmd_cart_url(env: Env) -> Any:
@@ -444,6 +467,10 @@ def build_parser() -> argparse.ArgumentParser:
     ad.add_argument("--qty", type=int, default=1)
     ad.add_argument("--store", choices=sorted(cart_tier2.STORES), default="amazon")
     ad.set_defaults(fn=cmd_cart_add)
+    pr = cart.add_parser("probe", help="weekly check: add buttons still found (no clicks)")
+    pr.add_argument("--member", help="default: the cart member")
+    pr.add_argument("--reply", action="store_true", help="ops-channel text or NO_REPLY")
+    pr.set_defaults(fn=cmd_cart_probe)
     u = cart.add_parser("url", help="print the tier-1 add-to-cart URL (smoke)")
     u.add_argument("asin", nargs="+", metavar="ASIN[:QTY]")
     u.set_defaults(fn=cmd_cart_url)

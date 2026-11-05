@@ -10,9 +10,9 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StringConstraints
 
 CONFIG_ENV = "PANDABASE_CONFIG"
 TOKEN_ENV = "AGENT_API_TOKEN"
@@ -52,6 +52,16 @@ class CartConfig(BaseModel):
     tier2_search_limit: int = Field(default=5, ge=1, le=10)
     tier2_title_chars: int = Field(default=160, ge=40, le=300)
     tier2_max_qty: int = Field(default=10, ge=1, le=50)
+    # Layout watch (`layout_watch.py`): a build alerts the ops channel when at least this many
+    # tier-1 lines failed for a page reason *and* they're at least this share of what tier 1 tried.
+    layout_alert_min_lines: int = Field(default=2, ge=1)
+    layout_alert_share: float = Field(default=0.5, gt=0, le=1)
+    # The weekly add-button check (`cart probe`): one product ASIN per store ("amazon",
+    # "wholefoods") whose page it opens. Pick everyday items that are rarely out of stock.
+    probe_asins: dict[
+        Literal["amazon", "wholefoods"],
+        Annotated[str, StringConstraints(pattern=r"^[A-Z0-9]{10}$")],
+    ] = Field(default_factory=dict)
 
 
 class ReceiptsConfig(BaseModel):

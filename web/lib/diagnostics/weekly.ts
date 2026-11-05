@@ -629,7 +629,27 @@ export async function renderWeekly(
     "cart_tier2_search",
     "cart_tier2_line",
   );
-  extracts["cart_injection.jsonl"] = [...cartLines, ...toolErrors].map((t) => ({
+  // Amazon layout watch (agent `layout_watch.py`): build alerts and the weekly add-button check.
+  const layoutAlerts = metric("cart_layout_alert");
+  const probes = metric("cart_probe");
+  const probeMisses = probes.filter((t) => t.p.found !== true);
+  const reasonList = (v: unknown) =>
+    Object.entries(asRecord(v))
+      .map(([r, c]) => `${r} ${num(n(c))}`)
+      .join(", ");
+  for (const t of layoutAlerts) {
+    findings.push({
+      score: 5,
+      text: `Amazon layout alert: ${num(n(t.p.page_failures))} of ${num(n(t.p.attempted))} tier-1 lines failed on the page (${reasonList(t.p.reasons)}).`,
+    });
+  }
+  for (const t of probeMisses) {
+    findings.push({
+      score: 4,
+      text: `Weekly add-button check failed: ${s(t.p.store) ?? "?"} ${s(t.p.asin) ?? ""} (${s(t.p.reason) ?? "not found"}).`,
+    });
+  }
+  extracts["cart_injection.jsonl"] = [...cartLines, ...toolErrors, ...probes, ...layoutAlerts].map((t) => ({
     at: t.at,
     metric: t.metric,
     source: t.source,
@@ -659,6 +679,21 @@ export async function renderWeekly(
           .map(([m, c]) => `${m} ${c}`)
           .join(", ") || "none"
       }.`,
+      "",
+      `Layout alerts: ${layoutAlerts.length}. Weekly add-button checks: ${probes.length} pages, ${probeMisses.length} without an add button.`,
+      ...(probes.length
+        ? [
+            "",
+            table(
+              ["Store", "Found", "Not found"],
+              [...new Set(probes.map((t) => s(t.p.store) ?? "?"))].sort().map((store) => {
+                const mine = probes.filter((t) => (s(t.p.store) ?? "?") === store);
+                const found = mine.filter((t) => t.p.found === true).length;
+                return [store, found, mine.length - found];
+              }),
+            ),
+          ]
+        : []),
     ].join("\n"),
     bullets([
       ...failedCart
@@ -667,10 +702,26 @@ export async function renderWeekly(
       ...metric("selector_error")
         .slice(0, 3)
         .map((t) => `Selector error: ${s(t.p.selector) ?? "?"} — ${s(t.p.error) ?? ""}`),
+      ...layoutAlerts.map(
+        (t) =>
+          `Layout alert (${s(t.p.cycle_id) ?? "?"}): ${num(n(t.p.page_failures))} of ${num(n(t.p.attempted))} lines — ${reasonList(t.p.reasons)}`,
+      ),
+      ...probeMisses.map(
+        (t) =>
+          `Add button not found: ${s(t.p.store) ?? "?"} ${s(t.p.asin) ?? ""} — ${s(t.p.reason) ?? "?"}`,
+      ),
     ]),
-    failedCart.length || metric("selector_error").length
-      ? ["Check the cart tool's selectors / add-to-cart URL against the failures above."]
-      : [],
+    [
+      ...(failedCart.length || metric("selector_error").length
+        ? ["Check the cart tool's selectors / add-to-cart URL against the failures above."]
+        : []),
+      ...(layoutAlerts.length ||
+      probeMisses.some((t) => ["no_add_form", "not_product_page"].includes(s(t.p.reason) ?? ""))
+        ? [
+            "Amazon's layout probably changed: save the failing product page (scrub it into a synthetic fixture) and update `cart_add.add_control` against it. Ask before any live Amazon run.",
+          ]
+        : []),
+    ],
   );
 
   // 7. UX friction -------------------------------------------------------------------------------

@@ -47,6 +47,14 @@
       "command": "pandabase-tools jobs replies",
       "deliver_to": "intake_channel",
       "_comment": "Command payload: no model turn. `openclaw automations add --name pandabase-job-replies --cron '*/5 * * * *' --tz America/Los_Angeles --command 'pandabase-tools jobs replies' --command-env PANDABASE_CONFIG=... --announce --channel discord --to channel:<intake_channel>`. Prints NO_REPLY when there is nothing to say."
+    },
+    {
+      "name": "pandabase-cart-probe",
+      "cron": "0 15 * * 5",
+      "skill": "grocery-cycle",
+      "command": "pandabase-tools cart probe --reply",
+      "deliver_to": "ops_channel",
+      "_comment": "Command payload: no model turn. Opens one Amazon and one Whole Foods product page (cart.probe_asins) and checks the add button is still found, without clicking. Prints NO_REPLY when both are fine, else one ⚠️ line for the ops channel."
     }
   ]
 }

@@ -65,7 +65,11 @@ def test_cron_example_schedule() -> None:
         "pandabase-receipts-partner": "0 21 * * 0",  # other member: Sundays
         "pandabase-diagnostics": "0 23 * * 0",
         "pandabase-job-replies": "*/5 * * * *",
+        "pandabase-cart-probe": "0 15 * * 5",  # Friday afternoon, before Saturday's build
     }
+    probe = next(j for j in cron["jobs"] if j["name"] == "pandabase-cart-probe")
+    assert probe["command"] == "pandabase-tools cart probe --reply"
+    assert probe["deliver_to"] == "ops_channel"
 
 
 def test_human_writes_need_an_actor(config: Path) -> None:
@@ -208,6 +212,85 @@ def test_cart_build_then_finish(config: Path) -> None:
     body = server.results[0]
     assert [x["outcome"] for x in body["lines"]] == ["tier1", "tier1", "tier2"]
     assert body["vendors"] == ["amazon"]
+
+
+def test_cart_build_raises_one_layout_alert_when_most_lines_lose_their_add_button(
+    config: Path,
+) -> None:
+    # Both tier-1 lines' product pages have no add button (as if Amazon changed its layout): 2 of
+    # the 2 lines tier 1 tried failed for a page reason → one alert for the ops channel.
+    server = CycleServer()
+    shop = FakeShop(unavailable=frozenset({"B0SYNTH001", "B0SYNTH002"}))
+    code, out = run(config, ["cart", "build"], server.api, shop.driver)
+    assert code == 0, out
+    assert out["layout_alert"] == {
+        "page_failures": 2,
+        "attempted": 2,
+        "reasons": {"no_add_form": 2},
+        "asins": ["B0SYNTH001", "B0SYNTH002"],
+    }
+    tel = server.api.bodies("POST /api/telemetry")[0]["events"]
+    alerts = [e["payload"] for e in tel if e["metric_type"] == "cart_layout_alert"]
+    assert alerts == [{"cycle_id": "C1", **out["layout_alert"]}]
+
+    # A re-run of the same build fails the same way but doesn't alert twice.
+    again = FakeShop(unavailable=frozenset({"B0SYNTH001", "B0SYNTH002"}))
+    code, out = run(config, ["cart", "build", "--cycle-id", "C1"], server.api, again.driver)
+    assert code == 0 and out["layout_alert"] is None
+    assert out["layout_alert_already_raised"] is True
+    tel = server.api.bodies("POST /api/telemetry")[-1]["events"]
+    assert "cart_layout_alert" not in {e["metric_type"] for e in tel}
+
+
+def test_cart_build_without_page_trouble_has_no_layout_alert(config: Path) -> None:
+    code, out = run(config, ["cart", "build"], CycleServer().api, _driver())
+    assert code == 0 and out["layout_alert"] is None
+    assert out["layout_alert_already_raised"] is False
+
+
+def _probe_config(config: Path) -> None:
+    data = json.loads(config.read_text())
+    data["cart"]["probe_asins"] = {"amazon": "B0SYNTH501", "wholefoods": "B0SYNTH301"}
+    config.write_text(json.dumps(data))
+
+
+def _probe_driver(wf_page: str = "product_wholefoods.html") -> FakeDriver:
+    dp = "https://www.amazon.com/dp/"
+    return FakeDriver(
+        {
+            dp + "B0SYNTH501": (dp + "B0SYNTH501", "product_buy_box.html"),
+            dp + "B0SYNTH301": (dp + "B0SYNTH301", wf_page),
+        }
+    )
+
+
+def test_cart_probe_command(config: Path) -> None:
+    _probe_config(config)
+    api = FakeApi({"POST /api/telemetry": lambda b: {"accepted": len(b["events"])}})
+    driver = _probe_driver()
+    code, out = run(config, ["cart", "probe"], api, driver)
+    assert code == 0 and out["ok"] is True
+    assert driver.clicks == 0
+    tel = api.bodies("POST /api/telemetry")[0]["events"]
+    assert [e["metric_type"] for e in tel] == ["cart_probe", "cart_probe"]
+
+    code, out = run(config, ["cart", "probe", "--reply"], api, _probe_driver())
+    assert (code, out) == (0, "NO_REPLY")
+    code, out = run(
+        config, ["cart", "probe", "--reply"], api, _probe_driver("product_unavailable.html")
+    )
+    assert code == 0 and out.startswith("⚠️") and "Whole Foods" in out
+
+
+def test_cart_probe_reply_when_the_browser_is_busy(config: Path) -> None:
+    _probe_config(config)
+    api = FakeApi({})
+    code, _ = run(config, ["lock", "acquire", "--member", "will", "--owner", "receipts"], api)
+    assert code == 0
+    code, out = run(config, ["cart", "probe", "--reply"], api, _probe_driver())
+    assert code == 0 and out.startswith("⚠️") and "busy" in out
+    code, out = run(config, ["cart", "probe"], api, _probe_driver())
+    assert code == 3 and out["error"] == "profile_locked"
 
 
 def test_cart_build_is_skipped_when_away(config: Path) -> None:

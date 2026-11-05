@@ -17,7 +17,8 @@ load_agent_env
 CRON_FILE="$ROOT/agent/cron.example.json"
 TOOLS_LIST="exec,read,write,message"  # no browser: tier 2 is `pandabase-tools cart search/add` (DESIGN §10 #52)
 tz="$(jq -r '.tz' "$CRON_FILE")"
-intake="$(jq -r '.discord.intake_channel' "$PANDABASE_CONFIG")"
+# A command job announces to its `deliver_to` channel (a key of the config's `discord`).
+channel_id() { jq -r --arg k "$1" '.discord[$k] // empty' "$PANDABASE_CONFIG"; }
 # Empty-array expansions use ${a[@]+"${a[@]}"}: macOS /bin/bash 3.2 with `set -u` calls an empty
 # "${a[@]}" an unbound variable.
 agent_args=()
@@ -35,12 +36,12 @@ job_id() {
       | map(select(.name == $n)) | first | .id // empty'
 }
 
-# upsert NAME CRON [agent-turn MESSAGE | command COMMAND]
+# upsert NAME CRON [agent MESSAGE | command COMMAND CHANNEL_ID]
 upsert() {
   local name="$1" cron="$2" kind="$3" payload="$4" id
   local args=(--cron "$cron" --tz "$tz")
   if [ "$kind" = command ]; then
-    args+=(--command "$payload" --announce --channel discord --to "channel:$intake")
+    args+=(--command "$payload" --announce --channel discord --to "channel:$5")
   else
     args+=(--session isolated --message "$payload" --tools "$TOOLS_LIST" --no-deliver ${agent_args[@]+"${agent_args[@]}"})
   fi
@@ -56,15 +57,18 @@ upsert() {
 
 # Fixed jobs from the example, i.e. everything but the per-member receipt sweeps. ("-" marks an
 # empty field: `read` merges adjacent tabs.)
-while IFS=$'\t' read -r name cron command message; do
+while IFS=$'\t' read -r name cron command message deliver_to; do
   if [ "$command" != - ]; then
-    # Job replies: a command payload (no model turn); agent-run.sh loads the token from .env.
-    upsert "$name" "$cron" command "$(printf '%q' "$ROOT/scripts/ops/agent-run.sh") ${command#pandabase-tools }"
+    # Command payloads (job replies, the weekly cart probe): no model turn; agent-run.sh loads
+    # the token from .env.
+    to="$(channel_id "$deliver_to")"
+    [ -n "$to" ] || die "$name: no discord.$deliver_to in $PANDABASE_CONFIG"
+    upsert "$name" "$cron" command "$(printf '%q' "$ROOT/scripts/ops/agent-run.sh") ${command#pandabase-tools }" "$to"
   else
     upsert "$name" "$cron" agent "$message"
   fi
 done < <(jq -r '.jobs[] | select(.skill != "digital-receipt-scraper")
-  | [.name, .cron, (.command // "-"), (.message // "-")] | @tsv' "$CRON_FILE")
+  | [.name, .cron, (.command // "-"), (.message // "-"), (.deliver_to // "intake_channel")] | @tsv' "$CRON_FILE")
 
 # Receipt sweeps, one per member.
 while IFS=$'\t' read -r member _profile sweep _cart; do

@@ -27,7 +27,7 @@ from pathlib import Path
 from typing import Any, Literal
 from urllib.parse import urlencode, urlsplit
 
-from . import cart_add, dom, guard
+from . import cart_add, dom, guard, layout_watch
 from . import contracts as c
 from .api import ApiClient
 from .browser import Driver, NotSignedIn, Snapshot, control_allowed
@@ -473,12 +473,16 @@ class BuildState:
             return None
         return data if isinstance(data, dict) else None
 
-    def save(self, result: InjectResult, *, posted: bool) -> None:
-        self.path.write_text(
-            json.dumps(
-                {"lines": [asdict(x) for x in result.lines()], "result_posted": posted}, indent=1
-            )
-        )
+    def save(
+        self, result: InjectResult, *, posted: bool, layout_alert: dict[str, Any] | None = None
+    ) -> None:
+        data: dict[str, Any] = {
+            "lines": [asdict(x) for x in result.lines()],
+            "result_posted": posted,
+        }
+        if layout_alert:  # raised once per cycle: a re-run doesn't post it again
+            data["layout_alert"] = layout_alert
+        self.path.write_text(json.dumps(data, indent=1))
 
     def lines(self) -> list[LineOutcome]:
         data = self.load() or {}
@@ -499,6 +503,9 @@ def build(
     sleep: Callable[[float], None] = time.sleep,
 ) -> dict[str, Any]:
     """open → building → price checks → cart → tier 1 → cart-result (when nothing needs the agent).
+
+    `layout_alert` (`layout_watch.layout_alert`) is set when most of tier 1 failed for page
+    reasons — the skill posts it to the ops channel; it's raised once per cycle.
 
     Re-running after a crash resumes: a `building` cycle isn't re-transitioned, and lines the
     state file records as added are not added again. A `ready` cycle is left alone.
@@ -532,18 +539,25 @@ def build(
         resumed = [x for x in tier1 if _line_key(x) in done]
         todo = [x for x in tier1 if _line_key(x) not in done]
         result = inject(driver, todo, cfg, tel, sleep)
+    # Only the lines tier 1 tried this run count: resumed and agent-bound lines never hit a page.
+    alert = layout_watch.layout_alert(result.lines(), cfg)
+    raised = (state.load() or {}).get("layout_alert")
+    if alert and not raised:
+        tel.emit("cart_layout_alert", cycle_id=cycle_id, **alert)
     for line in _set(resumed, "added", "resumed") + agent:
         result.put(line)
     posted = False
     if not result.needs_agent:
         api.cart_result(cycle_id, result_request(result.lines(), {}), key=f"cart:{cycle_id}")
         posted = True
-    state.save(result, posted=posted)
+    state.save(result, posted=posted, layout_alert=raised or alert)
     return {
         "cycle_id": cycle_id,
         "status": "ready" if posted else "needs_agent",
         "quotes_accepted": accepted,
         "result_posted": posted,
+        "layout_alert": None if raised else alert,
+        "layout_alert_already_raised": bool(raised),
         **result.as_json(),
     }
 

@@ -60,7 +60,12 @@ A Discord **thread per cycle** in `#pandabase`, acting as a running grocery list
   - Optional one-liner: "N review items waiting → link".
 - **Saturday 10am cart build:** the agent fills Will's Whole Foods/Amazon cart and posts a summary:
   what was added (and why each product was chosen), what fell back to manual, what failed.
-  Builds from predictions alone if nobody replied.
+  Builds from predictions alone if nobody replied. If most of the lines it tried (and at least
+  two) fail because the product page wasn't what the tools expect, it also posts one ⚠️ to the
+  ops channel: Amazon's layout probably changed.
+- **Friday afternoon add-button check:** before the build, one Amazon and one Whole Foods product
+  page are opened (nothing clicked) to confirm the add button is still found; a ⚠️ goes to the ops
+  channel only when it isn't, or when the cart browser is signed out.
 - **Away weeks:** "away until Nov 3" or "skip this week" → cycle skipped; away days don't distort
   consumption estimates.
 - **Other-store weeks:** "shopping at Trader Joe's" → cycle closes without a cart; purchases arrive
