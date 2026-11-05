@@ -663,6 +663,9 @@ export function buildSeed(opts: SeedOptions = {}): Rows {
     defaultAction: { action: "none" },
     expiresAt: iso(nowMs - DAY + 7 * DAY),
   });
+  // Deliberately unprocessable: no bucket holds `seed/trash-cam/3.mp4`, so the worker's first claim
+  // (the oldest queued job) 404s three times → `failed` + a `failed_job` review. Tier A's step 17
+  // asserts exactly that; in tier A′ it shows up as the 404s at the top of every worker log.
   job(nowMs - 20 * 60_000, {
     jobType: "trash_cam",
     status: "queued",

@@ -151,7 +151,12 @@ members are `alex@example.com` / `sam@example.com`, which is what the preview's 
 lists; the UI step signs in as Sam with a session cookie (`__Secure-authjs.session-token` over
 https) minted from the preview `AUTH_SECRET`. The run's photos and keyframes are deleted from
 `pandabase-media-preview` at the end (the keys recorded on the jobs it created, then checked gone);
-`preview-target.sh` refuses a bucket whose name lacks `preview`.
+`preview-target.sh` refuses a bucket whose name lacks `preview`. **Expected noise:** the seed's
+queued Trash Cam job points at `seed/trash-cam/3.mp4`, which no bucket holds (on purpose: tier A's
+step 17 asserts it fails). Its id ends in the same 16 characters every run (seeded RNG), and the
+worker claims it first and logs `media download failed: HTTP 404` three times in its first ~12 s,
+then fails it with a `failed_job` review (+1 on Cleanup, a line in step 16's report). Step 17
+isn't in the shortened week, so in A′ nothing asserts on it; the harness prints a note at startup.
 
 **The shortened week** = the steps marked `@preview` in `test_week.py`: 0 (stack up, worker
 heartbeat), 1 (open cycle), 2–3 (adds, skip, qty), 5 (lookup), 6 (nudge + check-in), 7 (paper

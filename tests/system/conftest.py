@@ -470,6 +470,8 @@ def _remote(tmp: Path) -> Iterator[Stack]:
     started = datetime.now(UTC).isoformat().replace("+00:00", "Z")
     try:
         wait_for("the preview", lambda: s.http("GET", "/sign-in").status_code == 200, timeout=60)
+        # db/src/seed.ts's queued trash_cam job has no R2 object on purpose (tier A's step 17).
+        print("--- expected: the seeded trash_cam job 404s 3 times (no R2 object), then fails ---")
         start_worker(s)
         yield s
     finally:
