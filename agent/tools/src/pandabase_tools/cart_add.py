@@ -15,12 +15,13 @@ the guard; no page text is returned to the model.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Literal
 
 from . import dom, guard
 from .browser import (
     ADD_FORM_ACTION,
+    ASIN_INPUT,
     ASIN_RE,
     SPONSORED_FORM,
     WF_BUTTON_ID,
@@ -53,6 +54,7 @@ class AddOutcome:
     reason: str | None = None
     cart_count_before: int | None = None
     cart_count_after: int | None = None
+    extra_asins: list[str] = field(default_factory=list)
 
 
 def _submits(form: dom.Node) -> list[dom.Node]:
@@ -87,8 +89,13 @@ def add_form(root: dom.Node, asin: str) -> dom.Node | None:
         action = form.attrs.get("action", "")
         if ADD_FORM_ACTION not in action or sponsored(form):
             continue
-        if not any(n.tag == "input" and n.attrs.get("value") == asin for n in form.iter()):
-            continue
+        carried = {
+            n.attrs.get("value", "")
+            for n in form.iter()
+            if n.tag == "input" and ASIN_INPUT.search(n.attrs.get("name", ""))
+        }
+        if carried != {asin}:
+            continue  # not this ASIN's, or a bundle with others in it
         if any(
             control_allowed({**n.attrs, "text": n.text(), "form_action": action})
             for n in _submits(form)
@@ -195,8 +202,14 @@ def add_one(
         out.cart_count_after = after
         # Only the ASIN in this vendor's active rows counts: `nav-cart-count` jumped 1 → 4 for one
         # Amazon item while the cart held 8 (live, 2026-11-04).
-        if asin in now_in:
+        extra = sorted(now_in - in_cart - {asin})
+        if asin in now_in and not extra:
             out.outcome = "added"
+        elif extra:
+            # Something else came with it (live: a bundle ad added two more). Named, not undone.
+            out.extra_asins = extra
+            tel.emit("selector_error", selector="cart_rows", error="extra_items", page=url)
+            out.reason = "extra_items"
         else:
             tel.emit("selector_error", selector="cart_rows", error="unverified", page=url)
             out.reason = "unverified"

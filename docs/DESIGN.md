@@ -678,9 +678,12 @@ JSON on stdout; exit 0 ok, 1 error, 2 usage, 3 profile locked, 4 refused URL):
   `data-asin` in a `/cart` form that isn't an add form, not `data-itemtype="saved"`): an ASIN
   already there is `already_in_cart` (a re-run never doubles a line). Otherwise open `/dp/{ASIN}`
   and find **that ASIN's own** add control: its add-to-cart form (action contains
-  `/cart/add-to-cart`, an input whose value is the ASIN, a submit `control_allowed` accepts —
-  related-item forms carry other ASINs; a sponsored ad's form (`spAddToCart` in its action, id or
-  name) never counts, even for the same ASIN; Buy Now is never the control), else the **Whole
+  `/cart/add-to-cart`, its `*asin*`-named inputs carry **this ASIN and no other** — a bundle
+  form never counts — and a submit `control_allowed` accepts; a sponsored ad's form (`spAddToCart`
+  or `sspa` in its action, id or name) never counts, even for the same ASIN; Buy Now is never the
+  control). Live, Amazon's own buy-box form posts to `/gp/product/handle-buy-box/…`, which the
+  guard refuses (Buy Now posts there too), so Amazon pages are `no_add_form` until that changes;
+  before the single-ASIN rule the add clicked a sponsored 3-item bundle ad. Else the **Whole
   Foods buy box**, which is a widget, not a form: a `#almAddToCart_feature_div` /
   `#core-dp-alm-atc-wf` box that is this ASIN's (`browser.buy_box_bound`): any
   `qs-widget-summary-atc-…QuantityAndCadenceSelector-<ASIN>` widget inside or around it names this
@@ -692,7 +695,9 @@ JSON on stdout; exit 0 ok, 1 error, 2 usage, 3 profile locked, 4 refused URL):
   `CdpDriver.add_to_cart` applies the same rule with locators, sets the quantity field in the form
   or box (a quantity > 1 with no quantity field is not added), clicks, and for the widget waits
   (≤ `WIDGET_SETTLE_MS`, 5 s) for the network to go idle. Then re-read the cart: `added` only if
-  the ASIN is now in its **active rows**, else `unverified` (`selector_error` `cart_rows`).
+  the ASIN is now in its **active rows** and no other ASIN appeared there; other new rows →
+  `failed` / `extra_items` with `extra_asins` (named for a human, not removed), no row →
+  `unverified` (`selector_error` `cart_rows`).
   `nav-cart-count` / "Subtotal (N items)" is reported (`cart_count_before/after`) but never
   decides: live it jumped 1 → 4 for one item. No add control → `no_add_form`. Nothing from the
   product page reaches the model.

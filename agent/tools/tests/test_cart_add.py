@@ -178,6 +178,49 @@ def test_pickup_add_end_to_end() -> None:
     driver.assert_never_checkout()
 
 
+# Live run 2 (2026-11-04): one Amazon "add" of B0FC2PF4KS put three items in the cart. The buy box
+# form posts to handle-buy-box (refused), so the only accepted form was a sponsored bundle ad
+# (`ref=sspa_…`) carrying that ASIN and two others. The "count jumped 1 → 4" was this, too.
+BUNDLE_PAGE = fixture("product_bundle_ad.html")
+P401 = "https://www.amazon.com/dp/B0SYNTH401"
+
+
+def test_a_sponsored_bundle_form_is_never_the_add_form() -> None:
+    root = dom.parse(BUNDLE_PAGE)
+    assert add_form(root, "B0SYNTH401") is None
+    assert add_control(root, "B0SYNTH401", P401) is None
+    # A multi-item form isn't the item's own even when it isn't marked sponsored.
+    unmarked = BUNDLE_PAGE.replace("sspa_dk_detail_sbb_crt", "dp_bundle_1")
+    assert add_form(dom.parse(unmarked), "B0SYNTH401") is None
+    # ... nor is a single-item sponsored product ad (`sspa`).
+    single = BUNDLE_PAGE.replace(
+        '<input type="hidden" name="items[1.base][asin]" value="B0SYNTH402">\n', ""
+    ).replace('<input type="hidden" name="items[2.base][asin]" value="B0SYNTH403">\n', "")
+    assert single.count("items[") < BUNDLE_PAGE.count("items[")
+    assert add_form(dom.parse(single), "B0SYNTH401") is None
+
+
+def test_bundle_page_adds_nothing() -> None:
+    driver = _driver(BUNDLE_PAGE, [_cart([], 0), _cart([], 0)], product_url=P401)
+    out = add_one(driver, "B0SYNTH401", 1, Telemetry(), "amazon")
+    assert (out.outcome, out.reason) == ("failed", "no_add_form")
+    assert driver.clicks == 0
+
+
+def test_other_new_items_in_the_cart_fail_the_add_and_are_named() -> None:
+    # Whatever the click was, an add that brings other items with it is not "added".
+    driver = _driver(
+        fixture("product_add_form.html"),
+        [_cart(["B0SYNTH001"], 1), _cart(["B0SYNTH001", "B0SYNTH202", "B0SYNTH402"], 3)],
+        product_url=P202,
+    )
+    tel = Telemetry()
+    out = add_one(driver, "B0SYNTH202", 1, tel, "amazon")
+    assert (out.outcome, out.reason) == ("failed", "extra_items")
+    assert out.extra_asins == ["B0SYNTH402"]
+    assert tel.metrics("selector_error")[0]["error"] == "extra_items"
+
+
 # --- Bug 2: verify by the ASIN in the cart's active rows, not by #nav-cart-count ---------------
 
 
@@ -308,4 +351,10 @@ def test_cdp_wont_add_a_wrong_quantity_through_a_widget(browser_page: Any) -> No
     no_qty = WF_PAGE.replace('name="quantity" ', 'name="size" ')
     driver = _live(browser_page, no_qty)
     assert driver.add_to_cart(WF, 3) is None
+    assert browser_page.evaluate("window.__clicked") == []
+
+
+def test_cdp_never_clicks_a_bundle_or_the_handle_buy_box_form(browser_page: Any) -> None:
+    driver = _live(browser_page, BUNDLE_PAGE, url=P401)
+    assert driver.add_to_cart("B0SYNTH401", 1) is None
     assert browser_page.evaluate("window.__clicked") == []

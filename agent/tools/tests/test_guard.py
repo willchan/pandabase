@@ -247,13 +247,14 @@ class _Form:
     ) -> None:
         self.controls = [_Ctl(d, log) for d in controls]
         self.qty_fields, self.log, self.ident = qty_fields, log, ident
+        self.asins = ["B0SYNTH202"]
 
     def locator(self, _sel: str) -> _Many:
         return _Many(self.controls)
 
-    def evaluate(self, _js: str, qty: int | None = None) -> int | str:
-        if qty is None:  # FORM_IDENT_JS: the form's action, id and name
-            return self.ident
+    def evaluate(self, _js: str, qty: int | None = None) -> Any:
+        if qty is None:  # FORM_IDENT_JS: the form's action, id and name, and its ASINs
+            return {"ident": self.ident, "asins": self.asins}
         self.log.append(f"qty:{qty}")
         return self.qty_fields
 

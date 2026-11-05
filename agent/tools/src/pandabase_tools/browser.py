@@ -29,8 +29,11 @@ CONFIRM_NAME = re.compile(r"^\s*(continue|add to (your )?cart|add all to cart)\s
 # Product-page add (tiers 1 and 2, `cart_add`): the ASIN's own add-to-cart form ...
 ADD_FORM_ACTION = "/cart/add-to-cart"
 ASIN_RE = re.compile(r"^[A-Z0-9]{10}$")
-# ... never a sponsored ad's (matched against the form's action, id and name) ...
-SPONSORED_FORM = re.compile(r"spAddToCart", re.I)
+# ... carrying that ASIN alone (a bundle form with more is never "its own": live, 2026-11-04, a
+# sponsored bundle ad added three items) and never a sponsored ad's (`spAddToCart`, `ref=sspa_…`;
+# matched against the form's action, id and name) ...
+SPONSORED_FORM = re.compile(r"spAddToCart|sspa", re.I)
+ASIN_INPUT = re.compile(r"asin", re.I)  # input names: items[0.base][asin], ASIN, snsAsin
 # ... or, on a Whole Foods page (no form), the buy-box widget bound to the ASIN.
 WF_BUY_BOX_IDS = ("almAddToCart_feature_div", "core-dp-alm-atc-wf")
 WF_WIDGET_ID = re.compile(r"^qs-widget-summary-atc-.*QuantityAndCadenceSelector-([A-Z0-9]{10})$")
@@ -53,9 +56,11 @@ WIDGET_BOUND_JS = r"""box => {
   }
   return {asins: [...asins], inBuybox: !!box.closest("[id='buybox']")};
 }"""
-FORM_IDENT_JS = (
-    """f => [f.getAttribute("action") || "", f.id || "", f.getAttribute("name") || ""].join(" ")"""
-)
+FORM_IDENT_JS = """f => ({
+  ident: [f.getAttribute("action") || "", f.id || "", f.getAttribute("name") || ""].join(" "),
+  asins: [...new Set([...f.querySelectorAll("input")]
+    .filter(e => /asin/i.test(e.getAttribute("name") || "")).map(e => e.value))],
+})"""
 SET_QTY_JS = """(form, q) => {
   let n = 0;
   for (const el of form.querySelectorAll("input, select")) {
@@ -226,8 +231,9 @@ class CdpDriver:
         )
         for i in range(forms.count()):
             form = forms.nth(i)
-            if SPONSORED_FORM.search(form.evaluate(FORM_IDENT_JS)):
-                continue  # a sponsored ad, even for this ASIN
+            ident = form.evaluate(FORM_IDENT_JS)
+            if SPONSORED_FORM.search(ident["ident"]) or ident["asins"] != [asin]:
+                continue  # a sponsored ad or a bundle, even with this ASIN in it
             controls = form.locator("[type=submit], button")
             allowed = [
                 controls.nth(j)

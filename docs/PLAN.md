@@ -1137,7 +1137,18 @@ branch `claude/system-e2e`). Details, the bugs found and the security review are
   `<input type=submit>` outside any form, and quantity as an unnamed number input behind a "Qty"
   dropdown. So a box whose widgets name no ASIN is now bound by the page (`#buybox` on
   `/dp/<ASIN>`; synthetic `product_wholefoods_pickup.html`), and WF quantities > 1 are not added
-  until setting that input is verified live. Regression tests: `tests/test_cart_add.py` on a synthetic
+  until setting that input is verified live. **Live run 2** (with before/after snapshots of both
+  carts' rows): one Amazon add of `B0FC2PF4KS` put **three** items in the cart. A read-only probe
+  showed the page's buy-box form posts to `/gp/product/handle-buy-box/…` (refused by the guard), so
+  the only form `add_form` accepted was a sponsored bundle ad (`/cart/add-to-cart/ref=sspa_dk_
+  detail_sbb_crt`) carrying that ASIN and two others — this is also the earlier "count jumped
+  1 → 4". The two extra lines were removed again. Now an add form must carry only its own ASIN,
+  `sspa` refs count as sponsored, and other new cart rows make the add `failed` / `extra_items`
+  (tier 1: `failed`, not `needs_agent`). Consequence: **Amazon tier 1 and 2 adds are now
+  `no_add_form`** until the buy box's `handle-buy-box` add is allowed (a guard change: permit that
+  POST only when its submitter is `submit.add-to-cart`; open decision). Whole Foods `B000P6L3K0`
+  was found and clicked, but no row appeared in `/cart/localmarket?almBrandId=…` within the 5 s
+  wait (`unverified`). Regression tests: `tests/test_cart_add.py` on a synthetic
   `product_wholefoods.html`, including the real Playwright click path in headless Chromium (the
   `python` CI job now installs Chromium for agent/tools). **Not verified here, no live Amazon run
   (owner on the Mac):** that the `almBrandId` cart lists Whole Foods rows as `data-asin` /
