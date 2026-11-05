@@ -5,17 +5,12 @@ Anything that isn't plain Amazon `https`, or that looks like checkout, payment o
 refused before the request is made (Buy Now, 1-Click and Turbo checkout count as checkout).
 `CdpDriver` also installs this as a Playwright route so a redirect or script-initiated navigation to
 checkout is aborted in the browser itself.
-
-One exception, in the browser only: the product page's own "Add to cart" posts its buy-box form to
-`/gp/product/handle-buy-box`, the endpoint Buy Now posts to as well. `buy_box_add` lets that one
-POST through when the button pressed was `submit.add-to-cart` and nothing else in the form data
-asks to buy, check out or subscribe. A tool never *opens* that URL; `check_url` still refuses it.
 """
 
 from __future__ import annotations
 
 import re
-from urllib.parse import parse_qsl, unquote, urlsplit, urlunsplit
+from urllib.parse import unquote, urlsplit
 
 ALLOWED_HOSTS = frozenset({"www.amazon.com", "amazon.com", "smile.amazon.com"})
 
@@ -85,41 +80,3 @@ def check_url(url: str) -> str:
     if reason:
         raise UnsafeUrl(url, reason)
     return url
-
-
-BUY_BOX_PATH = re.compile(r"^/gp/product/handle-buy-box(?=/|$)")
-BUY_BOX_ADD_FIELD = "submit.add-to-cart"
-# Form fields that make a buy-box POST something other than a plain add: another submit button
-# (Buy Now, wishlist, ...), or anything about buying now, checkout, 1-Click, Turbo or subscribing.
-BUY_BOX_REFUSED_FIELD = re.compile(
-    r"^submit\.|buy[\s._-]*now|check[\s._-]*out|turbo|(?:1|one)[\s._-]*click|subscri|^sns", re.I
-)
-
-
-def is_buy_box_url(url: str) -> bool:
-    """A product page's buy-box form endpoint (`handle-buy-box`) on an allowed host."""
-    parts = urlsplit(url)
-    return (
-        parts.scheme == "https"
-        and (parts.hostname or "").lower() in ALLOWED_HOSTS
-        and bool(BUY_BOX_PATH.match(unquote(parts.path).lower()))
-    )
-
-
-def buy_box_add(url: str, method: str, post_data: str | None) -> bool:
-    """Is this request the buy box's own "Add to cart" POST, and nothing more? Only the pressed
-    submit button's name is in a form's data, so Buy Now (`submit.buy-now`) never passes."""
-    if method.upper() != "POST" or not post_data or not is_buy_box_url(url):
-        return False
-    parts = urlsplit(url)
-    rest = BUY_BOX_PATH.sub("/gp/product/add", unquote(parts.path).lower(), count=1)
-    if classify_url(urlunsplit(("https", parts.netloc, rest, parts.query, ""))):
-        return False  # checkout or sign-in elsewhere in the URL
-    try:
-        fields = parse_qsl(post_data, keep_blank_values=True, strict_parsing=True)
-    except ValueError:
-        return False  # not form-encoded: can't tell what it asks for
-    names = [name for name, _ in fields]
-    return BUY_BOX_ADD_FIELD in names and not any(
-        BUY_BOX_REFUSED_FIELD.search(n) for n in names if n != BUY_BOX_ADD_FIELD
-    )

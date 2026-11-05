@@ -15,7 +15,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from types import TracebackType
 from typing import TYPE_CHECKING, Protocol, Self
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlsplit
 
 from . import dom, guard
 
@@ -34,12 +34,12 @@ ASIN_RE = re.compile(r"^[A-Z0-9]{10}$")
 # matched against the form's action, id and name) ...
 SPONSORED_FORM = re.compile(r"spAddToCart|sspa", re.I)
 ASIN_INPUT = re.compile(r"asin", re.I)  # input names: items[0.base][asin], ASIN, snsAsin
-# ... or the page's own buy-box form (`#addToCart`, action `/gp/product/handle-buy-box`, Buy Now's
-# endpoint too): only its `submit.add-to-cart` button (`buy_box_add_allowed`), in a form carrying
-# this ASIN alone and no subscription (`snsAsin`; live, its add button has the same name), and the
-# browser lets the POST through only when that was the button pressed (`guard.buy_box_add`) ...
+# ... or the page's own buy-box form (`#addToCart`, action `/gp/product/handle-buy-box`: Buy Now's
+# endpoint, which the guard refuses): only its `submit.add-to-cart` button, which posts to
+# `/cart/add-to-cart` through its `formaction` (live, 2026-11-05; `buy_box_add_allowed`), in a form
+# carrying this ASIN alone and no subscription (`snsAsin`; live, its add button has the same name).
 BUY_BOX_FORM_ACTION = "/gp/product/handle-buy-box"
-BUY_BOX_ADD_NAME = guard.BUY_BOX_ADD_FIELD
+BUY_BOX_ADD_NAME = "submit.add-to-cart"
 SUBSCRIPTION = re.compile(r"subscri|^sns|\bsns", re.I)
 # ... or, on a Whole Foods page (no form), the buy-box widget bound to the ASIN.
 WF_BUY_BOX_IDS = ("almAddToCart_feature_div", "core-dp-alm-atc-wf")
@@ -116,16 +116,19 @@ def subscription_form(input_names: list[str]) -> bool:
 
 def buy_box_add_allowed(desc: Mapping[str, str]) -> bool:
     """The one control in a buy-box (`handle-buy-box`) form the tools may click: its plain "Add to
-    cart" (`submit.add-to-cart`). Never Buy Now / 1-Click / checkout / subscription, never a
-    button that posts elsewhere (`formaction`). The form's other checks are the caller's."""
-    if desc.get("name") != BUY_BOX_ADD_NAME or desc.get("formaction"):
+    cart" (`submit.add-to-cart`), which posts to `/cart/add-to-cart` through its `formaction`.
+    Never Buy Now / 1-Click / checkout / subscription; never one that would post to the buy box
+    itself or anywhere else. The form's other checks (ASIN, subscription) are the caller's."""
+    if desc.get("name") != BUY_BOX_ADD_NAME:
+        return False
+    if BUY_BOX_FORM_ACTION not in (desc.get("form_action") or ""):
         return False
     words = " ".join(desc.get(k) or "" for k in _DESC_TEXT if k != "name")
     if DENY_CONTROL.search(words) or SUBSCRIPTION.search(words):
         return False
-    action = urljoin("https://www.amazon.com/", desc.get("form_action") or "")
-    # The action itself must be handle-buy-box and nothing else unsafe (`guard.buy_box_add`).
-    return guard.buy_box_add(action, "POST", f"{BUY_BOX_ADD_NAME}=")
+    target = urljoin("https://www.amazon.com/", desc.get("formaction") or "")
+    parts = urlsplit(target)
+    return parts.path.startswith(ADD_FORM_ACTION) and guard.classify_url(target) is None
 
 
 def control_allowed(desc: Mapping[str, str]) -> bool:
@@ -212,11 +215,7 @@ class CdpDriver:
 
     def _route(self, route: Route) -> None:
         request = route.request
-        if (
-            request.resource_type == "document"
-            and guard.classify_url(request.url)
-            and not guard.buy_box_add(request.url, request.method, request.post_data)
-        ):
+        if request.resource_type == "document" and guard.classify_url(request.url):
             self.blocked.append(request.url)
             route.abort("blockedbyclient")
         else:
@@ -262,8 +261,8 @@ class CdpDriver:
 
     def _add_by_buy_box(self, asin: str, qty: int) -> Snapshot | None:
         """The buy box's own "Add to cart" (`buy_box_add_allowed`), in a visible `handle-buy-box`
-        form that carries `asin` alone and no subscription. Same rule as `cart_add.buy_box_add`;
-        the browser route lets only that button's POST through."""
+        form that carries `asin` alone and no subscription. Same rule as `cart_add.buy_box_add`.
+        Its POST goes to `/cart/add-to-cart`; the buy box's own endpoint stays refused."""
         forms = self.page.locator(f"form[action*='{BUY_BOX_FORM_ACTION}']").filter(
             has=self.page.locator(f"input[value='{asin}']")
         )
@@ -289,8 +288,6 @@ class CdpDriver:
             # A form POST (lands on the cart) or an in-page add: either way, wait a bounded time.
             self.page.wait_for_load_state("domcontentloaded")
             self._settle()
-            if guard.is_buy_box_url(self.page.url):  # the add's own response, rendered in place
-                return Snapshot(self.page.url, self.page.content())
             return self._snapshot()
         return None
 

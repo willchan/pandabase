@@ -49,6 +49,7 @@ CART_URL = "https://www.amazon.com/gp/cart/view.html"
 # Whole Foods rows on it (PLAN Notes); the smoke check reads the same URL.
 WF_CART_URL = "https://www.amazon.com/cart/localmarket?almBrandId=VUZHIFdob2xlIEZvb2Rz"
 CART_URLS = {"amazon": CART_URL, "wholefoods": WF_CART_URL}
+ACTIVE_ITEMS = "Active Items"
 SUBTOTAL_COUNT = re.compile(r"subtotal\s*\(\s*(\d+)\s+items?\s*\)", re.I)
 
 AddResult = Literal["added", "already_in_cart", "failed"]
@@ -179,7 +180,8 @@ def add_control(root: dom.Node, asin: str, page_url: str | None = None) -> dom.N
 
 def cart_state(html: str) -> tuple[int | None, set[str]]:
     """(item count, ASINs in the active cart). Saved-for-later and recommendations don't count:
-    only `data-asin` rows inside a cart form whose `data-itemtype` isn't `saved`. The count
+    only `data-asin` rows inside a cart form whose `data-itemtype` isn't `saved`, or (Whole Foods)
+    `data-itemtype="active"` rows inside a `data-name="Active Items"` block. The count
     (`#nav-cart-count`, else "Subtotal (N items)") is reported, never used to decide an add."""
     root = dom.parse(html)
     count: int | None = None
@@ -199,6 +201,15 @@ def cart_state(html: str) -> tuple[int | None, set[str]]:
         for node in form.iter():
             asin = node.attrs.get("data-asin", "")
             if ASIN_RE.match(asin) and node.attrs.get("data-itemtype", "active") == "active":
+                asins.add(asin)
+    # The Whole Foods cart (`/cart/localmarket`) has no such form: its rows sit in an "Active
+    # Items" block (live, 2026-11-05) and must say `data-itemtype="active"` themselves.
+    for block in root.iter():
+        if block.attrs.get("data-name") != ACTIVE_ITEMS:
+            continue
+        for node in block.iter():
+            asin = node.attrs.get("data-asin", "")
+            if ASIN_RE.match(asin) and node.attrs.get("data-itemtype") == "active":
                 asins.add(asin)
     return count, asins
 

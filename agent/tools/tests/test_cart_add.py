@@ -209,13 +209,16 @@ def test_bundle_page_adds_only_the_item_through_its_buy_box() -> None:
     assert (control.attrs["name"], control.attrs["value"]) == ("submit.add-to-cart", "Add to cart")
 
 
-# Amazon's own "Add to cart" is in the buy box form, which posts to handle-buy-box: the same
-# endpoint as Buy Now. Only that one button may be used (owner decision, 2026-11-05): a control
-# named `submit.add-to-cart` in a handle-buy-box form carrying only this ASIN, not the
-# subscription form's (`snsAsin`, "Add subscription to cart"), never Buy Now, never a formaction.
+# Amazon's own "Add to cart" is in the buy box form, which posts to handle-buy-box: Buy Now's
+# endpoint, refused by the guard. Live run 3 (2026-11-05) was `no_add_form` because the button posts
+# to /cart/add-to-cart through its `formaction`, which the first version of this rule refused. Only
+# that button may be used: `submit.add-to-cart` in a handle-buy-box form carrying only this ASIN,
+# not the subscription form's (`snsAsin`, "Add subscription to cart", same name and id), posting
+# to /cart/add-to-cart; never Buy Now.
 BUY_BOX = "B0SYNTH501"
 P501 = "https://www.amazon.com/dp/" + BUY_BOX
 BUY_BOX_PAGE = fixture("product_buy_box.html")
+ADD_FA = 'title="Add to Shopping Cart" formaction="/cart/add-to-cart/ref=dp_start-bbf_1_glance"'
 
 
 def test_buy_box_add_is_the_one_time_add_to_cart() -> None:
@@ -230,11 +233,11 @@ def test_buy_box_add_is_the_one_time_add_to_cart() -> None:
 @pytest.mark.parametrize(
     ("change", "why"),
     [
-        (('name="submit.add-to-cart" id="add-to-cart-button"', 'name="submit.buy-now"'), "buy now"),
-        (('id="add-to-cart-button"', 'id="add-to-cart-button" formaction="/checkout/turbo"'), "fa"),
+        ((ADD_FA, ""), "no formaction: would post to handle-buy-box"),
+        ((ADD_FA, 'formaction="/checkout/turbo"'), "checkout formaction"),
         (('name="offerListingID"', 'name="snsAsin"'), "a subscription form"),
         (('value="synthOffer501"', 'value="B0SYNTH599"'), "x"),  # not an ASIN-named input
-        (('id="add-to-cart-button" value="Add to cart"', 'value="Buy now"'), "buy now text"),
+        (('value="Add to cart" title', 'value="Buy now" title'), "buy now text"),
     ],
 )
 def test_buy_box_add_refusals(change: tuple[str, str], why: str) -> None:
@@ -313,6 +316,25 @@ def test_asin_only_saved_for_later_after_the_add_is_unverified() -> None:
     )
     out = add_one(driver, "B0SYNTH202", 1, Telemetry(), "amazon")
     assert (out.outcome, out.reason) == ("failed", "unverified")
+
+
+def test_whole_foods_cart_rows_outside_a_form_are_active_rows() -> None:
+    # Live run 3 (2026-11-05): the Whole Foods cart showed the owner's item as an active row, but
+    # `cart_state` found none: there the rows sit in a `data-name="Active Items"` block, not in a
+    # `/cart` form, so every Whole Foods add came back `unverified`.
+    _count, asins = cart_state(fixture("cart_localmarket.html"))
+    assert asins == {"B0SYNTH601", "B0SYNTH602"}  # not saved, not recommendations
+
+
+def test_whole_foods_add_is_verified_on_the_live_cart_shape() -> None:
+    before = fixture("cart_localmarket.html")
+    after = before.replace(
+        "Synthetic Milk</div>",
+        'Synthetic Milk</div>\n<div data-asin="B0SYNTH301" data-itemtype="active">x</div>',
+    )
+    driver = _driver(WF_PAGE, [before, after])
+    out = add_one(driver, WF, 1, Telemetry(), "wholefoods")
+    assert (out.outcome, out.reason, out.extra_asins) == ("added", None, [])
 
 
 def test_cart_state_rows_ignore_add_forms_and_saved() -> None:
@@ -431,10 +453,14 @@ def test_cdp_clicks_only_the_one_time_buy_box_add_with_the_quantity(browser_page
 @pytest.mark.parametrize(
     "change",
     [
-        ('name="submit.add-to-cart" id="add-to-cart-button"', 'name="submit.buy-now"'),
+        (
+            'name="submit.add-to-cart" id="add-to-cart-button" value="Add to cart"',
+            'name="submit.buy-now" value="Add to cart"',
+        ),
         ('name="offerListingID"', 'name="snsAsin"'),
-        ('id="add-to-cart-button"', 'id="add-to-cart-button" formaction="/checkout/turbo"'),
-        ('id="add-to-cart-button"', 'id="add-to-cart-button" style="display:none"'),
+        (ADD_FA, ""),
+        (ADD_FA, 'formaction="/checkout/turbo"'),
+        (ADD_FA, ADD_FA + ' style="display:none"'),
     ],
 )
 def test_cdp_never_clicks_buy_now_or_a_subscription(
@@ -445,27 +471,28 @@ def test_cdp_never_clicks_buy_now_or_a_subscription(
     assert browser_page.evaluate("window.__clicked") == []
 
 
-def test_real_form_posts_pass_the_guard_only_for_add_to_cart(browser_page: Any) -> None:
-    """Chromium sends only the pressed submit button's name: the guard tells the two apart."""
-    posts: list[tuple[str, bool]] = []
+def test_real_form_posts_only_add_to_cart_gets_past_the_guard(browser_page: Any) -> None:
+    """In Chromium, "Add to cart" posts to /cart/add-to-cart (its formaction); Buy Now posts to
+    handle-buy-box, which the driver's route aborts."""
+    posts: list[tuple[str, str, bool]] = []
 
     def serve(route: Any) -> None:
         req = route.request
         if req.method == "POST":
-            posts.append(
-                (req.post_data or "", guard.buy_box_add(req.url, req.method, req.post_data))
-            )
+            path = req.url.split("amazon.com", 1)[1].split("?")[0]
+            posts.append((path, req.post_data or "", guard.classify_url(req.url) is None))
             route.fulfill(body=_cart([], 0), content_type="text/html")
         else:
             route.fulfill(body=BUY_BOX_PAGE, content_type="text/html")
 
-    for button in ("#add-to-cart-button", "#buy-now-button", "#add-to-cart-button-sns"):
+    for button in ("form:not([style]) #add-to-cart-button", "#buy-now-button"):
         browser_page.unroute("**/*")
         browser_page.route("**/*", serve)
         browser_page.goto(P501)
         with browser_page.expect_navigation():
             browser_page.click(button)
-    [(add, add_ok), (buy, buy_ok), (sns, sns_ok)] = posts
-    assert "submit.add-to-cart" in add and "submit.buy-now" not in add and add_ok
-    assert "submit.buy-now" in buy and "submit.add-to-cart" not in buy and not buy_ok
-    assert "snsAsin" in sns and not sns_ok
+    [(add_path, add, add_ok), (buy_path, buy, buy_ok)] = posts
+    assert add_path.startswith("/cart/add-to-cart/") and add_ok
+    assert "submit.add-to-cart" in add and "submit.buy-now" not in add
+    assert buy_path.startswith("/gp/product/handle-buy-box/") and not buy_ok
+    assert "submit.buy-now" in buy

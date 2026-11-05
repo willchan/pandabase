@@ -128,55 +128,22 @@ def test_cdp_route_aborts_checkout_documents_in_the_browser() -> None:
     assert driver.blocked == CHECKOUT + SIGNIN
 
 
-# The buy box's "Add to cart" posts to handle-buy-box, Buy Now's endpoint too (live, 2026-11-04).
-# The browser lets that POST through only when the pressed button was `submit.add-to-cart`.
+# The buy-box form posts to handle-buy-box, Buy Now's endpoint (live, 2026-11-05). Its "Add to cart"
+# button posts to /cart/add-to-cart instead (formaction), so handle-buy-box stays refused outright:
+# whatever form data a POST there carries, the browser aborts it.
 HBB = "https://www.amazon.com/gp/product/handle-buy-box/ref=dp_start-bbf_1_glance"
 ADD_POST = "items%5B0.base%5D%5Basin%5D=B0SYNTH501&ASIN=B0SYNTH501&submit.add-to-cart=Add+to+cart"
 
 
-def test_buy_box_add_post_is_allowed() -> None:
-    assert guard.buy_box_add(HBB, "POST", ADD_POST)
-    assert guard.buy_box_add(HBB.replace("/ref=dp_start-bbf_1_glance", ""), "post", ADD_POST)
-
-
-@pytest.mark.parametrize(
-    ("url", "method", "data", "why"),
-    [
-        (HBB, "GET", None, "a GET is a navigation, not the form's add"),
-        (HBB, "POST", None, "no form data"),
-        (HBB, "POST", "ASIN=B0SYNTH501&submit.buy-now=Buy+Now", "Buy Now"),
-        (HBB, "POST", ADD_POST + "&submit.buy-now=", "two submitters"),
-        (HBB, "POST", ADD_POST + "&snsAsin=B0SYNTH501", "a subscription"),
-        (HBB, "POST", ADD_POST + "&submit.add-to-registry.wishlist=", "another submit"),
-        (HBB, "POST", ADD_POST + "&isBuyNow=1", "buy-now field"),
-        (HBB, "POST", ADD_POST + "&proceedToCheckout=1", "checkout field"),
-        (HBB, "POST", "submit.add-to-cart", "not form-encoded fields"),
-        (HBB + "?next=/checkout/entry", "POST", ADD_POST, "checkout in the URL"),
-        (HBB.replace("www.amazon.com", "evil.example"), "POST", ADD_POST, "host"),
-        (HBB.replace("https", "http"), "POST", ADD_POST, "scheme"),
-        ("https://www.amazon.com/gp/buy/spc/handle-buy-box", "POST", ADD_POST, "other path"),
-        ("https://www.amazon.com/checkout/entry", "POST", ADD_POST, "checkout"),
-    ],
-)
-def test_other_buy_box_posts_are_refused(url: str, method: str, data: str | None, why: str) -> None:
-    assert not guard.buy_box_add(url, method, data), why
-
-
-def test_cdp_route_lets_only_the_buy_box_add_post_through() -> None:
+def test_cdp_route_aborts_every_buy_box_post() -> None:
     driver = CdpDriver("http://127.0.0.1:9222")
-    add = _Route(HBB, method="POST", post_data=ADD_POST)
+    for data in (ADD_POST, "ASIN=B0SYNTH501&submit.buy-now=Buy+Now", None):
+        route = _Route(HBB, method="POST", post_data=data)
+        driver._route(route)  # type: ignore[arg-type]
+        assert route.aborted == "blockedbyclient" and not route.continued
+    add = _Route("https://www.amazon.com/cart/add-to-cart/ref=dp_start-bbf_1_glance", method="POST")
     driver._route(add)  # type: ignore[arg-type]
-    assert add.continued and add.aborted is None
-    for data in ("ASIN=B0SYNTH501&submit.buy-now=Buy+Now", ADD_POST + "&snsAsin=B0SYNTH501"):
-        buy = _Route(HBB, method="POST", post_data=data)
-        driver._route(buy)  # type: ignore[arg-type]
-        assert buy.aborted == "blockedbyclient" and not buy.continued
-    get = _Route(HBB)
-    driver._route(get)  # type: ignore[arg-type]
-    assert get.aborted == "blockedbyclient"
-    assert driver.blocked == [HBB, HBB, HBB]
-    with pytest.raises(guard.UnsafeUrl):
-        driver.open(HBB)  # tools still never open it
+    assert add.continued
 
 
 def test_cdp_driver_refuses_before_navigating() -> None:
@@ -228,10 +195,14 @@ def test_add_to_cart_controls_are_clickable(desc: dict[str, str]) -> None:
     assert control_allowed(desc)
 
 
+# The buy box's own "Add to cart", as seen live: in a handle-buy-box form, posting to
+# /cart/add-to-cart through its formaction.
 BUY_BOX_ADD = {
     "name": "submit.add-to-cart",
     "id": "add-to-cart-button",
     "value": "Add to cart",
+    "title": "Add to Shopping Cart",
+    "formaction": "/cart/add-to-cart/ref=dp_start-bbf_1_glance",
     "form_action": "/gp/product/handle-buy-box/ref=dp_start-bbf_1_glance",
 }
 
@@ -248,10 +219,13 @@ def test_buy_box_add_to_cart_is_the_one_buy_box_control_allowed() -> None:
         {"value": "Buy Now"},
         {"value": "Add subscription to cart"},
         {"id": "rcx-subscribe-submit-button-announce"},
-        {"formaction": "/checkout/turbo/entry"},
-        {"form_action": "/cart/add-to-cart/ref=x"},
-        {"form_action": "/gp/product/handle-buy-box/ref=x?next=/checkout"},
         {"text": "Buy now with 1-Click"},
+        {"formaction": ""},  # would post to handle-buy-box, which the guard aborts
+        {"formaction": "/checkout/turbo/entry"},
+        {"formaction": "/gp/product/handle-buy-box/ref=x"},
+        {"formaction": "/cart/add-to-cart/ref=x?next=/checkout"},
+        {"formaction": "https://evil.example/cart/add-to-cart/"},
+        {"form_action": "/cart/add-to-cart/ref=x"},  # not a buy-box form: `add_form`'s case
     ],
 )
 def test_other_buy_box_controls_are_never_clickable(change: dict[str, str]) -> None:
