@@ -14,7 +14,8 @@ import {
   vendorAlias,
   type Db,
 } from "@pandabase/db";
-import { and, asc, desc, eq, inArray, ne, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, ne, or, sql } from "drizzle-orm";
+import { projectRows } from "@pandabase/db/rebuild-state";
 import { normalizeReceiptText } from "../domain/matching";
 import { planMerge } from "../domain/merge";
 import {
@@ -27,10 +28,14 @@ import {
 import { mayCreateLabel, type ReviewKind } from "../domain/review";
 import { daysBetween } from "../domain/time";
 import { badRequest, conflict, notFound } from "../http";
-import { getItem, productsByItem, toCandidate } from "../repo/catalog";
-import { asRecord, type Q } from "../repo/db";
-import { refreshInventoryState } from "../repo/inventory";
-import { emitTelemetry } from "../telemetry";
+import { getItem, toCandidate } from "../repo/catalog";
+import { asRecord, batchThen, batchTransaction, type Q, type Stmt } from "../repo/db";
+import {
+  inventoryStateReads,
+  inventoryStateWrites,
+  refreshInventoryState,
+} from "../repo/inventory";
+import { emitTelemetry, telemetryWrites } from "../telemetry";
 import { newId } from "./receipts";
 import type { ServiceCtx } from "./types";
 
@@ -54,31 +59,44 @@ async function closeReview(
   ctx: ServiceCtx,
   extra: Record<string, unknown> = {},
 ): Promise<void> {
-  await q
-    .update(reviewItem)
-    .set({
-      status,
-      reviewedByMemberId: ctx.actor.memberId,
-      reviewedAt: ctx.now,
-      updatedAt: ctx.now,
-    })
-    .where(eq(reviewItem.id, r.id));
-  await emitTelemetry(
-    q,
-    "state_engine",
-    [
-      {
-        metric: "review_resolved",
-        reviewId: r.id,
-        kind: r.kind,
-        outcome: status,
-        impactScore: r.impactScore,
-        ageHours: Math.round(daysBetween(r.createdAt, ctx.now) * 24 * 10) / 10,
-        ...extra,
-      },
-    ],
-    ctx.now,
-  );
+  for (const w of closeReviewWrites(q, r, status, ctx, extra)) await w;
+}
+
+/** `closeReview`'s statements, unsent, for services that batch. */
+function closeReviewWrites(
+  q: Q,
+  r: ReviewRow,
+  status: Outcome,
+  ctx: ServiceCtx,
+  extra: Record<string, unknown> = {},
+) {
+  return [
+    q
+      .update(reviewItem)
+      .set({
+        status,
+        reviewedByMemberId: ctx.actor.memberId,
+        reviewedAt: ctx.now,
+        updatedAt: ctx.now,
+      })
+      .where(eq(reviewItem.id, r.id)),
+    ...telemetryWrites(
+      q,
+      "state_engine",
+      [
+        {
+          metric: "review_resolved",
+          reviewId: r.id,
+          kind: r.kind,
+          outcome: status,
+          impactScore: r.impactScore,
+          ageHours: Math.round(daysBetween(r.createdAt, ctx.now) * 24 * 10) / 10,
+          ...extra,
+        },
+      ],
+      ctx.now,
+    ),
+  ];
 }
 
 // --- reads --------------------------------------------------------------------------------------
@@ -231,19 +249,71 @@ export async function answerReceiptReview(
   answers: readonly LineAnswer[],
   ctx: ServiceCtx,
 ): Promise<{ status: "confirmed" | "corrected"; receiptStatus: string }> {
-  return db.transaction(async (tx) => {
+  // A constant number of round trips however long the receipt (DESIGN §8 *Database round
+  // trips*): read the review, then everything else in one batch; decide in memory; send every
+  // write plus the reads the inventory projection needs in one batch, then the projection.
+  return batchTransaction(db, async (tx) => {
     const r = await pendingReview(tx, reviewId, ["receipt"]);
-    if (!r.receiptId) throw badRequest(`review ${reviewId} has no receipt`);
-    const [rec] = await tx.select().from(receipt).where(eq(receipt.id, r.receiptId));
-    if (!rec) throw notFound(`receipt ${r.receiptId}`);
-    const lines = await receiptLines(tx, rec.id);
+    const receiptId = r.receiptId;
+    if (!receiptId) throw badRequest(`review ${reviewId} has no receipt`);
+    // Every item this answer can touch: the lines' current items and the answered ones.
+    const lineItemIds = tx
+      .select({ id: receiptLine.itemId })
+      .from(receiptLine)
+      .where(eq(receiptLine.receiptId, receiptId));
+    const answeredIds = [
+      ...new Set(answers.flatMap((a) => (a.answer === "item" ? [a.itemId] : []))),
+    ];
+    const itemScope = or(inArray(item.id, answeredIds), inArray(item.id, lineItemIds));
+    const ofReceipt = tx
+      .select({ v: receipt.vendor })
+      .from(receipt)
+      .where(eq(receipt.id, receiptId));
+    const [[rec], lines, aliases, items, productRows, events, jobs] = await tx.batch([
+      tx.select().from(receipt).where(eq(receipt.id, receiptId)),
+      receiptLines(tx, receiptId),
+      tx.select().from(vendorAlias).where(eq(vendorAlias.vendor, ofReceipt)),
+      tx.select().from(item).where(itemScope),
+      tx
+        .select()
+        .from(product)
+        .where(or(inArray(product.itemId, answeredIds), inArray(product.itemId, lineItemIds)))
+        .orderBy(asc(product.id)),
+      tx
+        .select()
+        .from(inventoryEvent)
+        .where(
+          and(
+            eq(inventoryEvent.sourceRef, receiptId),
+            eq(inventoryEvent.kind, "acquired"),
+            ne(inventoryEvent.trust, "expired"),
+          ),
+        )
+        .orderBy(asc(inventoryEvent.id)),
+      tx
+        .select()
+        .from(auditJob)
+        .where(
+          eq(
+            auditJob.id,
+            tx.select({ j: receipt.jobId }).from(receipt).where(eq(receipt.id, receiptId)),
+          ),
+        ),
+    ]);
+    if (!rec) throw notFound(`receipt ${receiptId}`);
+    const itemById = new Map(items.map((i) => [i.id, i]));
+    const itemOf = (id: string) => {
+      const it = itemById.get(id);
+      if (!it) throw notFound(`item ${id}`);
+      return it;
+    };
     const open = new Map(lines.filter(isOpenLine).map((l) => [l.id, l]));
 
     const decided: { line: LineRow; decision: LineDecision }[] = [];
     for (const a of answers) {
       const line = open.get(a.lineId);
       if (!line) throw badRequest(`line ${a.lineId} is not open on this receipt`);
-      if (a.answer === "item") await getItem(tx, a.itemId);
+      if (a.answer === "item") itemOf(a.itemId);
       const decision: LineDecision =
         a.answer === "ignore"
           ? { kind: "ignore" }
@@ -254,10 +324,9 @@ export async function answerReceiptReview(
       decided.push({ line, decision });
     }
 
-    const aliases = await tx.select().from(vendorAlias).where(eq(vendorAlias.vendor, rec.vendor));
     const res = resolveReceiptReview({
       vendor: rec.vendor,
-      existingAliases: aliases,
+      existingAliases: aliases.filter((a) => a.vendor === rec.vendor),
       lines: decided.map(({ line, decision }) => ({
         lineId: line.id,
         normalized: rec.source === "paper" ? normalizeReceiptText(line.rawText) : null,
@@ -269,54 +338,50 @@ export async function answerReceiptReview(
       })),
     });
 
+    const writes: Stmt[] = [];
+    // The receipt's lines as they will be once the updates below are written.
+    const final = lines.map((l) => ({ ...l }));
+    const finalById = new Map(final.map((l) => [l.id, l]));
     for (const u of res.lineUpdates) {
-      await tx
-        .update(receiptLine)
-        .set({
-          itemId: u.itemId,
-          productId: u.productId,
-          trust: u.trust,
-          ignored: u.ignored,
-          ...(u.matchMethod ? { matchMethod: u.matchMethod } : {}),
-          updatedAt: ctx.now,
-        })
-        .where(eq(receiptLine.id, u.lineId));
+      const set = {
+        itemId: u.itemId,
+        productId: u.productId,
+        trust: u.trust,
+        ignored: u.ignored,
+        ...(u.matchMethod ? { matchMethod: u.matchMethod } : {}),
+        updatedAt: ctx.now,
+      };
+      writes.push(tx.update(receiptLine).set(set).where(eq(receiptLine.id, u.lineId)));
+      const l = finalById.get(u.lineId);
+      if (l) Object.assign(l, set);
     }
     for (const a of res.aliases) {
       const { trust, ...alias } = a;
-      await tx
-        .insert(vendorAlias)
-        .values({ id: newId(), createdAt: ctx.now, updatedAt: ctx.now, ...alias, trust })
-        .onConflictDoUpdate({
-          target: [vendorAlias.vendor, vendorAlias.kind, vendorAlias.vendorString],
-          set: {
-            itemId: alias.itemId,
-            productId: alias.productId,
-            confidenceScore: alias.confidenceScore,
-            ignored: alias.ignored,
-            trust,
-            updatedAt: ctx.now,
-          },
-        });
+      writes.push(
+        tx
+          .insert(vendorAlias)
+          .values({ id: newId(), createdAt: ctx.now, updatedAt: ctx.now, ...alias, trust })
+          .onConflictDoUpdate({
+            target: [vendorAlias.vendor, vendorAlias.kind, vendorAlias.vendorString],
+            set: {
+              itemId: alias.itemId,
+              productId: alias.productId,
+              confidenceScore: alias.confidenceScore,
+              ignored: alias.ignored,
+              trust,
+              updatedAt: ctx.now,
+            },
+          }),
+      );
     }
 
     // Make the receipt's `acquired` events match its final lines.
-    const final = await receiptLines(tx, rec.id);
-    const products = await productsByItem(
-      tx,
-      final.flatMap((l) => (l.itemId ? [l.itemId] : [])),
-    );
-    const events = await tx
-      .select()
-      .from(inventoryEvent)
-      .where(
-        and(
-          eq(inventoryEvent.sourceRef, rec.id),
-          eq(inventoryEvent.kind, "acquired"),
-          ne(inventoryEvent.trust, "expired"),
-        ),
-      )
-      .orderBy(asc(inventoryEvent.id));
+    const products = new Map<string, (typeof productRows)[number][]>();
+    for (const p of productRows) {
+      let list = products.get(p.itemId);
+      if (!list) products.set(p.itemId, (list = []));
+      list.push(p);
+    }
     const plan = reconcileReceiptEvents(
       final.map((l) => ({
         itemId: l.itemId,
@@ -334,80 +399,107 @@ export async function answerReceiptReview(
         trust: e.trust === "confirmed" ? "confirmed" : "provisional",
       })),
     );
-    for (const t of plan.trust) {
-      await tx
-        .update(inventoryEvent)
-        .set({ trust: t.trust, updatedAt: ctx.now })
-        .where(eq(inventoryEvent.id, t.eventId));
+    for (const trust of ["confirmed", "provisional"] as const) {
+      const ids = plan.trust.filter((t) => t.trust === trust).map((t) => t.eventId);
+      if (ids.length > 0) {
+        writes.push(
+          tx
+            .update(inventoryEvent)
+            .set({ trust, updatedAt: ctx.now })
+            .where(inArray(inventoryEvent.id, ids)),
+        );
+      }
     }
     if (plan.expire.length > 0) {
-      await tx
-        .update(inventoryEvent)
-        .set({ trust: "expired", updatedAt: ctx.now })
-        .where(inArray(inventoryEvent.id, plan.expire));
+      writes.push(
+        tx
+          .update(inventoryEvent)
+          .set({ trust: "expired", updatedAt: ctx.now })
+          .where(inArray(inventoryEvent.id, plan.expire)),
+      );
     }
-    for (const e of plan.insert) {
-      const it = await getItem(tx, e.itemId);
-      await tx.insert(inventoryEvent).values({
-        id: newId(),
-        createdAt: ctx.now,
-        updatedAt: ctx.now,
-        itemId: e.itemId,
-        location: it.defaultLocation,
-        kind: "acquired",
-        quantity: e.quantity,
-        occurredAt: rec.acquiredAt,
-        source: eventSource(rec.source),
-        sourceRef: rec.id,
-        actorMemberId: ctx.actor.memberId,
-        actorSystem: ctx.actor.system,
-        trust: e.trust,
-      });
+    if (plan.insert.length > 0) {
+      writes.push(
+        tx.insert(inventoryEvent).values(
+          plan.insert.map((e) => ({
+            id: newId(),
+            createdAt: ctx.now,
+            updatedAt: ctx.now,
+            itemId: e.itemId,
+            location: itemOf(e.itemId).defaultLocation,
+            kind: "acquired" as const,
+            quantity: e.quantity,
+            occurredAt: rec.acquiredAt,
+            source: eventSource(rec.source),
+            sourceRef: rec.id,
+            actorMemberId: ctx.actor.memberId,
+            actorSystem: ctx.actor.system,
+            trust: e.trust,
+          })),
+        ),
+      );
     }
 
     const corrected = decided.some((d) => d.decision.kind !== "confirm");
     const status = corrected ? "corrected" : "confirmed";
     if (mayCreateLabel(status, ctx.actor.memberId) && res.labels.length > 0) {
-      const [job] = rec.jobId
-        ? await tx.select().from(auditJob).where(eq(auditJob.id, rec.jobId))
-        : [];
-      await tx.insert(labeledObservation).values(
-        res.labels.map((l) => ({
-          id: newId(),
-          createdAt: ctx.now,
-          updatedAt: ctx.now,
-          sourceKind: "receipt_line" as const,
-          jobId: rec.jobId,
-          modelOutput: {
-            ...l.modelOutput,
-            line_id: l.lineId,
-            raw_text: lines.find((x) => x.id === l.lineId)?.rawText ?? null,
-          },
-          humanLabel: l.humanLabel,
-          model: job?.model ?? null,
-          promptVersion: job?.promptVersion ?? null,
-          memberId: ctx.actor.memberId!,
-        })),
+      const job = rec.jobId ? jobs[0] : undefined;
+      writes.push(
+        tx.insert(labeledObservation).values(
+          res.labels.map((l) => ({
+            id: newId(),
+            createdAt: ctx.now,
+            updatedAt: ctx.now,
+            sourceKind: "receipt_line" as const,
+            jobId: rec.jobId,
+            modelOutput: {
+              ...l.modelOutput,
+              line_id: l.lineId,
+              raw_text: lines.find((x) => x.id === l.lineId)?.rawText ?? null,
+            },
+            humanLabel: l.humanLabel,
+            model: job?.model ?? null,
+            promptVersion: job?.promptVersion ?? null,
+            memberId: ctx.actor.memberId!,
+          })),
+        ),
       );
     }
 
     const stillPending = final.some((l) => l.itemId === null && !l.ignored);
     const applied = final.some((l) => l.itemId !== null && !l.ignored);
     const receiptStatus = !stillPending ? "applied" : applied ? "partial" : "pending_review";
-    await tx
-      .update(receipt)
-      .set({ status: receiptStatus, updatedAt: ctx.now })
-      .where(eq(receipt.id, rec.id));
-
-    const touched = [...events.map((e) => e.itemId), ...plan.insert.map((e) => e.itemId)];
-    await refreshInventoryState(tx, touched, ctx.now, ctx.config);
+    writes.push(
+      tx
+        .update(receipt)
+        .set({ status: receiptStatus, updatedAt: ctx.now })
+        .where(eq(receipt.id, rec.id)),
+    );
     const count = (k: LineDecision["kind"]) => decided.filter((d) => d.decision.kind === k).length;
-    await closeReview(tx, r, status, ctx, {
-      vendor: rec.vendor,
-      confirmedLines: count("confirm"),
-      correctedLines: count("correct"),
-      ignoredLines: count("ignore"),
-    });
+    writes.push(
+      ...closeReviewWrites(tx, r, status, ctx, {
+        vendor: rec.vendor,
+        confirmedLines: count("confirm"),
+        correctedLines: count("correct"),
+        ignoredLines: count("ignore"),
+      }),
+    );
+
+    // Re-project `inventory_state` for the touched items from the events as written.
+    const touched = [
+      ...new Set([...events.map((e) => e.itemId), ...plan.insert.map((e) => e.itemId)]),
+    ];
+    if (touched.length === 0) {
+      await batchThen(tx, writes, []);
+    } else {
+      const [stateItems, stateEvents, away] = await batchThen(
+        tx,
+        writes,
+        inventoryStateReads(tx, touched),
+      );
+      const rows = projectRows(stateItems, stateEvents, away, ctx.now, ctx.config);
+      await batchThen(tx, inventoryStateWrites(tx, touched, rows), []);
+    }
     return { status, receiptStatus };
   });
 }

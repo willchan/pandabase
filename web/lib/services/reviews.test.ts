@@ -17,6 +17,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { DEFAULT_CONFIG } from "@/lib/config";
 import { loadEstimates } from "@/lib/repo/inventory";
 import { ALEX, setup, type Harness } from "@/test/harness";
+import { countRoundTrips } from "@/test/roundTrips";
 import { ingestReceipt } from "./receipts";
 import {
   answerReceiptReview,
@@ -113,6 +114,7 @@ describe("answerReceiptReview", () => {
       .where(eq(labeledObservation.jobId, detail.receipt.jobId!));
     expect(labels).toHaveLength(1);
     expect(labels[0]!.humanLabel).toEqual({ itemId: line.itemId, productId: line.productId });
+    expect(labels[0]!.promptVersion).toBe("paper_receipt.v1"); // from the receipt's audit job
     const [after] = await h.db.select().from(reviewItem).where(eq(reviewItem.id, r.id));
     expect(after).toMatchObject({ status: "confirmed", reviewedByMemberId: ctx.actor.memberId });
     expect((await telemetry("review_resolved"))[0]!.payload).toMatchObject({
@@ -234,6 +236,62 @@ describe("answerReceiptReview", () => {
     const other = await reviewOf("trash_cam");
     await expect(answerReceiptReview(h.db, other.id, [], ctx)).rejects.toThrow(/trash_cam/);
     await expect(receiptReviewDetail(h.db, other.id)).rejects.toThrow(/not found/);
+  });
+});
+
+// Regression: "Confirm receipt" made ~3 sequential database round trips per receipt line (line
+// update, alias upsert, event insert + item lookup, all inside one interactive transaction), so on
+// remote Turso a long receipt held the write lock for seconds and the Preview E2E step 07b timed
+// out. The round-trip count must not grow with the number of lines.
+describe("answerReceiptReview round trips", () => {
+  const answerFresh = async (n: number) => {
+    const res = await ingestReceipt(
+      h.db,
+      {
+        source: "paper",
+        vendor: "wholefoods",
+        accountMemberId: null,
+        externalOrderId: null,
+        fulfillment: "in_store",
+        orderedAt: null,
+        acquiredAt: h.now(),
+        subtotalCents: null,
+        totalCents: 1000 + n, // distinct receipts
+        lines: Array.from({ length: n }, (_, i) => ({
+          rawText: `ZZQ MYSTERY THING ${n}-${i}`,
+          asin: null,
+          qty: 1,
+          unitPriceCents: 1,
+          lineTotalCents: 1,
+        })),
+      },
+      { ...ctx, actor: { memberId: null, system: "worker" } },
+    );
+    const [review] = await h.db
+      .select()
+      .from(reviewItem)
+      .where(and(eq(reviewItem.receiptId, res.receipt_id), eq(reviewItem.kind, "receipt")));
+    const items = [await h.itemId("Eggs"), await h.itemId("Toilet Paper")];
+    const trips = countRoundTrips(h.db);
+    try {
+      const out = await answerReceiptReview(
+        h.db,
+        review!.id,
+        res.lines.map((l, i) => ({ lineId: l.id, answer: "item", itemId: items[i % 2]! })),
+        ctx,
+      );
+      expect(out).toEqual({ status: "corrected", receiptStatus: "applied" });
+      return trips.count();
+    } finally {
+      trips.restore();
+    }
+  };
+
+  it("is constant in the number of receipt lines", async () => {
+    const small = await answerFresh(2);
+    const large = await answerFresh(8);
+    expect(large).toBe(small);
+    expect(small).toBe(5); // review read, read batch, write batch, state batch, commit
   });
 });
 

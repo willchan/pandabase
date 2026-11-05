@@ -39,16 +39,35 @@ export async function refreshInventoryState(
 ): Promise<void> {
   const ids = [...new Set(itemIds)];
   if (ids.length === 0) return;
-  const items = await q.select().from(item).where(inArray(item.id, ids));
-  const events = await q
-    .select()
-    .from(inventoryEvent)
-    .where(and(inArray(inventoryEvent.itemId, ids), ne(inventoryEvent.trust, "expired")))
-    .orderBy(asc(inventoryEvent.occurredAt), asc(inventoryEvent.id));
-  const rows = projectRows(items, events, await awayPeriods(q), now, config);
-  await q.delete(inventoryState).where(inArray(inventoryState.itemId, ids));
-  if (rows.length > 0) await q.insert(inventoryState).values(rows);
+  const [items, events, away] = inventoryStateReads(q, ids);
+  const rows = projectRows(await items, await events, await away, now, config);
+  for (const w of inventoryStateWrites(q, ids, rows)) await w;
 }
+
+/**
+ * `refreshInventoryState` in parts, for services that batch (`batchThen`): the reads its
+ * projection needs (items, their non-expired events, away periods)…
+ */
+export const inventoryStateReads = (q: Q, ids: readonly string[]) =>
+  [
+    q.select().from(item).where(inArray(item.id, ids)),
+    q
+      .select()
+      .from(inventoryEvent)
+      .where(and(inArray(inventoryEvent.itemId, ids), ne(inventoryEvent.trust, "expired")))
+      .orderBy(asc(inventoryEvent.occurredAt), asc(inventoryEvent.id)),
+    q.select({ startsOn: awayPeriod.startsOn, endsOn: awayPeriod.endsOn }).from(awayPeriod),
+  ] as const;
+
+/** …and the writes that replace those items' rows with `rows` (from `projectRows`). */
+export const inventoryStateWrites = (
+  q: Q,
+  ids: readonly string[],
+  rows: (typeof inventoryState.$inferInsert)[],
+) => [
+  q.delete(inventoryState).where(inArray(inventoryState.itemId, ids)),
+  ...(rows.length > 0 ? [q.insert(inventoryState).values(rows)] : []),
+];
 
 export interface ItemEstimate {
   item: ItemRow;
