@@ -198,3 +198,18 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - run: plutil -lint ops/launchd/*.plist
+
+  ci-ok:
+    # The single required status check for main (ruleset "Main"): it passes only when every job
+    # above passed. always() matters: without it a failed need *skips* this job, and GitHub treats
+    # a skipped required check as passing, so auto-merge would land a broken PR. Add new jobs to
+    # `needs` instead of editing the ruleset.
+    if: always()
+    needs: [web, e2e, e2e-system, contracts, python, worker-image, ops, launchd]
+    runs-on: ubuntu-latest
+    steps:
+      - if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') || contains(needs.*.result, 'skipped')
+        run: |
+          echo "Some CI jobs did not pass: ${{ join(needs.*.result, ', ') }}"
+          exit 1
+      - run: echo "All CI jobs passed"
