@@ -6,9 +6,11 @@
 #    symlinks that resolve outside the workspace, so the repo is loaded as an extra root).
 #    `openclaw config set` applies this live, so the gateway keeps running (OpenClaw 2026.10+
 #    refuses `gateway stop` on the operator's running service without --force anyway).
-# 2. Writes AGENT_API_TOKEN, PANDABASE_CONFIG and PANDABASE_API_URL from .env (plus a dummy
-#    OLLAMA_API_KEY for local vision, if unset) into ~/.openclaw/.env: the gateway loads it, and
-#    the skills gate on these variables.
+# 2. Writes PANDABASE_AGENT_API_TOKEN (.env's AGENT_API_TOKEN), PANDABASE_CONFIG and
+#    PANDABASE_API_URL (plus a dummy OLLAMA_API_KEY for local vision, if unset) into
+#    ~/.openclaw/.env: the gateway loads it, and the skills gate on these variables. Every app's
+#    tools share that file, so PandaBase's keys are prefixed; an unprefixed AGENT_API_TOKEN left
+#    by an older install is removed.
 # 3. Runs `openclaw skills check`.
 set -euo pipefail
 # shellcheck source=scripts/ops/lib.sh
@@ -52,9 +54,11 @@ fi
 [ "$DRY_RUN" = 1 ] || chmod 600 "$OPENCLAW_ENV"
 load_agent_env
 changed=0
-for key in AGENT_API_TOKEN PANDABASE_CONFIG PANDABASE_API_URL; do
+for key in PANDABASE_AGENT_API_TOKEN PANDABASE_CONFIG PANDABASE_API_URL; do
   want="${!key:-}"
-  [ -n "$want" ] || die "$key is empty in .env — run 'make secrets' and edit .env"
+  src="$key"
+  [ "$key" = PANDABASE_AGENT_API_TOKEN ] && src=AGENT_API_TOKEN
+  [ -n "$want" ] || die "$src is empty in .env — run 'make secrets' and edit .env"
   if [ "$(env_get "$key" "$OPENCLAW_ENV")" = "$want" ]; then
     note "kept $key in $OPENCLAW_ENV"
     continue
@@ -68,6 +72,17 @@ for key in AGENT_API_TOKEN PANDABASE_CONFIG PANDABASE_API_URL; do
     info "set $key in $OPENCLAW_ENV"
   fi
 done
+# Older installs wrote the token unprefixed, where any app's tools would pick it up.
+if [ -n "$(env_get AGENT_API_TOKEN "$OPENCLAW_ENV")" ]; then
+  if [ "$changed" = 0 ] && [ -s "$OPENCLAW_ENV" ]; then backup "$OPENCLAW_ENV"; fi
+  changed=1
+  if [ "$DRY_RUN" = 1 ]; then
+    info "[dry-run] would remove the unprefixed AGENT_API_TOKEN from $OPENCLAW_ENV"
+  else
+    env_unset AGENT_API_TOKEN "$OPENCLAW_ENV"
+    info "removed the unprefixed AGENT_API_TOKEN from $OPENCLAW_ENV"
+  fi
+fi
 # OpenClaw's bundled Ollama provider wants a (dummy) key to count as configured for local vision.
 if [ -z "$(env_get OLLAMA_API_KEY "$OPENCLAW_ENV")" ]; then
   if [ "$changed" = 0 ] && [ -s "$OPENCLAW_ENV" ]; then backup "$OPENCLAW_ENV"; fi

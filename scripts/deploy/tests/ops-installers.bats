@@ -39,6 +39,19 @@ JSON
   ! called "openclaw config set"
 }
 
+# Bug: the token went into OpenClaw's shared env file as AGENT_API_TOKEN, a name another app's
+# tools (Bamboo) also read, so they picked up PandaBase's token. It must be written prefixed, and
+# an unprefixed copy from an older install removed; other apps' lines stay.
+@test "install-agent-skills writes the token prefixed and drops the unprefixed one" {
+  printf 'AGENT_API_TOKEN=old-unprefixed\nBAMBOO_API_URL=https://bamboo.test\n' >"$OPENCLAW_ENV"
+  run /bin/bash "$ROOT_DIR/scripts/ops/install-agent-skills.sh"
+  [ "$status" -eq 0 ]
+  grep -qx 'PANDABASE_AGENT_API_TOKEN=test-agent' "$OPENCLAW_ENV"
+  ! grep -q '^AGENT_API_TOKEN=' "$OPENCLAW_ENV"
+  grep -qx 'BAMBOO_API_URL=https://bamboo.test' "$OPENCLAW_ENV"
+  [ "$(stat -f %Lp "$OPENCLAW_ENV" 2>/dev/null || stat -c %a "$OPENCLAW_ENV")" = 600 ]
+}
+
 # Bug: with OPENCLAW_AGENT unset, `"${agent_args[@]}"` expanded an empty array, which bash 3.2
 # (macOS /bin/bash) under `set -u` reports as "agent_args[@]: unbound variable".
 @test "install-agent-cron runs with OPENCLAW_AGENT unset" {

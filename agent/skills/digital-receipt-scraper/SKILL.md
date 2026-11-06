@@ -6,7 +6,7 @@ metadata:
     "openclaw":
       {
         "emoji": "🧾",
-        "requires": { "bins": ["pandabase-tools"], "env": ["AGENT_API_TOKEN", "PANDABASE_CONFIG"] },
+        "requires": { "bins": ["pandabase-tools"], "env": ["PANDABASE_AGENT_API_TOKEN", "PANDABASE_CONFIG"] },
       },
   }
 ---

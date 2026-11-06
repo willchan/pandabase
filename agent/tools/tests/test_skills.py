@@ -52,7 +52,7 @@ def test_frontmatter(name: str) -> None:
     meta = json.loads(re.sub(r",(\s*[}\]])", r"\1", fields["metadata"]))  # JSON5 trailing commas
     requires = meta["openclaw"]["requires"]
     assert requires["bins"] == ["pandabase-tools"]
-    assert set(requires["env"]) == {"AGENT_API_TOKEN", "PANDABASE_CONFIG"}
+    assert set(requires["env"]) == {"PANDABASE_AGENT_API_TOKEN", "PANDABASE_CONFIG"}
     assert "pandabase-tools" in body
 
 
