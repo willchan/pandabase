@@ -114,5 +114,5 @@ def test_request_is_validated_before_sending() -> None:
 def test_missing_token_is_refused() -> None:
     from pandabase_tools.api import ApiClient
 
-    with pytest.raises(ValueError, match="AGENT_API_TOKEN"):
+    with pytest.raises(ValueError, match="PANDABASE_AGENT_API_TOKEN"):
         ApiClient("https://x.test", "")

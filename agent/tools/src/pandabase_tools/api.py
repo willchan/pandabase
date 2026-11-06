@@ -156,7 +156,7 @@ class ApiClient:
         timeout: float = 30.0,
     ) -> None:
         if not token:
-            raise ValueError("AGENT_API_TOKEN is not set")
+            raise ValueError("PANDABASE_AGENT_API_TOKEN is not set")
         self.http = httpx.Client(
             base_url=base_url.rstrip("/"),
             headers={"Authorization": f"Bearer {token}", "User-Agent": "pandabase-tools"},

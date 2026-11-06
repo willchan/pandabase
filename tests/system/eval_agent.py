@@ -281,7 +281,7 @@ def test_agent_scenarios(request: pytest.FixtureRequest) -> None:
     env = {
         **os.environ,
         "PANDABASE_CONFIG": str(stack.config_path),
-        "AGENT_API_TOKEN": stack.tokens["agent"],
+        "PANDABASE_AGENT_API_TOKEN": stack.tokens["agent"],
         "OLLAMA_API_KEY": "ollama-local",
         # pandabase-tools from agent/tools' venv (the one running this test) on PATH.
         "PATH": f"{Path(sys.executable).parent}{os.pathsep}{os.environ.get('PATH', '')}",

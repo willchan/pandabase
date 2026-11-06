@@ -220,7 +220,7 @@ class Stack:
         return {
             **os.environ,
             "PANDABASE_CONFIG": str(self.config_path),
-            "AGENT_API_TOKEN": self.tokens["agent"],
+            "PANDABASE_AGENT_API_TOKEN": self.tokens["agent"],
             "FAKE_AMAZON_LOG": str(self.amazon_log),
         }
 

@@ -1,8 +1,9 @@
 """Agent pack configuration: `pandabase.config.json` + `profiles.json` (examples in `/agent`).
 
-Secrets never live in these files: the API token comes from `AGENT_API_TOKEN`. Tool tunables
-(batch sizes, throttles, lookbacks) live here with their defaults so the JSON only needs what
-differs.
+Secrets never live in these files: the API token comes from `PANDABASE_AGENT_API_TOKEN`. It's
+prefixed because OpenClaw's env file is shared by every app's tools on the Mac (the engine and
+the repo `.env` still call it `AGENT_API_TOKEN`). Tool tunables (batch sizes, throttles,
+lookbacks) live here with their defaults so the JSON only needs what differs.
 """
 
 from __future__ import annotations
@@ -15,7 +16,7 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, Field, StringConstraints
 
 CONFIG_ENV = "PANDABASE_CONFIG"
-TOKEN_ENV = "AGENT_API_TOKEN"
+TOKEN_ENV = "PANDABASE_AGENT_API_TOKEN"
 API_URL_ENV = "PANDABASE_API_URL"
 
 

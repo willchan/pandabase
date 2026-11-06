@@ -61,7 +61,9 @@ env_set() {
 }
 
 # Export the agent-tools variables from .env (PANDABASE_API_URL, AGENT_API_TOKEN,
-# PANDABASE_CONFIG) unless the caller's environment already has them.
+# PANDABASE_CONFIG) unless the caller's environment already has them. The tools read the token as
+# PANDABASE_AGENT_API_TOKEN (prefixed: other apps' tools share OpenClaw's env), set here from
+# .env's AGENT_API_TOKEN, the engine's name for it.
 load_agent_env() {
   local key value
   for key in PANDABASE_API_URL AGENT_API_TOKEN PANDABASE_CONFIG HOUSEHOLD_TZ; do
@@ -72,6 +74,19 @@ load_agent_env() {
   done
   : "${PANDABASE_CONFIG:=$ROOT/agent/pandabase.config.json}"
   export PANDABASE_CONFIG
+  if [ -z "${PANDABASE_AGENT_API_TOKEN:-}" ] && [ -n "${AGENT_API_TOKEN:-}" ]; then
+    export PANDABASE_AGENT_API_TOKEN="$AGENT_API_TOKEN"
+  fi
+}
+
+# Remove KEY from an env file in place (no-op when absent). Keeps mode 600.
+env_unset() {
+  local key="$1" file="${2:-$ENV_FILE}" tmp
+  [ -f "$file" ] || return 0
+  tmp="$(mktemp "${file}.XXXXXX")"
+  awk -v k="$key" 'index($0, k "=") != 1' "$file" >"$tmp"
+  chmod 600 "$tmp"
+  mv "$tmp" "$file"
 }
 
 tools() {

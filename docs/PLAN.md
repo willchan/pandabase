@@ -1167,6 +1167,13 @@ branch `claude/system-e2e`). Details, the bugs found and the security review are
   prices are collapsed (regression fixture `search_results_live_layout.html`); re-parsing three live
   searches (Whole Foods bananas and milk, Amazon cake flour) gave a product name and unit price for
   all 15 results.
+- **Prefixed agent token on the Mac (follow-up PR, 2026-11-06):** a second app on the Mac
+  (Bamboo) reads `AGENT_API_TOKEN` too, and OpenClaw passes `~/.openclaw/.env` to every app's
+  tools, so Bamboo would have used PandaBase's token. The tools and skills now read
+  `PANDABASE_AGENT_API_TOKEN`; `make install-agent-skills` writes it from `.env`'s
+  `AGENT_API_TOKEN` and removes the unprefixed line (DESIGN §10 #57). Engine, `.env`, Vercel and
+  GitHub names are unchanged. No fallback to the old name: the Mac's env file gets the new key
+  before this merges, so the skills' `requires.env` gate never sees it missing.
 - **Members on first sign-in (follow-up PR):** `currentMember()` creates the `member` row for an
   allowed email on its first page view (`ensureMember`; DESIGN §3.1, §10 #42), replacing the
   `NotAMember` dead end. The API still answers 403 `not a household member` for a session without
