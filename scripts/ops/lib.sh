@@ -62,7 +62,7 @@ env_set() {
 
 # Export the agent-tools variables from .env (PANDABASE_API_URL, AGENT_API_TOKEN,
 # PANDABASE_CONFIG) unless the caller's environment already has them. The tools read the token as
-# PANDABASE_AGENT_API_TOKEN (prefixed: other apps' tools share OpenClaw's env), set here from
+# PANDABASE_AGENT_API_TOKEN (the Mac's apps share one account, so its keys are prefixed), set here from
 # .env's AGENT_API_TOKEN, the engine's name for it.
 load_agent_env() {
   local key value

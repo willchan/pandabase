@@ -142,8 +142,8 @@ Check: `scripts/ops/agent-run.sh config show` prints your members and `"token_se
 4. **Skills and automations.**
 
    ```sh
-   make install-agent-skills   # adds agent/skills; agent env → ~/.openclaw/.env (applies live)
-   openclaw gateway restart    # so the gateway reads ~/.openclaw/.env
+   make install-agent-skills   # adds agent/skills; settings → ~/.config/pandabase/agent.env
+   openclaw gateway restart    # only if it says so
    make install-agent-cron
    ```
 

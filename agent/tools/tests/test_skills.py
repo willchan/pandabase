@@ -52,7 +52,9 @@ def test_frontmatter(name: str) -> None:
     meta = json.loads(re.sub(r",(\s*[}\]])", r"\1", fields["metadata"]))  # JSON5 trailing commas
     requires = meta["openclaw"]["requires"]
     assert requires["bins"] == ["pandabase-tools"]
-    assert set(requires["env"]) == {"PANDABASE_AGENT_API_TOKEN", "PANDABASE_CONFIG"}
+    # No `requires.env`: the tools read ~/.config/pandabase/agent.env themselves, so nothing of
+    # PandaBase's lives in the gateway env that every app's tools receive (DESIGN §10 #58).
+    assert "env" not in requires
     assert "pandabase-tools" in body
 
 

@@ -1174,6 +1174,11 @@ branch `claude/system-e2e`). Details, the bugs found and the security review are
   `AGENT_API_TOKEN` and removes the unprefixed line (DESIGN §10 #57). Engine, `.env`, Vercel and
   GitHub names are unchanged. No fallback to the old name: the Mac's env file gets the new key
   before this merges, so the skills' `requires.env` gate never sees it missing.
+- **PandaBase's own env file on the Mac (follow-up PR, 2026-11-06):** standardised on Bamboo's
+  pattern. `pandabase-tools` reads `~/.config/pandabase/agent.env` (process env wins), the skills
+  drop `requires.env`, and `make install-agent-skills` writes that file and removes PandaBase's keys
+  from `~/.openclaw/.env` (DESIGN §10 #58). Rollout: once merged, re-run the installer; the
+  gateway needs a restart only to forget the removed keys.
 - **Members on first sign-in (follow-up PR):** `currentMember()` creates the `member` row for an
   allowed email on its first page view (`ensureMember`; DESIGN §3.1, §10 #42), replacing the
   `NotAMember` dead end. The API still answers 403 `not a household member` for a session without
