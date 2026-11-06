@@ -1,0 +1,31 @@
+<!doctype html>
+<html><head><title>Amazon.com : bananas</title></head>
+<body>
+<div id="search">
+  <!-- Whole Foods-style result: the h2 title link is shorter than the price link, whose text
+       repeats every price (screen-reader `a-offscreen` copy + visible digits). -->
+  <div role="listitem" data-asin="B0SYNTH301" data-component-type="s-search-result">
+    <span class="a-badge-text">Purchased Nov 2026</span>
+    <a class="a-link-normal s-no-outline" href="/Synthetic-Produce/dp/B0SYNTH301/ref=sr_1_1"><img class="s-image" alt="Synthetic Organic Banana, 1 Each"></a>
+    <div data-cy="title-recipe">
+      <a class="a-link-normal s-line-clamp-3" href="/Synthetic-Produce/dp/B0SYNTH301/ref=sr_1_1"><h2 aria-label="Synthetic Organic Banana, 1 Each" class="a-size-base-plus"><span>Synthetic Organic Banana, 1 Each</span></h2></a>
+    </div>
+    <div data-cy="reviews-block"><a aria-label="1,234 ratings" href="/Synthetic-Produce/dp/B0SYNTH301/ref=sr_1_1"><span>(1.2K)</span></a></div>
+    <div data-cy="price-recipe">
+      <a class="a-link-normal s-no-hover" href="/Synthetic-Produce/dp/B0SYNTH301/ref=sr_1_1"><span class="a-offscreen">estimated $0.37 per each</span><span>est. </span><span class="a-price"><span class="a-offscreen">$0.37</span><span class="a-price-symbol">$</span><span class="a-price-whole">0<span class="a-price-decimal">.</span></span><span class="a-price-fraction">37</span></span><span> /each</span> <span>(</span><span class="a-price a-text-price"><span class="a-offscreen">$0.99</span><span>$0.99</span></span><span> /lb</span><span>)</span></a>
+    </div>
+    <a href="/Synthetic-Produce/dp/B0SYNTH301/ref=sr_1_1" aria-label="Choose Quantity" class="a-button-text">Choose Quantity</a>
+  </div>
+  <!-- Amazon-style result whose title is in an h2 outside any link, next to a long price link. -->
+  <div role="listitem" data-asin="B0SYNTH302" data-component-type="s-search-result">
+    <a href="/dp/B0SYNTH302/ref=sr_1_2"><img class="s-image" alt="Synthetic Cake Flour Value Pack, 3 lb (Pack of 4)"></a>
+    <h2 aria-label="Synthetic Cake Flour Value Pack, 3 lb (Pack of 4)"><span>Synthetic Cake Flour Value Pack, 3 lb (Pack of 4)</span></h2>
+    <a href="/dp/B0SYNTH302/ref=sr_1_2"><span class="a-price"><span class="a-offscreen">$22.36</span><span>$22.36</span></span> Typical: <span class="a-price a-text-price"><span class="a-offscreen">$24.88</span><span>$24.88</span></span> <span>(</span><span class="a-price a-text-price"><span class="a-offscreen">$0.47</span><span>$0.47</span></span><span>/ounce)</span></a>
+  </div>
+  <!-- No h2 at all: fall back to the product link's text, never to a price-only link. -->
+  <div role="listitem" data-asin="B0SYNTH303" data-component-type="s-search-result">
+    <a href="/dp/B0SYNTH303"><span class="a-price"><span class="a-offscreen">$1.99</span><span>$1.99</span></span> <span>(</span><span class="a-price"><span class="a-offscreen">$0.12</span><span>$0.12</span></span><span>/Ounce)</span></a>
+    <a href="/dp/B0SYNTH303">Synthetic Swans Flour 16 oz</a>
+  </div>
+</div>
+</body></html>
