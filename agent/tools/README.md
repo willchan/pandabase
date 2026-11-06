@@ -9,6 +9,7 @@ attaches over CDP to a member's running Chromium), and never navigates to checko
 uv sync
 uv run ruff check && uv run ruff format --check && uv run mypy . && uv run pytest
 PANDABASE_CONFIG=../pandabase.config.json PANDABASE_AGENT_API_TOKEN=… uv run pandabase-tools config show
+# on the Mac the tools read the same keys from ~/.config/pandabase/agent.env (make install-agent-skills)
 ```
 
 | Command | What |

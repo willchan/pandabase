@@ -634,10 +634,10 @@ indefinitely.
 
 Skills are folders with `SKILL.md` (OpenClaw / AgentSkills format: YAML frontmatter with `name`,
 `description` and a `metadata.openclaw` JSON5 block gating on `requires.bins: ["pandabase-tools"]`
-and `requires.env: ["PANDABASE_AGENT_API_TOKEN", "PANDABASE_CONFIG"]`; markdown instructions). They
+and no `requires.env`; markdown instructions). They
 call one deterministic CLI, `pandabase-tools`, through OpenClaw's `exec` tool; the CLI talks to the
-API with `PANDABASE_AGENT_API_TOKEN` (the engine's `AGENT_API_TOKEN`, prefixed on the Mac because
-every app's tools share OpenClaw's env file). Discord I/O (thread creation, replies, ✅ reactions) uses OpenClaw's
+API with `PANDABASE_AGENT_API_TOKEN` (the engine's `AGENT_API_TOKEN`), read from PandaBase's own
+`~/.config/pandabase/agent.env`, not from the gateway env that every app's tools receive (§10 #58). Discord I/O (thread creation, replies, ✅ reactions) uses OpenClaw's
 `message` tool (`thread-create`, `reply`, `react`, `read`).
 
 | Skill | Trigger | Does |
@@ -992,7 +992,8 @@ sets it). Worker: `PANDABASE_API_URL`, `WORKER_API_TOKEN`, `OLLAMA_URL`
 (`http://host.docker.internal:11434`), `OLLAMA_VLM_MODEL` (`qwen3.5:9b`), `OLLAMA_TEXT_MODEL`
 (`qwen3.5:4b`), `POLL_INTERVAL_SECONDS` (10), `HOUSEHOLD_TZ`, `PROMPTS_DIR` (set by the image).
 Agent tools: `PANDABASE_API_URL`, `PANDABASE_AGENT_API_TOKEN` (`.env`'s `AGENT_API_TOKEN`),
-`PANDABASE_CONFIG`. Mac Mini updater (`.env`):
+`PANDABASE_CONFIG`, from `~/.config/pandabase/agent.env` (mode 600; `PANDABASE_AGENT_ENV` overrides
+the path); the process env wins. Mac Mini updater (`.env`):
 `PANDABASE_WORKER_TAG` (written by it), `DEPLOY_DISCORD_WEBHOOK_URL`; worker image:
 `PANDABASE_BUILD_SHA` (from the `GIT_SHA` build arg). GitHub environment `production`: secrets
 `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN`, `VERCEL_TOKEN`, `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID`,
@@ -1025,7 +1026,8 @@ Setup is the README checklist; every step is a `make` target over an idempotent 
 - **Agent install:** `make install-agent-tools` (uv sync, `pandabase-tools` linked into
   `~/.local/bin`, configs from the examples with `diagnostics_dir` = `<repo>/diagnostics`);
   `make install-agent-skills` (backs up `openclaw.json`, appends `<repo>/agent/skills` to
-  `skills.load.extraDirs` (applied live; the gateway keeps running), writes the agent env to `~/.openclaw/.env`);
+  `skills.load.extraDirs` (applied live; the gateway keeps running), writes the tools' settings to
+  `~/.config/pandabase/agent.env` and removes PandaBase's keys from `~/.openclaw/.env`);
   `make install-agent-cron` (list, then `edit` by name or `add`; receipt sweeps generated per
   member from `receipt_sweep`; the job-replies command payload runs `scripts/ops/agent-run.sh`,
   which reads the token from `.env` so it isn't stored in OpenClaw's automation DB). Gateway
@@ -1134,3 +1136,4 @@ docker-compose.yml (+ docker-compose.build.yml), Makefile, CLAUDE.md, README.md,
 | 55 | Interactive services do a constant number of database round trips: read in one batch, decide in memory, write in one batch inside `batchTransaction` (§8 *Database round trips*) | Each statement against remote Turso is a network request made while holding the write lock; a sequential statement per receipt line made "Confirm receipt" take seconds on long receipts (Preview E2E step 07b timed out) |
 | 56 | Amazon layout breakage is watched two ways: a build alert (≥ 2 tier-1 lines and ≥ half of them failed for a page reason, once per cycle, to the ops channel) and a Friday 15:00 add-button check on one Amazon and one Whole Foods page that clicks nothing | Amazon changes pages without notice (the add URL died 2026-11-04); one odd line is noise, most of a build is a layout. The check reuses tier 1's own `add_control` rule, so it tests what Saturday will do, and runs a day early with two page loads (live runs had already drawn a `/checkpoint`) |
 | 57 | On the Mac, PandaBase's agent token is `PANDABASE_AGENT_API_TOKEN` (the engine, `.env`, Vercel and GitHub keep `AGENT_API_TOKEN`) | `~/.openclaw/.env` is loaded into every tool OpenClaw runs, for every app. An unprefixed name there leaks one app's token into another's tools, and an app that lets the environment override its own file (Bamboo did) then sends the wrong token to the wrong server. App-specific keys on the Mac carry the app's prefix; shared ones (Discord bot, Ollama) don't |
+| 58 | PandaBase's Mac-side settings live in its own `~/.config/pandabase/agent.env`, read by `pandabase-tools`; the skills gate on the binary only (no `requires.env`); `~/.openclaw/.env` keeps only shared keys | The same pattern as Bamboo, so every app on the Mac works one way: no app's secrets are handed to every other app's tools, a token change needs no gateway restart, and adding or removing an app doesn't touch OpenClaw's env. Not a security boundary: every app runs as `openclaw-agent` |

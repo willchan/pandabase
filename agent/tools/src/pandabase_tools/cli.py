@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import re
 import sys
 import time
@@ -76,7 +75,7 @@ class Env:
     def api(self) -> api_mod.ApiClient:
         if self._api is None:
             self._api = api_mod.ApiClient(
-                self.cfg.api_base_url, os.environ.get(config_mod.TOKEN_ENV, "")
+                self.cfg.api_base_url, config_mod.setting(config_mod.TOKEN_ENV)
             )
         return self._api
 
@@ -423,7 +422,7 @@ def cmd_config_show(env: Env) -> Any:
         "members": [
             m.model_dump() | {"cdp_url": env.loaded.profile(m).cdp_url} for m in cfg.members
         ],
-        "token_set": bool(os.environ.get(config_mod.TOKEN_ENV)),
+        "token_set": bool(config_mod.setting(config_mod.TOKEN_ENV)),
     }
 
 

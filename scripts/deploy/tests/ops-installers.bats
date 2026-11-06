@@ -18,7 +18,8 @@ JSON
   printf 'PANDABASE_CONFIG=%s\n' "$ROOT_DIR/agent/pandabase.config.json" >>"$ROOT_DIR/.env"
   echo '{}' >"$STUB/openclaw.json"
   export OPENCLAW_ENV="$BATS_TEST_TMPDIR/openclaw.env"
-  unset OPENCLAW_AGENT PANDABASE_CONFIG
+  export PANDABASE_AGENT_ENV="$BATS_TEST_TMPDIR/config/pandabase/agent.env"
+  unset OPENCLAW_AGENT PANDABASE_CONFIG PANDABASE_AGENT_API_TOKEN
 }
 
 # Bug: the script ran `openclaw gateway stop` before `config set`; OpenClaw 2026.10 refuses that
@@ -39,17 +40,27 @@ JSON
   ! called "openclaw config set"
 }
 
-# Bug: the token went into OpenClaw's shared env file as AGENT_API_TOKEN, a name another app's
-# tools (Bamboo) also read, so they picked up PandaBase's token. It must be written prefixed, and
-# an unprefixed copy from an older install removed; other apps' lines stay.
-@test "install-agent-skills writes the token prefixed and drops the unprefixed one" {
-  printf 'AGENT_API_TOKEN=old-unprefixed\nBAMBOO_API_URL=https://bamboo.test\n' >"$OPENCLAW_ENV"
+# Bug: PandaBase's token and settings lived in OpenClaw's ~/.openclaw/.env, which the gateway
+# hands to every app's tools (Bamboo read PandaBase's AGENT_API_TOKEN from it). They now go to
+# PandaBase's own agent.env (dir 700, file 600); OpenClaw's file loses them, prefixed or not, and
+# keeps other apps' lines and the shared OLLAMA_API_KEY.
+@test "install-agent-skills writes PandaBase's own env file and clears its keys from OpenClaw's" {
+  printf 'AGENT_API_TOKEN=old-unprefixed\nPANDABASE_AGENT_API_TOKEN=old\nPANDABASE_API_URL=http://old\nBAMBOO_API_URL=https://bamboo.test\n' >"$OPENCLAW_ENV"
   run /bin/bash "$ROOT_DIR/scripts/ops/install-agent-skills.sh"
   [ "$status" -eq 0 ]
-  grep -qx 'PANDABASE_AGENT_API_TOKEN=test-agent' "$OPENCLAW_ENV"
-  ! grep -q '^AGENT_API_TOKEN=' "$OPENCLAW_ENV"
+  grep -qx 'PANDABASE_AGENT_API_TOKEN=test-agent' "$PANDABASE_AGENT_ENV"
+  grep -qx 'PANDABASE_API_URL=http://engine.test' "$PANDABASE_AGENT_ENV"
+  grep -q '^PANDABASE_CONFIG=' "$PANDABASE_AGENT_ENV"
+  [ -n "$(find "$PANDABASE_AGENT_ENV" -perm 600)" ] # find: same on macOS and Linux
+  [ -n "$(find "$(dirname "$PANDABASE_AGENT_ENV")" -maxdepth 0 -perm 700)" ]
+  ! grep -qE '^(AGENT_API_TOKEN|PANDABASE_[A-Z_]+)=' "$OPENCLAW_ENV"
   grep -qx 'BAMBOO_API_URL=https://bamboo.test' "$OPENCLAW_ENV"
-  [ -n "$(find "$OPENCLAW_ENV" -perm 600)" ] # mode 600 (find: same on macOS and Linux)
+  grep -qx 'OLLAMA_API_KEY=ollama-local' "$OPENCLAW_ENV"
+  # A second run changes nothing.
+  run /bin/bash "$ROOT_DIR/scripts/ops/install-agent-skills.sh"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"kept PANDABASE_AGENT_API_TOKEN"* ]]
+  [[ "$output" != *"removed"* ]]
 }
 
 # Bug: with OPENCLAW_AGENT unset, `"${agent_args[@]}"` expanded an empty array, which bash 3.2

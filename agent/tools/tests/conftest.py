@@ -18,6 +18,15 @@ FIXTURES = Path(__file__).parent / "fixtures" / "amazon"
 REPO = Path(__file__).resolve().parents[3]
 
 
+@pytest.fixture(autouse=True)
+def _no_real_agent_env(
+    tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Never read the Mac's real ~/.config/pandabase/agent.env from a test."""
+    missing = tmp_path_factory.getbasetemp() / "no-agent.env"
+    monkeypatch.setenv("PANDABASE_AGENT_ENV", str(missing))
+
+
 def fixture(name: str) -> str:
     return (FIXTURES / name).read_text()
 

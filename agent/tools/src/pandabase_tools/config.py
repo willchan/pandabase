@@ -1,15 +1,19 @@
 """Agent pack configuration: `pandabase.config.json` + `profiles.json` (examples in `/agent`).
 
-Secrets never live in these files: the API token comes from `PANDABASE_AGENT_API_TOKEN`. It's
-prefixed because OpenClaw's env file is shared by every app's tools on the Mac (the engine and
-the repo `.env` still call it `AGENT_API_TOKEN`). Tool tunables (batch sizes, throttles,
-lookbacks) live here with their defaults so the JSON only needs what differs.
+Secrets never live in these files. The token, API URL and config path come from PandaBase's own
+env file on the Mac, `~/.config/pandabase/agent.env` (mode 600, written by
+`make install-agent-skills`), or from the process env, which wins (tests, `make smoke`, cron via
+`agent-run.sh`). Not from OpenClaw's `~/.openclaw/.env`: the gateway hands that to every app's
+tools. Every key is `PANDABASE_`-prefixed, and only prefixed keys are read from the file (the
+engine and the repo `.env` call the token `AGENT_API_TOKEN`). Tool tunables (batch sizes,
+throttles, lookbacks) live here with their defaults so the JSON only needs what differs.
 """
 
 from __future__ import annotations
 
 import json
 import os
+import re
 from pathlib import Path
 from typing import Annotated, Literal
 
@@ -18,6 +22,37 @@ from pydantic import BaseModel, Field, StringConstraints
 CONFIG_ENV = "PANDABASE_CONFIG"
 TOKEN_ENV = "PANDABASE_AGENT_API_TOKEN"
 API_URL_ENV = "PANDABASE_API_URL"
+AGENT_ENV_FILE_ENV = "PANDABASE_AGENT_ENV"
+DEFAULT_AGENT_ENV_FILE = "~/.config/pandabase/agent.env"
+_ENV_LINE = re.compile(r"^(?:export\s+)?(PANDABASE_[A-Z0-9_]+)=(.*)$")
+
+
+def agent_env_file() -> Path:
+    return Path(os.environ.get(AGENT_ENV_FILE_ENV) or DEFAULT_AGENT_ENV_FILE).expanduser()
+
+
+def parse_env_file(text: str) -> dict[str, str]:
+    """`KEY=VALUE` lines with a `PANDABASE_` key; comments, blanks and other keys are skipped."""
+    out: dict[str, str] = {}
+    for raw in text.splitlines():
+        m = _ENV_LINE.match(raw.strip())
+        if m:
+            value = m.group(2).strip()
+            if len(value) >= 2 and value[0] == value[-1] and value[0] in "'\"":
+                value = value[1:-1]
+            out[m.group(1)] = value
+    return out
+
+
+def setting(key: str) -> str:
+    """A PandaBase setting: the process env, else `agent_env_file()`, else ""."""
+    if os.environ.get(key):
+        return os.environ[key]
+    try:
+        text = agent_env_file().read_text()
+    except FileNotFoundError:
+        return ""
+    return parse_env_file(text).get(key, "")
 
 
 class DiscordConfig(BaseModel):
@@ -134,10 +169,10 @@ class Loaded(BaseModel):
 
 
 def load(path: str | None = None) -> Loaded:
-    config_path = Path(path or os.environ.get(CONFIG_ENV) or "pandabase.config.json").expanduser()
+    config_path = Path(path or setting(CONFIG_ENV) or "pandabase.config.json").expanduser()
     config = ToolsConfig.model_validate(json.loads(config_path.read_text()))
-    if os.environ.get(API_URL_ENV):
-        config.api_base_url = os.environ[API_URL_ENV]
+    if api_url := setting(API_URL_ENV):
+        config.api_base_url = api_url
     profiles_path = Path(config.profiles_file).expanduser()
     if not profiles_path.is_absolute():
         profiles_path = config_path.parent / profiles_path
