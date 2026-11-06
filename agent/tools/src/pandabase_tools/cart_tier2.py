@@ -49,6 +49,9 @@ SIZE = re.compile(
     re.I,
 )
 SPONSORED = re.compile(r"\bsponsored\b", re.I)
+# Amazon prints each price twice: a screen-reader `a-offscreen` copy, then the visible digits
+# ("$0.99$0.99 /lb"). Collapsed before the unit-price match.
+DOUBLED_PRICE = re.compile(r"(\$\s?\d[\d,]*(?:\.\d+)?)\s*\1(?![\d.])")
 
 
 def clean_query(query: str) -> str:
@@ -110,6 +113,18 @@ def _result_block(asin: str, link: dom.Node) -> dom.Node | None:
     )
 
 
+def _title(asin: str, block: dom.Node) -> str:
+    """The result's heading (`<h2>`, its `aria-label` first). Without one, the longest of the
+    ASIN's links that isn't a price link: on live pages the price link is often the longest
+    (live run 2026-11-04, Whole Foods titles came back as "estimated $0.37 per each…")."""
+    for h2 in block.find_all("h2"):
+        text = h2.attrs.get("aria-label", "").strip() or h2.text()
+        if text:
+            return text
+    titles = [a.text() for x, a in dom.asin_links(block) if x == asin and "$" not in a.text()]
+    return max(titles, key=len, default="")
+
+
 def parse_search(html: str, *, limit: int, title_chars: int) -> list[Candidate]:
     root = dom.parse(html)
     seen: set[str] = set()
@@ -120,12 +135,11 @@ def parse_search(html: str, *, limit: int, title_chars: int) -> list[Candidate]:
         block = _result_block(asin, link)
         if block is None:
             continue
-        titles = [a.text() for x, a in dom.asin_links(block) if x == asin]
-        title = untrusted_text(max(titles, key=len, default=""), title_chars)
+        title = untrusted_text(_title(asin, block), title_chars)
         if not title:
             continue
         seen.add(asin)
-        text = block.text()
+        text = DOUBLED_PRICE.sub(r"\1", block.text())
         unit = UNIT_PRICE.search(text)
         size = SIZE.search(title)
         availability: Literal["available", "unavailable", "unknown"] = "unknown"

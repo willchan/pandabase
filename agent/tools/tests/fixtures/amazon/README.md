@@ -23,6 +23,7 @@ form's `action`, `ASIN.n` inputs, and visible text.
 | `product_buy_box.html` | Amazon buy box as seen live: three `handle-buy-box` forms (hidden subscription first, one-time with Buy Now and a hidden `isBuyNow`, wishlist) + a sponsored bundle; only the one-time "Add to cart", whose `formaction` is `/cart/add-to-cart`, may be clicked |
 | `cart_localmarket.html` | Whole Foods cart: active rows in a `data-name="Active Items"` block, not in a form; saved and recommended items outside it |
 | `product_unavailable.html` | product page with no add form for its own ASIN |
+| `search_results_live_layout.html` | search results built like live ones: title in an `<h2 aria-label>`, a longer price link, every price doubled by its `a-offscreen` copy, a result without an `<h2>` |
 | `search_no_results.html` | tier-2 search with no results |
 | `orders_list_p1.html`, `orders_list_p2.html` | order history, two pages |
 | `order_details_delivery.html` | delivered Amazon order (+ a recommendations carousel) |

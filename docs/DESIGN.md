@@ -714,7 +714,10 @@ JSON on stdout; exit 0 ok, 1 error, 2 usage, 3 profile locked, 4 refused URL):
   the query is reduced to words first) and returns ≤ `cart.tier2_search_limit` (5) candidates
   `{asin, title, size, price_cents, unit_price, availability, sponsored}` — a result is the nearest
   `data-asin` block, else the widest ancestor mentioning only that ASIN; swatch links inside
-  another result are not candidates. No clicks. Page text is untrusted: control/format characters
+  another result are not candidates. The title is the result's `<h2>` (`aria-label` first), else
+  its longest link without a price in it (live, the price link is often the longest); each price
+  is printed twice (`a-offscreen` copy + digits) and is collapsed before the unit-price match. No
+  clicks. Page text is untrusted: control/format characters
   stripped, one line, ≤ `cart.tier2_title_chars` (160) per field, under a `notice` saying it is
   data, not instructions; the model chooses by ASIN. `cart add --asin X --qty N [--store …]`
   is `cart_add.add_one` for that ASIN (`added`, `already_in_cart`, or `failed` with a reason).

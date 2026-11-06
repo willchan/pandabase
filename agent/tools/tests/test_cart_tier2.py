@@ -83,6 +83,26 @@ def test_parse_search_candidates() -> None:
     assert len(long) <= 160 and long.endswith("…") and "‮" not in long
 
 
+def test_parse_search_titles_from_h2_not_price_links() -> None:
+    """Live run 2026-11-04: Whole Foods titles came back as price text ("estimated $0.37 per
+    eachest. $0.37$0.37 /each ...") because the longest product link was the price link, and
+    unit prices were missed because every price is repeated in an `a-offscreen` copy."""
+    from conftest import fixture
+
+    cands = parse_search(fixture("search_results_live_layout.html"), limit=10, title_chars=160)
+    by = {c.asin: c for c in cands}
+    assert list(by) == ["B0SYNTH301", "B0SYNTH302", "B0SYNTH303"]
+    banana = by["B0SYNTH301"]
+    assert banana.title == "Synthetic Organic Banana, 1 Each"
+    assert (banana.price_cents, banana.unit_price) == (37, "$0.99 /lb")
+    pack = by["B0SYNTH302"]
+    assert pack.title == "Synthetic Cake Flour Value Pack, 3 lb (Pack of 4)"
+    assert (pack.price_cents, pack.size, pack.unit_price) == (2236, "3 lb", "$0.47/ounce")
+    swans = by["B0SYNTH303"]
+    assert swans.title == "Synthetic Swans Flour 16 oz"
+    assert (swans.price_cents, swans.unit_price) == (199, "$0.12/Ounce")
+
+
 def test_parse_search_respects_limit() -> None:
     assert len(parse_search(_search_page(), limit=2, title_chars=160)) == 2
 

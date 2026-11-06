@@ -1161,6 +1161,12 @@ branch `claude/system-e2e`). Details, the bugs found and the security review are
   CI job now installs Chromium for agent/tools). **Still not verified live:** Whole Foods
   quantities > 1 (refused for now) and an add that takes longer than the 5 s wait (it would come
   back `unverified`, not wrong). `cart.wholefoods_tier1` can be turned on.
+  **Search parsing (follow-up PR, 2026-11-05):** the first live `cart search` returned Whole
+  Foods titles as price text and no unit prices (title = longest link, which was the price link;
+  every price doubled by its `a-offscreen` copy). Titles now come from the result's `<h2>`, doubled
+  prices are collapsed (regression fixture `search_results_live_layout.html`); re-parsing three live
+  searches (Whole Foods bananas and milk, Amazon cake flour) gave a product name and unit price for
+  all 15 results.
 - **Members on first sign-in (follow-up PR):** `currentMember()` creates the `member` row for an
   allowed email on its first page view (`ensureMember`; DESIGN §3.1, §10 #42), replacing the
   `NotAMember` dead end. The API still answers 403 `not a household member` for a session without
