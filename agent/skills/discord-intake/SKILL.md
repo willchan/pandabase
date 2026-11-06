@@ -1,6 +1,6 @@
 ---
 name: discord-intake
-description: PandaBase intake in the #pandabase Discord channel — paper-receipt and Trash Cam photos become audit jobs (local VLM only), and text like "bought milk", "we're out of eggs", "froze the chicken" or "never buy that brand again" updates inventory.
+description: "PandaBase intake in the #pandabase Discord channel — paper-receipt and Trash Cam photos become audit jobs (local VLM only), and text like \"bought milk\", \"we're out of eggs\", \"froze the chicken\" or \"never buy that brand again\" updates inventory."
 metadata:
   {
     "openclaw":

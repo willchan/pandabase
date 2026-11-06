@@ -1,6 +1,6 @@
 ---
 name: item-lookup
-description: Answer "do we have X?" / "how much X is left?" anywhere in Discord from PandaBase's inventory estimate, with an honest confidence hint.
+description: "Answer \"do we have X?\" / \"how much X is left?\" anywhere in Discord from PandaBase's inventory estimate, with an honest confidence hint."
 metadata:
   {
     "openclaw":
