@@ -49,7 +49,7 @@ JSON
   grep -qx 'PANDABASE_AGENT_API_TOKEN=test-agent' "$OPENCLAW_ENV"
   ! grep -q '^AGENT_API_TOKEN=' "$OPENCLAW_ENV"
   grep -qx 'BAMBOO_API_URL=https://bamboo.test' "$OPENCLAW_ENV"
-  [ "$(stat -f %Lp "$OPENCLAW_ENV" 2>/dev/null || stat -c %a "$OPENCLAW_ENV")" = 600 ]
+  [ -n "$(find "$OPENCLAW_ENV" -perm 600)" ] # mode 600 (find: same on macOS and Linux)
 }
 
 # Bug: with OPENCLAW_AGENT unset, `"${agent_args[@]}"` expanded an empty array, which bash 3.2
