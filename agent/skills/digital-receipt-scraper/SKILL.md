@@ -1,6 +1,6 @@
 ---
 name: digital-receipt-scraper
-description: PandaBase digital receipts — sweep a household member's Amazon / Whole Foods order history (delivery, pickup, in-store) in their own Chromium profile and ingest finished orders; one-time 12-month backfill on request.
+description: "PandaBase digital receipts — sweep a household member's Amazon / Whole Foods order history (delivery, pickup, in-store) in their own Chromium profile and ingest finished orders; one-time 12-month backfill on request."
 metadata:
   {
     "openclaw":

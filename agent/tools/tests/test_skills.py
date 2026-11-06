@@ -9,6 +9,7 @@ import shlex
 from pathlib import Path
 
 import pytest
+import yaml
 from conftest import REPO
 
 from pandabase_tools.api import ROUTES, match_route
@@ -38,6 +39,28 @@ def frontmatter(path: Path) -> tuple[dict[str, str], str]:
         elif key:
             fields[key] += "\n" + line
     return fields, m.group(2)
+
+
+def written_description(path: Path) -> str:
+    """The description as written on its line: the raw text, or a double-quoted string unescaped
+    (YAML double-quoted escapes are a superset of JSON's, and we only use JSON's)."""
+    line = next(ln for ln in path.read_text().splitlines() if ln.startswith("description:"))
+    raw = line.removeprefix("description:").strip()
+    return str(json.loads(raw)) if raw.startswith('"') else raw
+
+
+@pytest.mark.parametrize("name", NAMES)
+def test_description_survives_yaml(name: str) -> None:
+    """Regression: OpenClaw parses SKILL.md frontmatter as real YAML, where ` #` in an unquoted
+    plain scalar starts a comment. `PandaBase intake in the #pandabase Discord channel — …` reached
+    the model as just "PandaBase intake in the", so it couldn't tell when to use the skill."""
+    path = SKILLS / name / "SKILL.md"
+    m = re.match(r"^---\n(.*?)\n---\n", path.read_text(), re.S)
+    assert m, f"{path}: no YAML frontmatter"
+    parsed = yaml.safe_load(m.group(1))
+    assert parsed["name"] == name
+    assert parsed["description"] == written_description(path)
+    assert parsed["description"].endswith(".")
 
 
 def test_skill_set() -> None:

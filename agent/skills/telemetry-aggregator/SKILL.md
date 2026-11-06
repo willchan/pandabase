@@ -1,6 +1,6 @@
 ---
 name: telemetry-aggregator
-description: Weekly PandaBase diagnostics — fetch the rendered report, write it to /diagnostics on the Mac Mini, and post a 3-line summary to #pandabase (Sunday 23:00 automation).
+description: "Weekly PandaBase diagnostics — fetch the rendered report, write it to /diagnostics on the Mac Mini, and post a 3-line summary to #pandabase (Sunday 23:00 automation)."
 metadata:
   {
     "openclaw":

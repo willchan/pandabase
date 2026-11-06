@@ -1,6 +1,6 @@
 ---
 name: grocery-cycle
-description: PandaBase weekly grocery cycle in the #pandabase Discord channel — open a cycle thread, record list edits/skips/away/other-store from thread replies, post the Friday nudge, and build (never check out) the Saturday cart.
+description: "PandaBase weekly grocery cycle in the #pandabase Discord channel — open a cycle thread, record list edits/skips/away/other-store from thread replies, post the Friday nudge, and build (never check out) the Saturday cart."
 metadata:
   {
     "openclaw":

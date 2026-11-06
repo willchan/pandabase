@@ -634,7 +634,10 @@ indefinitely.
 
 Skills are folders with `SKILL.md` (OpenClaw / AgentSkills format: YAML frontmatter with `name`,
 `description` and a `metadata.openclaw` JSON5 block gating on `requires.bins: ["pandabase-tools"]`
-and no `requires.env`; markdown instructions). They
+and no `requires.env`; markdown instructions). Every `description` is a double-quoted YAML string:
+OpenClaw parses frontmatter as real YAML, where ` #` in a plain scalar starts a comment, so
+`… in the #pandabase channel` reached the model cut off at "in the" (`test_skills.py` parses each
+with PyYAML and checks the full text). They
 call one deterministic CLI, `pandabase-tools`, through OpenClaw's `exec` tool; the CLI talks to the
 API with `PANDABASE_AGENT_API_TOKEN` (the engine's `AGENT_API_TOKEN`), read from PandaBase's own
 `~/.config/pandabase/agent.env`, not from the gateway env that every app's tools receive (§10 #58). Discord I/O (thread creation, replies, ✅ reactions) uses OpenClaw's
