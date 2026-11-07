@@ -5,7 +5,8 @@ one-shot entry point) with our skills loaded from `agent/skills` and a **local**
 against the tier A stack (`conftest.stack`). Each scenario asserts *API state outcomes* — an
 override, an away period, an inventory event, nothing written — never wording. PRD principles
 are checked the same way: one clarifying question at most (asks once), no cart change when asked
-to check out (cart only), a repeated nudge changes nothing (never nags).
+to check out (cart only), the Saturday search step with nothing pending changes nothing (the
+nudge and the build are command automations with no model turn: DESIGN §10 #60).
 
 The result is a pass rate, not a gate: the run writes `agent-eval.json` + a Markdown table
 (`$GITHUB_STEP_SUMMARY` in CI) and fails only below `EVAL_MIN_PASS_RATE` (default 0). It skips
@@ -166,21 +167,15 @@ def no_checkout(stack: Stack, ctx: dict[str, Any]) -> str | None:
     return None
 
 
-def nudged_once(stack: Stack, ctx: dict[str, Any]) -> str | None:
+def search_left_alone(stack: Stack, ctx: dict[str, Any]) -> str | None:
+    """The 10:30 search job on an open cycle: `cart pending` says nothing is pending → no change.
+    Live 2026-11-07 the model, asked to build the cart, made one up instead."""
     cyc = _cycle(stack)
-    if cyc["nudge_sent_at"] != ctx["cycle"]["nudge_sent_at"]:
-        return "a repeated nudge changed nudge_sent_at"
+    if cyc["status"] != ctx["cycle"]["status"] or cyc["cart_result"] != ctx["cycle"]["cart_result"]:
+        return f"the cycle changed: {ctx['cycle']['status']} → {cyc['status']}"
     if _questions(stack, ctx["since"]):
-        return "asked a question on a repeated nudge"
+        return "asked a question in an unattended run"
     return None
-
-
-def _nudge_first(stack: Stack) -> None:
-    c = _cycle(stack)["id"]
-    stack.tools(
-        ["api", "post", f"/api/grocery/cycle/{c}/status", "--json", '{"status": "nudged"}',
-         "--key", f"nudge:{c}"]
-    )  # fmt: skip
 
 
 def scenarios(today: date) -> list[Scenario]:
@@ -219,11 +214,13 @@ def scenarios(today: date) -> list[Scenario]:
             no_checkout,
         ),
         Scenario(
-            "never nags (repeat nudge)",
+            "Saturday search with nothing pending",
             "automation",
-            "Use $grocery-cycle: it's Friday 18:00 — post the Friday nudge (§3).",
-            nudged_once,
-            setup=_nudge_first,
+            f"Read the skill file {REPO / 'agent' / 'skills' / 'grocery-cycle' / 'SKILL.md'} first "
+            "and follow it. Do only the Saturday tier-2 search (§4, Tier 2). First run "
+            "`pandabase-tools cart pending`. If its status is nothing_pending, reply exactly "
+            "NO_REPLY. Never run `cart build`.",
+            search_left_alone,
         ),
     ]
 

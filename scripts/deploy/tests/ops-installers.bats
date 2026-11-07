@@ -12,7 +12,7 @@ setup() {
   mkdir -p "$ROOT_DIR/agent/skills"
   cp "$REPO_SRC/agent/cron.example.json" "$ROOT_DIR/agent/"
   cat >"$ROOT_DIR/agent/pandabase.config.json" <<'JSON'
-{"discord": {"intake_channel": "123", "ops_channel": "456"},
+{"discord": {"intake_channel": "123", "ops_channel": "456", "cycle_channel": "789"},
  "members": [{"name": "alex", "profile": "alex", "receipt_sweep": "weekly", "cart_member": true}]}
 JSON
   printf 'PANDABASE_CONFIG=%s\n' "$ROOT_DIR/agent/pandabase.config.json" >>"$ROOT_DIR/.env"
@@ -85,4 +85,22 @@ JSON
   grep -F "pandabase-job-replies" "$STUB/calls" | grep -qF -- "--to channel:123"
   grep -F "pandabase-cart-probe" "$STUB/calls" | grep -qF -- "--to channel:456"
   grep -F "pandabase-cart-probe" "$STUB/calls" | grep -qF -- "cart probe --reply"
+}
+
+# Bug (live 2026-11-06/07): the Friday nudge and Saturday build were model jobs told only "Use
+# $grocery-cycle: …"; the local model never opened the skill, posted a made-up cart, and both runs
+# reported "ok". Those two are now command jobs, and every model job names its skill file.
+@test "install-agent-cron runs the nudge and build as commands and names skill files" {
+  run /bin/bash "$ROOT_DIR/scripts/ops/install-agent-cron.sh"
+  [ "$status" -eq 0 ]
+  grep -F "pandabase-friday-nudge" "$STUB/calls" | grep -qF -- "cycle nudge"
+  grep -F "pandabase-friday-nudge" "$STUB/calls" | grep -qF -- "--to channel:789"
+  grep -F "pandabase-saturday-build" "$STUB/calls" | grep -qF -- "cart build --reply"
+  grep -F "pandabase-saturday-build" "$STUB/calls" | grep -qF -- "--timeout-seconds 1500"
+  ! grep -F "pandabase-saturday-build" "$STUB/calls" | grep -qF -- "--message"
+  grep -F "pandabase-saturday-search" "$STUB/calls" |
+    grep -qF -- "Read the skill file $ROOT_DIR/agent/skills/grocery-cycle/SKILL.md first"
+  grep -F "pandabase-receipts-alex" "$STUB/calls" |
+    grep -qF -- "agent/skills/digital-receipt-scraper/SKILL.md first and follow it. Sweep receipts"
+  ! grep -qF -- 'Use $' "$STUB/calls"
 }

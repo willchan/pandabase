@@ -27,7 +27,16 @@ from zoneinfo import ZoneInfo
 from pydantic import BaseModel, ValidationError
 
 from . import api as api_mod
-from . import cart_injector, cart_tier2, contracts, guard, layout_watch, photos, receipt_parser
+from . import (
+    cart_injector,
+    cart_tier2,
+    contracts,
+    cycle_replies,
+    guard,
+    layout_watch,
+    photos,
+    receipt_parser,
+)
 from . import config as config_mod
 from .browser import CdpDriver, Driver, NotSignedIn
 from .lock import ProfileLock, ProfileLocked
@@ -136,27 +145,74 @@ def _member(env: Env, name: str | None) -> config_mod.Member:
         raise CliError({"error": str(err).strip("'\"")}) from err
 
 
+def _current_cycle(env: Env) -> contracts.Cycle | None:
+    cur = env.api.call("GET", "/api/grocery/cycle/current")
+    assert isinstance(cur, contracts.CycleCurrentResponse)
+    return cur.cycle
+
+
 def cmd_cart_build(env: Env) -> Any:
+    """`--reply`: the Saturday message for OpenClaw to announce (a command automation, no model
+    turn; `cycle_replies.build`)."""
     a = env.args
     member = _member(env, a.member)
-    cycle_id = a.cycle_id
+    cycle = _current_cycle(env)
+    cycle_id = a.cycle_id or (cycle.id if cycle else None)
     if not cycle_id:
-        cur = env.api.call("GET", "/api/grocery/cycle/current")
-        cycle = getattr(cur, "cycle", None)
-        if cycle is None:
-            return {"status": "no_cycle"}
-        cycle_id = cycle.id
+        res: dict[str, Any] = {"status": "no_cycle"}
+        return cycle_replies.build(res, None) if a.reply else res
     state = cart_injector.BuildState(env.loaded.state_dir(), cycle_id)
     profile = env.loaded.profile(member)
-    with env.lock().held(member.profile, "cart build"):
-        return cart_injector.build(
-            env.api,
-            lambda: env.driver_factory(profile.cdp_url),
-            env.cfg.cart,
-            cycle_id,
-            state,
-            env.tel,
+    try:
+        with env.lock().held(member.profile, "cart build"):
+            res = cart_injector.build(
+                env.api,
+                lambda: env.driver_factory(profile.cdp_url),
+                env.cfg.cart,
+                cycle_id,
+                state,
+                env.tel,
+            )
+    except ProfileLocked as err:
+        if not a.reply:
+            raise
+        return (
+            f"⚠️ The cart wasn't built: the cart browser was busy ({err.owner}). "
+            "Run `pandabase-tools cart build --reply` on the Mac mini once it's free."
         )
+    return cycle_replies.build(res, cycle) if a.reply else res
+
+
+def cmd_cart_pending(env: Env) -> Any:
+    """The current cycle's lines the build left for the agent (tier 2), from the build state.
+    Never opens a page or re-runs the build."""
+    cycle = _current_cycle(env)
+    if cycle is None or cycle.status != "building":
+        return {"status": "nothing_pending"}
+    state = cart_injector.BuildState(env.loaded.state_dir(), cycle.id)
+    data = state.load() or {}
+    lines = [x for x in state.lines() if x.outcome == "needs_agent"]
+    if data.get("result_posted") or not lines:
+        return {"status": "nothing_pending", "cycle_id": cycle.id}
+    return {
+        "status": "needs_agent",
+        "cycle_id": cycle.id,
+        "needs_agent": [asdict(x) for x in lines],
+    }
+
+
+def cmd_cycle_nudge(env: Env) -> Any:
+    """Friday 18:00: record the nudge and print the check-in for OpenClaw to announce (a command
+    automation, no model turn). `NO_REPLY` when this cycle was already nudged."""
+    cycle = _current_cycle(env)
+    if cycle is None:
+        return "⚠️ No grocery list is open this week, so there is no Friday check-in."
+    if cycle.nudge_sent_at is not None:
+        return cycle_replies.NO_REPLY
+    env.api.cycle_status(cycle.id, "nudged", key=f"nudge:{cycle.id}")
+    checkin = env.api.call("GET", "/api/grocery/checkin")
+    assert isinstance(checkin, contracts.CheckinResponse)
+    return cycle_replies.nudge(cycle, checkin, env.cfg.web_url)
 
 
 def cmd_cart_finish(env: Env) -> Any:
@@ -448,7 +504,10 @@ def build_parser() -> argparse.ArgumentParser:
     b = cart.add_parser("build", help="Saturday build: price checks → tier 1 → cart result")
     b.add_argument("--cycle-id")
     b.add_argument("--member", help="default: the cart member")
+    b.add_argument("--reply", action="store_true", help="the Discord message, or NO_REPLY")
     b.set_defaults(fn=cmd_cart_build)
+    pe = cart.add_parser("pending", help="lines the build left for tier 2 (reads state only)")
+    pe.set_defaults(fn=cmd_cart_pending)
     f = cart.add_parser("finish", help="post the cart result after tier-2 fallback")
     f.add_argument("--cycle-id", required=True)
     f.add_argument("--outcomes", help='{"<line index>": "tier2"|"failed"}')
@@ -473,6 +532,10 @@ def build_parser() -> argparse.ArgumentParser:
     u = cart.add_parser("url", help="print the tier-1 add-to-cart URL (smoke)")
     u.add_argument("asin", nargs="+", metavar="ASIN[:QTY]")
     u.set_defaults(fn=cmd_cart_url)
+
+    cyc = sub.add_parser("cycle").add_subparsers(dest="cmd", required=True)
+    nu = cyc.add_parser("nudge", help="Friday: record the nudge, print the check-in (or NO_REPLY)")
+    nu.set_defaults(fn=cmd_cycle_nudge)
 
     rec = sub.add_parser("receipts").add_subparsers(dest="cmd", required=True)
     s = rec.add_parser("sweep", help="ingest final orders newer than the cursor (or --backfill)")

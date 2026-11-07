@@ -135,6 +135,7 @@ def test_every_agent_route_is_used_by_some_skill_or_tool() -> None:
         "POST /api/jobs/{id}/notified",
         "POST /api/telemetry",
         "GET /api/diagnostics/weekly",
+        "GET /api/grocery/checkin",  # `cycle nudge` (the Friday command automation)
         "GET /api/health/worker",  # scripts/deploy/mac-update.sh health check (`api get`)
     }
     unused = set(ROUTES) - used - tool_routes

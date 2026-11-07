@@ -1,44 +1,55 @@
 {
-  "_comment": "OpenClaw automations for PandaBase. OpenClaw stores jobs in its SQLite state DB, so this file is documentation + input for `make install-agent-cron` (M8): each entry becomes `openclaw automations add --name <name> --cron <cron> --tz <tz> --session isolated --message <message> --tools exec,read,write,message,browser --no-deliver`. Skills post to Discord themselves with the message tool, so run output isn't announced. Entries with `command` are command payloads (no model call) announced to the named channel instead. Times are household-local (tz).",
+  "_comment": "OpenClaw automations for PandaBase. OpenClaw stores jobs in its SQLite state DB, so this file is documentation + input for `make install-agent-cron` (M8): each agent entry becomes `openclaw automations add --name <name> --cron <cron> --tz <tz> --session isolated --message 'Read the skill file <repo>/agent/skills/<skill>/SKILL.md first and follow it. <message>' --tools exec,read,write,message,browser --no-deliver`. Skills post to Discord themselves with the message tool, so run output isn't announced. Entries with `command` are command payloads (no model call) announced to the named channel instead. Times are household-local (tz). The Friday nudge and the Saturday build are command payloads (live 2026-11-06/07: the local model, given only \"Use $grocery-cycle\", never opened the skill and posted a made-up cart); the model only runs the steps that need judgment.",
   "tz": "America/Los_Angeles",
   "jobs": [
     {
       "name": "pandabase-friday-nudge",
       "cron": "0 18 * * 5",
       "skill": "grocery-cycle",
-      "message": "Use $grocery-cycle: run the Friday nudge."
+      "command": "pandabase-tools cycle nudge",
+      "deliver_to": "cycle_channel",
+      "_comment": "Command payload: records the nudge and prints the check-in (NO_REPLY when already nudged)."
     },
     {
       "name": "pandabase-saturday-build",
       "cron": "0 10 * * 6",
       "skill": "grocery-cycle",
-      "message": "Use $grocery-cycle: run the Saturday cart build."
+      "command": "pandabase-tools cart build --reply",
+      "deliver_to": "cycle_channel",
+      "timeout_seconds": 1500,
+      "_comment": "Command payload: tier 1 + price checks, then prints what was added and what is left for the 10:30 search. Silent while it works, hence the timeout."
+    },
+    {
+      "name": "pandabase-saturday-search",
+      "cron": "30 10 * * 6",
+      "skill": "grocery-cycle",
+      "message": "Do only the Saturday tier-2 search (§4, Tier 2). First run `pandabase-tools cart pending`. If its status is nothing_pending, reply exactly NO_REPLY. Never run `cart build`."
     },
     {
       "name": "pandabase-monday-open",
       "cron": "0 9 * * 1",
       "skill": "grocery-cycle",
-      "message": "Use $grocery-cycle: ensure a cycle is open (Monday fallback)."
+      "message": "Do §1 only: make sure a cycle is open (Monday fallback)."
     },
     {
       "name": "pandabase-receipts-will",
       "cron": "0 21 * * *",
       "skill": "digital-receipt-scraper",
       "member": "will",
-      "message": "Use $digital-receipt-scraper: sweep receipts for member will."
+      "message": "Sweep receipts for member will."
     },
     {
       "name": "pandabase-receipts-partner",
       "cron": "0 21 * * 0",
       "skill": "digital-receipt-scraper",
       "member": "partner",
-      "message": "Use $digital-receipt-scraper: sweep receipts for member partner."
+      "message": "Sweep receipts for member partner."
     },
     {
       "name": "pandabase-diagnostics",
       "cron": "0 23 * * 0",
       "skill": "telemetry-aggregator",
-      "message": "Use $telemetry-aggregator: write last week's diagnostics."
+      "message": "Write last week's diagnostics."
     },
     {
       "name": "pandabase-job-replies",

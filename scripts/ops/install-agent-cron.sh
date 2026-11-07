@@ -36,12 +36,22 @@ job_id() {
       | map(select(.name == $n)) | first | .id // empty'
 }
 
-# upsert NAME CRON [agent MESSAGE | command COMMAND CHANNEL_ID]
+# A model job's message names its skill file outright: given only "Use $grocery-cycle: …", the
+# local model never opened the skill and improvised (live, 2026-11-06/07).
+skill_message() {
+  printf 'Read the skill file %s first and follow it. %s' \
+    "$ROOT/agent/skills/$1/SKILL.md" "$2"
+}
+
+# upsert NAME CRON [agent MESSAGE | command COMMAND CHANNEL_ID [TIMEOUT_SECONDS]]
 upsert() {
   local name="$1" cron="$2" kind="$3" payload="$4" id
   local args=(--cron "$cron" --tz "$tz")
   if [ "$kind" = command ]; then
     args+=(--command "$payload" --announce --channel discord --to "channel:$5")
+    if [ -n "${6:-}" ] && [ "$6" != - ]; then
+      args+=(--timeout-seconds "$6" --no-output-timeout-seconds "$6")
+    fi
   else
     args+=(--session isolated --message "$payload" --tools "$TOOLS_LIST" --no-deliver ${agent_args[@]+"${agent_args[@]}"})
   fi
@@ -57,18 +67,19 @@ upsert() {
 
 # Fixed jobs from the example, i.e. everything but the per-member receipt sweeps. ("-" marks an
 # empty field: `read` merges adjacent tabs.)
-while IFS=$'\t' read -r name cron command message deliver_to; do
+while IFS=$'\t' read -r name cron skill command message deliver_to timeout; do
   if [ "$command" != - ]; then
-    # Command payloads (job replies, the weekly cart probe): no model turn; agent-run.sh loads
-    # the token from .env.
+    # Command payloads (job replies, the Friday nudge, the Saturday build, the weekly cart probe):
+    # no model turn; agent-run.sh loads the token from .env.
     to="$(channel_id "$deliver_to")"
     [ -n "$to" ] || die "$name: no discord.$deliver_to in $PANDABASE_CONFIG"
-    upsert "$name" "$cron" command "$(printf '%q' "$ROOT/scripts/ops/agent-run.sh") ${command#pandabase-tools }" "$to"
+    upsert "$name" "$cron" command "$(printf '%q' "$ROOT/scripts/ops/agent-run.sh") ${command#pandabase-tools }" "$to" "$timeout"
   else
-    upsert "$name" "$cron" agent "$message"
+    upsert "$name" "$cron" agent "$(skill_message "$skill" "$message")"
   fi
 done < <(jq -r '.jobs[] | select(.skill != "digital-receipt-scraper")
-  | [.name, .cron, (.command // "-"), (.message // "-"), (.deliver_to // "intake_channel")] | @tsv' "$CRON_FILE")
+  | [.name, .cron, .skill, (.command // "-"), (.message // "-"), (.deliver_to // "intake_channel"),
+     (.timeout_seconds // "-" | tostring)] | @tsv' "$CRON_FILE")
 
 # Receipt sweeps, one per member.
 while IFS=$'\t' read -r member _profile sweep _cart; do
@@ -83,7 +94,7 @@ while IFS=$'\t' read -r member _profile sweep _cart; do
       ;;
   esac
   upsert "pandabase-receipts-$member" "$cron" agent \
-    "Use \$digital-receipt-scraper: sweep receipts for member $member."
+    "$(skill_message digital-receipt-scraper "Sweep receipts for member $member.")"
 done < <(members)
 
 note "Check them with: openclaw automations list"

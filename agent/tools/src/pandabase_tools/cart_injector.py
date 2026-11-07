@@ -262,7 +262,8 @@ def _add_from_product_page(driver: Driver, line: LineOutcome, tel: Telemetry) ->
         line.outcome, line.reason = "failed", str(err)[:200]
         return line
     if res.outcome == "added":
-        line.outcome, line.reason = "added", None
+        # in the other store's cart: the line's store tag is wrong (the summary says so)
+        line.outcome, line.reason = "added", f"in_{res.store}_cart" if res.store else None
     elif res.outcome == "already_in_cart":
         line.outcome, line.reason = "added", "already_in_cart"
     elif res.reason in ("not_signed_in", "extra_items") or (res.reason or "").startswith(

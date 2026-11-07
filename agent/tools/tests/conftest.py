@@ -99,6 +99,7 @@ class FakeDriver:
 
 PRODUCT = "https://www.amazon.com/dp/"
 VIEW_URL = "https://www.amazon.com/gp/cart/view.html"
+WF_CART_URL = cart_add.CART_URLS["wholefoods"]
 
 
 def product_html(asin: str, *, available: bool = True) -> str:
@@ -146,6 +147,8 @@ class FakeShop:
     def page(self, url: str) -> Page | None:
         if url == VIEW_URL:
             return (url, self.cart_html())
+        if url == WF_CART_URL:  # read when an add isn't in the Amazon cart: empty here
+            return (url, "<html><body></body></html>")
         if url.startswith(PRODUCT):
             asin = url[len(PRODUCT) :].split("/")[0]
             return (url, product_html(asin, available=asin not in self.unavailable))
