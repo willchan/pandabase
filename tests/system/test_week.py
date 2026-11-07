@@ -220,7 +220,7 @@ def test_05_do_we_have(stack: Stack) -> None:
 def test_06_friday_nudge(stack: Stack) -> None:
     c = W["cycle"]
     # The Friday automation is a command payload (no model turn): it records the nudge and
-    # prints the check-in that OpenClaw announces (DESIGN §10 #59).
+    # prints the check-in that OpenClaw announces (DESIGN §10 #60).
     out = stack.skill(GC, "cycle nudge")
     print("NUDGE", out)
     assert out.startswith("🛒 **Friday check-in**") and "**Likely needed:**" in out

@@ -6,7 +6,7 @@ against the tier A stack (`conftest.stack`). Each scenario asserts *API state ou
 override, an away period, an inventory event, nothing written — never wording. PRD principles
 are checked the same way: one clarifying question at most (asks once), no cart change when asked
 to check out (cart only), the Saturday search step with nothing pending changes nothing (the
-nudge and the build are command automations with no model turn: DESIGN §10 #59).
+nudge and the build are command automations with no model turn: DESIGN §10 #60).
 
 The result is a pass rate, not a gate: the run writes `agent-eval.json` + a Markdown table
 (`$GITHUB_STEP_SUMMARY` in CI) and fails only below `EVAL_MIN_PASS_RATE` (default 0). It skips
