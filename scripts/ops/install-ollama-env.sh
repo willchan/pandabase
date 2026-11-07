@@ -25,4 +25,4 @@ fi
 run launchctl setenv OLLAMA_NUM_PARALLEL 1
 run launchctl setenv OLLAMA_MAX_LOADED_MODELS 1
 run launchctl setenv OLLAMA_NO_CLOUD 1
-info "Now restart Ollama (menu bar → Quit Ollama, then open it again)."
+info "Now turn on Ollama → Settings → Airplane mode (the app overrides OLLAMA_NO_CLOUD with it), then restart Ollama (menu bar → Quit Ollama, then open it again)."
