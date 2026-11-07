@@ -213,8 +213,13 @@ ollama pull qwen3.5:9b             # the VLM: receipts, Trash Cam, and OpenClaw'
 ollama pull qwen3.5:4b             # merge suggestions (skip if you choose the single-model option)
 ```
 
+Also turn on **Ollama → Settings → Airplane mode**: the app passes its own `OLLAMA_NO_CLOUD` to
+the server from that setting, overriding launchd. On a host whose Ollama other apps share, skip
+`make install-ollama-env`: the host owns these settings ([SETUP-MAC.md](docs/SETUP-MAC.md) §3).
+
 Check: `curl -s localhost:11434/api/tags | jq -r '.models[].name'` lists both models;
-`launchctl getenv OLLAMA_MAX_LOADED_MODELS` → `1`.
+`ps eww -p "$(pgrep -f 'ollama serve' | head -1)" | tr ' ' '\n' | grep '^OLLAMA_'` shows the
+three settings the server actually got.
 
 #### Memory budget (32GB)
 

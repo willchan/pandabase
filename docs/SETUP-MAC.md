@@ -87,7 +87,21 @@ With a ~25GB reply model there's room for one model at a time: keep
 `OLLAMA_MAX_LOADED_MODELS=1` and let Ollama swap (the first reply after a photo waits a few
 seconds while the reply model reloads). `OLLAMA_NO_CLOUD=1` turns off Ollama's cloud models.
 
-Check: `launchctl getenv OLLAMA_NO_CLOUD` → `1`; `ollama list` shows the models.
+**Also turn on Ollama → Settings → Airplane mode.** The Ollama app passes its own
+`OLLAMA_NO_CLOUD` to the server from that setting, overriding launchd, so with Airplane mode off
+the server runs with `OLLAMA_NO_CLOUD=0` and cloud models stay reachable.
+
+Check: `ps eww -p "$(pgrep -f 'ollama serve' | head -1)" | tr ' ' '\n' | grep '^OLLAMA_'` shows
+all three at their values (that's what the server actually got; `launchctl getenv` only shows
+what was set); a `:cloud` model is refused with "ollama cloud is disabled"; `ollama list` shows
+the models.
+
+**On a shared host** (other apps on the same Ollama, a host-level runbook): Ollama's settings
+and which models are pulled belong to the host, not to PandaBase. Skip `make install-ollama-env`
+and check the host sets the three values above. PandaBase's own needs are the VLM
+(`OLLAMA_VLM_MODEL`, ~7–8GB loaded) and the text model (`OLLAMA_TEXT_MODEL`, ~4GB, or the VLM
+under the single-model option), each loaded briefly per job, plus OpenClaw's reply model if it
+runs on this Ollama (README "Memory budget").
 
 ## 4. Agent tools and config
 
