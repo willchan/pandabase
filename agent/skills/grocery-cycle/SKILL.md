@@ -101,51 +101,28 @@ pandabase-tools telemetry emit clarifying_question --payload '{"question": "Oat 
 
 Photos and "bought/we're out/never buy" messages belong to the `discord-intake` skill.
 
-## 3. Friday 18:00 nudge (automation)
+## 3. Friday 18:00 nudge (runs by itself)
+
+The `pandabase-friday-nudge` automation runs `pandabase-tools cycle nudge` with no model turn: it
+records the nudge and posts the check-in (likely needed, please check, freezer, review items) in
+`cycle_channel`, linking the cycle thread. **You never post the nudge.** Answers to it ("6 eggs",
+photos) arrive in the thread: handle them with §2.
+
+## 4. Saturday cart (10:00 build runs by itself; you do the 10:30 search)
+
+At 10:00 the `pandabase-saturday-build` automation runs `pandabase-tools cart build --reply` with
+no model turn: it adds every line it can from its product page and posts what it added and what
+is still to find in `cycle_channel`. **Never run `cart build` yourself**: lines it couldn't verify
+may already be in a cart, and a re-run could add them again.
+
+At 10:30 the `pandabase-saturday-search` automation asks you for the search step. Start with:
 
 ```sh
-pandabase-tools api get /api/grocery/cycle/current
-pandabase-tools api post /api/grocery/cycle/<C>/status --json '{"status": "nudged"}' --key nudge:<C>
-pandabase-tools api get /api/grocery/checkin
+pandabase-tools cart pending
 ```
 
-(No cycle → do §1 first. A repeated nudge is a no-op on the server; if `nudge_sent_at` was
-already set before this run, don't post again.) Post in the cycle thread, omitting empty lines:
-
-> 🛒 **Friday check-in** — I'll fill the cart tomorrow at 10am.
-> **Likely needed:** milk, eggs (out), bananas
-> **Please check:** ❓ eggs — count the eggs · ❓ rice — still some left?
-> **Freezer:** chicken thighs (Aug 12), peas (Sep 1)
-> 3 review items waiting → <web_url>/cleanup
-> Reply with changes or counts ("6 eggs"), or a photo. No reply needed — I'll go with the plan.
-
-`likely_needed` / `please_check` items show `name` (+ `audit_hint` for please-check), `freezer`
-shows `name (frozen_at date)`, the last line only when `pending_review_count > 0`. This is the
-only place pending reviews are ever mentioned.
-
-## 4. Saturday 10:00 cart build (automation)
-
-```sh
-pandabase-tools cart build
-```
-
-It moves the cycle to `building`, checks prices for lines that need it, adds every line it can
-from its product page in the cart member's Chromium (tier 1), and prints
-`{status, added, needs_agent, failed}`. Re-running is safe (it never adds a line twice).
-
-- `status: "skipped"` → post "⏸️ Away on build day — no cart this week." and do §1.
-- `status: "no_cycle"` / `"not_current"` → do §1, then run `cart build` again once.
-- exit code 3 (`profile_locked`) → another job is using the browser; try once more in 10 minutes
-  (one retry only), then post the ⚠️ summary with everything as not added.
-- `layout_alert` is not null → first post **once** to `channels.ops_channel` (not the cycle
-  thread), then carry on with the steps below as usual:
-
-  > ⚠️ **Amazon's layout probably changed** — 3 of 4 cart lines couldn't be added from their product pages (no_add_form 3). Lines go to search; the cart tools need a look.
-
-  Fill in `page_failures`, `attempted` and `reasons` from `layout_alert`. A re-run of the same
-  build returns `layout_alert: null` (it was already raised): don't post again.
-- `status: "ready"` → nothing needed the agent; post the summary.
-- `status: "needs_agent"` → tier 2 below, then the summary.
+- `status: "nothing_pending"` → reply exactly `NO_REPLY` and stop.
+- `status: "needs_agent"` → `cycle_id` is `<C>`; do tier 2 below for each `needs_agent` line.
 
 **Tier 2 (only for `needs_agent` lines, ≤ 15 minutes total).** Use only the two commands below —
 **never the browser tool** (it's disabled for this agent: it would put a product page in front of
@@ -175,7 +152,7 @@ pandabase-tools cart add --asin <asin> --qty <qty> --store amazon
 
 `outcome: "added"` or `"already_in_cart"` → the line is `tier2`; `"failed"` (any `reason`) →
 `failed`, don't retry it. Exit code 3 (`profile_locked`) → wait a minute and retry once. Stop at
-15 minutes and mark the remaining lines `failed`. Then post the results:
+15 minutes and mark the remaining lines `failed`. Then record the results:
 
 ```sh
 pandabase-tools cart finish --cycle-id <C> --outcomes '{"<index>": "tier2", "<index>": "failed"}'
@@ -183,15 +160,14 @@ pandabase-tools cart finish --cycle-id <C> --outcomes '{"<index>": "tier2", "<in
 
 (`index` comes from the `needs_agent` entries; lines you don't list count as failed.)
 
-**Summary** in the cycle thread:
+**Post the results** in `cycle_channel` (one message; omit empty lines):
 
-> ✅ **Cart ready** — review & check out: https://www.amazon.com/gp/cart/view.html
-> **Added (8):** oats ×2 · eggs — 28% cheaper per egg than your usual · bananas ×6 · …
+> 🔎 **Search results** — review & check out: https://www.amazon.com/gp/cart/view.html
 > ⚠️ **Added by search — please check (2):** birthday candles, cake flour
 > ⚠️ **Couldn't add (1):** sparkling water — unavailable
 
-Use each line's `reason_text` only when the product was switched or is notable; keep it to one
-line per section, truncating with "+N more".
+Keep it to one line per section, truncating with "+N more". The 10:00 message already listed
+what tier 1 added: don't repeat it.
 
 The Friday 15:00 `pandabase-cart-probe` automation (`pandabase-tools cart probe --reply`, no
 model turn) checks one Amazon and one Whole Foods product page still have a findable add button

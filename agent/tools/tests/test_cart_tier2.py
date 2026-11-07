@@ -12,7 +12,7 @@ from urllib.parse import parse_qsl, urlsplit
 import pytest
 from conftest import FakeDriver
 
-from pandabase_tools import dom, guard
+from pandabase_tools import cart_add, dom, guard
 from pandabase_tools.cart_add import add_form, cart_state
 from pandabase_tools.cart_tier2 import (
     NOTICE,
@@ -180,6 +180,8 @@ def _add_driver(
             return (url, product_page)
         if url == VIEW:
             return (url, next(views))
+        if url == cart_add.CART_URLS["wholefoods"]:  # read when the add isn't in the Amazon cart
+            return (url, "<html><body></body></html>")
         return None
 
     return FakeDriver(pages, add=lambda _a, _q: landing)

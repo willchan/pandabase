@@ -60,6 +60,7 @@ def test_cron_example_schedule() -> None:
     assert jobs == {
         "pandabase-friday-nudge": "0 18 * * 5",
         "pandabase-saturday-build": "0 10 * * 6",
+        "pandabase-saturday-search": "30 10 * * 6",  # tier 2, after the build
         "pandabase-monday-open": "0 9 * * 1",
         "pandabase-receipts-will": "0 21 * * *",  # cart member: daily
         "pandabase-receipts-partner": "0 21 * * 0",  # other member: Sundays
@@ -67,6 +68,14 @@ def test_cron_example_schedule() -> None:
         "pandabase-job-replies": "*/5 * * * *",
         "pandabase-cart-probe": "0 15 * * 5",  # Friday afternoon, before Saturday's build
     }
+    by_name = {j["name"]: j for j in cron["jobs"]}
+    # No model turn for these two (live 2026-11-07: the model posted a made-up cart).
+    assert by_name["pandabase-friday-nudge"]["command"] == "pandabase-tools cycle nudge"
+    assert by_name["pandabase-saturday-build"]["command"] == "pandabase-tools cart build --reply"
+    assert {
+        by_name[n]["deliver_to"] for n in ("pandabase-friday-nudge", "pandabase-saturday-build")
+    } == {"cycle_channel"}
+    assert "cart pending" in by_name["pandabase-saturday-search"]["message"]
     probe = next(j for j in cron["jobs"] if j["name"] == "pandabase-cart-probe")
     assert probe["command"] == "pandabase-tools cart probe --reply"
     assert probe["deliver_to"] == "ops_channel"
@@ -478,3 +487,116 @@ def test_cart_add_takes_the_profile_lock(config: Path) -> None:
 def test_cart_add_rejects_a_bad_asin(config: Path) -> None:
     code, out = run(config, ["cart", "add", "--asin", "../checkout"], FakeApi({}), FakeDriver({}))
     assert code == 1 and "ASIN" in out["error"]
+
+
+# --- Scheduled steps that run without a model (cycle_replies) ----------------------------------
+# Live 2026-11-06/07: told "Use $grocery-cycle: run the Saturday cart build", the local model never
+# opened the skill or ran a pandabase-tools command; it posted a cart made up from old memory notes
+# and both automations reported "ok". The build and the nudge are now command automations.
+
+
+def test_cart_build_reply_is_the_discord_summary(config: Path) -> None:
+    server = CycleServer()
+    code, out = run(config, ["cart", "build", "--reply"], server.api, _driver())
+    assert code == 0 and isinstance(out, str), out
+    assert out.startswith("🛒 **Cart built** in <#T1>")
+    assert "✅ **Added (2):** oats ×2, towels" in out  # noqa: RUF001
+    assert "🔎 **Still to find (1):** candles — I'll search for these at 10:30." in out
+    assert "[Amazon](<https://www.amazon.com/gp/cart/view.html>)" in out
+    assert "Whole Foods" not in out
+    # The tier-2 job reads what's left without touching the browser or re-running the build.
+    code, pending = run(config, ["cart", "pending"], server.api)
+    assert code == 0 and pending["status"] == "needs_agent"
+    assert [(x["index"], x["name"]) for x in pending["needs_agent"]] == [(2, "candles")]
+    # Saturday again (a retry): already handled lines aren't re-added; once ready, it's silent.
+    run(config, ["cart", "finish", "--cycle-id", "C1", "--outcomes", '{"2": "failed"}'], server.api)
+    code, out = run(config, ["cart", "build", "--reply"], server.api, _driver())
+    assert (code, out) == (0, "NO_REPLY")
+    code, pending = run(config, ["cart", "pending"], server.api)
+    assert pending["status"] == "nothing_pending"
+
+
+def test_cart_build_reply_without_a_cycle_or_when_away(config: Path) -> None:
+    api = FakeApi({"GET /api/grocery/cycle/current": lambda _: {"cycle": None}})
+    code, out = run(config, ["cart", "build", "--reply"], api, _driver())
+    assert (code, out) == (0, "⚠️ No grocery list was open this week, so no cart was built.")
+    server = CycleServer()
+    server.api.handlers["POST /api/grocery/cycle/C1/status"] = lambda _: {
+        "changed": True,
+        "cycle": _cycle("skipped"),
+    }
+    code, out = run(config, ["cart", "build", "--reply"], server.api, _driver())
+    assert (code, out) == (0, "⏸️ Away on build day — no cart this week.")
+
+
+def test_cart_build_reply_when_the_browser_is_busy(config: Path) -> None:
+    server = CycleServer()
+    run(config, ["lock", "acquire", "--member", "will", "--owner", "receipts"], server.api)
+    code, out = run(config, ["cart", "build", "--reply"], server.api, _driver())
+    assert code == 0 and out.startswith("⚠️ The cart wasn't built: the cart browser was busy")
+
+
+def _checkin() -> dict[str, Any]:
+    item = {"base_unit": "count", "on_hand": 0, "runout_at": None, "audit_hint": None}
+    return {
+        "cycle_id": "C1",
+        "likely_needed": [
+            item | {"item_id": "I1", "name": "milk", "reason": "runout", "status": "low"},
+            item | {"item_id": "I2", "name": "eggs", "reason": "runout", "status": "out"},
+        ],
+        "please_check": [
+            item
+            | {
+                "item_id": "I3",
+                "name": "rice",
+                "reason": "audit_hint",
+                "status": "unknown",
+                "audit_hint": "still some left?",
+            }
+        ],
+        "freezer": [
+            {
+                "item_id": "I4",
+                "name": "peas",
+                "base_unit": "g",
+                "quantity": 500,
+                "frozen_at": "2026-09-01T12:00:00Z",
+            }
+        ],
+        "pending_review_count": 3,
+    }
+
+
+def test_cycle_nudge_records_the_nudge_and_prints_the_check_in(config: Path) -> None:
+    server = CycleServer()
+    server.api.handlers["GET /api/grocery/checkin"] = lambda _: _checkin()
+    # The API keeps the cycle open and stamps nudge_sent_at (web/lib/services/cycles.ts).
+    nudged = _cycle("open") | {"nudge_sent_at": "2026-10-24T01:00:00Z"}
+    server.api.handlers["POST /api/grocery/cycle/C1/status"] = lambda _: {
+        "changed": True,
+        "cycle": nudged,
+    }
+    code, out = run(config, ["cycle", "nudge"], server.api)
+    assert code == 0 and isinstance(out, str), out
+    assert server.api.bodies("POST /api/grocery/cycle/C1/status") == [{"status": "nudged"}]
+    assert out.splitlines() == [
+        "🛒 **Friday check-in** — I'll fill the cart tomorrow at 10am.",
+        "**Likely needed:** milk, eggs (out)",
+        "**Please check:** ❓ rice — still some left?",
+        "**Freezer:** peas (Sep 1)",
+        "3 review items waiting → https://pandabase.example.vercel.app/cleanup",
+        'Reply in <#T1> with changes or counts ("6 eggs"), or a photo. No reply needed — I\'ll go '
+        "with the plan.",
+    ]
+
+
+def test_cycle_nudge_is_silent_when_already_nudged_and_says_so_without_a_cycle(
+    config: Path,
+) -> None:
+    nudged = _cycle("open") | {"nudge_sent_at": "2026-10-23T01:00:00Z"}
+    api = FakeApi({"GET /api/grocery/cycle/current": lambda _: {"cycle": nudged}})
+    assert run(config, ["cycle", "nudge"], api) == (0, "NO_REPLY")
+    assert api.bodies("POST /api/grocery/cycle/C1/status") == []
+    api = FakeApi({"GET /api/grocery/cycle/current": lambda _: {"cycle": None}})
+    code, out = run(config, ["cycle", "nudge"], api)
+    assert code == 0 and out.startswith("⚠️ No grocery list is open this week")

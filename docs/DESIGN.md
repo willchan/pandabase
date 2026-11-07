@@ -777,8 +777,15 @@ ignored: tier 2 moved into the tools). The agent's OpenClaw config should deny
 `["group:web", "browser"]` (`tools.deny`, in `agent/openclaw.pandabase.example.json5`): a local
 reply model with raw web/browser tools next to a signed-in Amazon session is the injection path
 §10 #52 closes. `agent/cron.example.json`
-documents the OpenClaw automations (`openclaw automations add --cron … --tz
-America/Los_Angeles --session isolated --message "Use $<skill>: …"`; one command payload).
+documents the OpenClaw automations. Steps that need no judgment are *command* payloads announced to
+a channel, with no model turn: the Friday nudge (`pandabase-tools cycle nudge` records it and prints
+the check-in), the Saturday 10:00 build (`cart build --reply`: tier 1, then a summary of what was
+added and what is left), job replies and the cart probe (`cycle_replies.py` formats the messages;
+`NO_REPLY` = silent). They post to `cycle_channel` with a link to the week's thread, since a command
+payload's destination is fixed at install time. Model jobs (`--session isolated`) get a message that
+names their skill file (`Read the skill file <repo>/agent/skills/<skill>/SKILL.md first and follow
+it. …`); the Saturday 10:30 search job reads what the build left with `cart pending` (build state
+only, no browser) and never re-runs the build (§10 #59).
 OpenClaw keeps automations in its own state DB, so M8 registers them with the CLI. Skills are
 installed by pointing OpenClaw's `skills.load.extraDirs` at the repo's `agent/skills` (`make
 install-agent-skills`): OpenClaw rejects workspace-skill symlinks that resolve outside the
@@ -1140,3 +1147,4 @@ docker-compose.yml (+ docker-compose.build.yml), Makefile, CLAUDE.md, README.md,
 | 56 | Amazon layout breakage is watched two ways: a build alert (≥ 2 tier-1 lines and ≥ half of them failed for a page reason, once per cycle, to the ops channel) and a Friday 15:00 add-button check on one Amazon and one Whole Foods page that clicks nothing | Amazon changes pages without notice (the add URL died 2026-11-04); one odd line is noise, most of a build is a layout. The check reuses tier 1's own `add_control` rule, so it tests what Saturday will do, and runs a day early with two page loads (live runs had already drawn a `/checkpoint`) |
 | 57 | On the Mac, PandaBase's agent token is `PANDABASE_AGENT_API_TOKEN` (the engine, `.env`, Vercel and GitHub keep `AGENT_API_TOKEN`) | `~/.openclaw/.env` is loaded into every tool OpenClaw runs, for every app. An unprefixed name there leaks one app's token into another's tools, and an app that lets the environment override its own file (Bamboo did) then sends the wrong token to the wrong server. App-specific keys on the Mac carry the app's prefix; shared ones (Discord bot, Ollama) don't |
 | 58 | PandaBase's Mac-side settings live in its own `~/.config/pandabase/agent.env`, read by `pandabase-tools`; the skills gate on the binary only (no `requires.env`); `~/.openclaw/.env` keeps only shared keys | The same pattern as Bamboo, so every app on the Mac works one way: no app's secrets are handed to every other app's tools, a token change needs no gateway restart, and adding or removing an app doesn't touch OpenClaw's env. Not a security boundary: every app runs as `openclaw-agent` |
+| 59 | Scheduled steps that need no judgment (Friday nudge, Saturday tier 1 + summary) run as OpenClaw command payloads; the model gets only tier 2, the Monday thread and the receipt/diagnostics skills, each told its skill file's path. A tier-1 add that isn't in the tagged store's cart is looked for in the other store's cart | Live 2026-11-06/07: told "Use $grocery-cycle: …", the local model never opened the skill, posted a cart made up from old memory notes, and both automations reported "ok". The same build showed five Amazon items tagged Whole Foods landing in the Amazon cart and counted as failures (a false layout alert; a re-run would have added them twice) |

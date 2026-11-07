@@ -219,16 +219,18 @@ def test_05_do_we_have(stack: Stack) -> None:
 @preview
 def test_06_friday_nudge(stack: Stack) -> None:
     c = W["cycle"]
-    out = stack.skill(GC, '"status": "nudged"', c=c)
+    # The Friday automation is a command payload (no model turn): it records the nudge and
+    # prints the check-in that OpenClaw announces (DESIGN §10 #59).
+    out = stack.skill(GC, "cycle nudge")
     print("NUDGE", out)
+    assert out.startswith("🛒 **Friday check-in**") and "**Likely needed:**" in out
     cyc = stack.one("select * from grocery_cycle where id = ?", c)
     assert cyc["nudge_sent_at"] and cyc["status"] == "open"
-    again = stack.skill(GC, '"status": "nudged"', c=c)
+    assert stack.skill(GC, "cycle nudge") == "NO_REPLY"  # never nags
     assert stack.one("select nudge_sent_at from grocery_cycle where id = ?", c) == {
         "nudge_sent_at": cyc["nudge_sent_at"]
     }
-    print("NUDGE2", again)
-    checkin = stack.skill(GC, "api get /api/grocery/checkin")
+    checkin = stack.tools(["api", "get", "/api/grocery/checkin"])
     print("CHECKIN", checkin)
     assert checkin["likely_needed"] and checkin["pending_review_count"] >= 1
     W["checkin"] = checkin
@@ -427,18 +429,24 @@ def test_11_saturday_build(stack: Stack) -> None:
     """`cart build` (price checks → tier 1 on synthetic Amazon) → tier 2 → `cart finish`."""
     c = W["cycle"]
     t = stack.rows("select max(created_at) t from system_telemetry")[0]["t"]
-    built = stack.skill(GC, "pandabase-tools cart build", shim=True)
+    built = stack.tools(["cart", "build"], shim=True)  # JSON: what the --reply text is made of
     assert built["status"] == "needs_agent" and built["cycle_id"] == c and not built["failed"]
     added = {x["index"]: x for x in built["added"]}
-    agent = {x["index"]: x for x in built["needs_agent"]}
     assert added and all(x["vendor"] == "amazon" and x["asin"] for x in added.values())
+    assert stack.one("select status from grocery_cycle where id = ?", c)["status"] == "building"
+    # The 10:00 automation (a retry here): nothing is added twice, and it prints the summary.
+    again = stack.skill(GC, "cart build --reply", shim=True)
+    print("BUILD", again)
+    assert again.startswith("🛒 **Cart built**") and f"**Added ({len(added)}):**" in again
+    assert "🔎 **Still to find" in again
+    # The 10:30 search job reads what's left from the build state, without a browser.
+    pending = stack.skill(GC, "cart pending")
+    assert pending["status"] == "needs_agent" and pending["cycle_id"] == c
+    agent = {x["index"]: x for x in pending["needs_agent"]}
+    assert set(agent) == {x["index"] for x in built["needs_agent"]}
     # Whole Foods isn't tier-1 verified (cart.wholefoods_tier1 false); free text needs a search.
     assert {x["vendor"] for x in agent.values()} <= {"wholefoods", None}
     cake = next(i for i, x in agent.items() if x["free_text"] == "cake flour")
-    assert stack.one("select status from grocery_cycle where id = ?", c)["status"] == "building"
-    # Re-running is safe: nothing is added twice.
-    again = stack.skill(GC, "pandabase-tools cart build", shim=True)
-    assert {x["index"] for x in again["added"]} == set(added)
 
     # Tier 2 through the guarded tools only (no browser tool): search → pick an ASIN → add.
     # Cake flour plays the "uncertain" line the agent skips.
@@ -683,9 +691,9 @@ def test_18_away_on_build_day_skips(stack: Stack) -> None:
         sender_id=ALEX,
         message_id=stack.message_id(),
     )
-    built = stack.skill(GC, "pandabase-tools cart build", shim=True)
+    built = stack.skill(GC, "cart build --reply", shim=True)
     print("SKIP", built)
-    assert built["status"] == "skipped"
+    assert built == "⏸️ Away on build day — no cart this week."
     assert stack.one("select status from grocery_cycle where id = ?", c)["status"] == "skipped"
 
 

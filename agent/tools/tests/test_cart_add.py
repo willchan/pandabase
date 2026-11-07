@@ -289,7 +289,7 @@ def test_count_jump_without_the_asin_in_the_cart_is_unverified() -> None:
     # Live: nav-cart-count went 1 → 4 for one Amazon item while the cart held 8 items.
     driver = _driver(
         fixture("product_add_form.html"),
-        [_cart(["B0SYNTH001"], 1), _cart(["B0SYNTH001"], 4)],
+        [_cart(["B0SYNTH001"], 1), _cart(["B0SYNTH001"], 4), _cart([], 0)],
         product_url=P202,
     )
     tel = Telemetry()
@@ -312,7 +312,9 @@ def test_asin_in_the_active_rows_is_added_whatever_the_count_says(after_count: i
 def test_asin_only_saved_for_later_after_the_add_is_unverified() -> None:
     after = fixture("cart_view.html").replace("B0SYNTH209", "B0SYNTH202")  # the saved row
     driver = _driver(
-        fixture("product_add_form.html"), [fixture("cart_view.html"), after], product_url=P202
+        fixture("product_add_form.html"),
+        [fixture("cart_view.html"), after, _cart([], 0)],
+        product_url=P202,
     )
     out = add_one(driver, "B0SYNTH202", 1, Telemetry(), "amazon")
     assert (out.outcome, out.reason) == ("failed", "unverified")
@@ -496,3 +498,25 @@ def test_real_form_posts_only_add_to_cart_gets_past_the_guard(browser_page: Any)
     assert "submit.add-to-cart" in add and "submit.buy-now" not in add
     assert buy_path.startswith("/gp/product/handle-buy-box/") and not buy_ok
     assert "submit.buy-now" in buy
+
+
+# --- Bug 3: a line tagged with the wrong store landed in the other cart -----------------------
+# Live build 2026-11-07: every line was tagged `wholefoods`, but five were ordinary Amazon items
+# (air filters, Tide pods, a dish brush, …). Their buy-box add put them in the main Amazon cart,
+# the check read only the Whole Foods cart, so all five came back `unverified`: a false "Amazon's
+# layout changed" alert, and a re-run of `cart build` would have added each of them again (only
+# lines recorded as `added` are skipped). Now the other store's cart is read when the ASIN isn't
+# in the tagged one.
+
+
+def test_item_tagged_whole_foods_that_lands_in_the_amazon_cart_is_added() -> None:
+    driver = _driver(
+        fixture("product_add_form.html"),
+        [_cart([], 0), _cart([], 0), _cart(["B0SYNTH202"], 1)],
+        product_url=P202,
+    )
+    tel = Telemetry()
+    out = add_one(driver, "B0SYNTH202", 1, tel, "wholefoods")
+    assert (out.outcome, out.reason, out.store) == ("added", None, "amazon"), out
+    assert driver.opened == [WF_CART, P202, WF_CART, VIEW]
+    assert tel.metrics("selector_error") == []

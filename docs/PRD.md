@@ -52,14 +52,17 @@ A Discord **thread per cycle** in `#pandabase`, acting as a running grocery list
   or someone says "done"), or **Monday 9am** at the latest.
 - **Anytime:** either of us replies to add things — including one-off free text
   ("birthday candles, cake flour"), skip items ("skip bananas"), or set quantities.
-- **Friday 6pm nudge** in the thread:
+- **Friday 6pm nudge** in `#pandabase`, linking the week's thread (replies go in the thread):
   - *Likely needed* — items predicted to run out within 3 days, or marked critical.
   - *Please check* — items the app is unsure about (near run-out, stale, or with an audit hint
     like "count the eggs"). We can answer with text or a photo.
   - *Freezer* — the 1–3 oldest freezer items.
   - Optional one-liner: "N review items waiting → link".
-- **Saturday 10am cart build:** the agent fills Will's Whole Foods/Amazon cart and posts a summary:
-  what was added (and why each product was chosen), what fell back to manual, what failed.
+- **Saturday 10am cart build:** Will's Whole Foods/Amazon cart is filled and a summary posted in
+  `#pandabase`: what was added (and which items landed in the other store's cart), what is left
+  to find, what failed, with cart links. At 10:30 the agent searches for what's left and posts
+  what it added by search. The nudge and the build run without the language model, so they can't
+  be skipped or made up.
   Builds from predictions alone if nobody replied. If most of the lines it tried (and at least
   two) fail because the product page wasn't what the tools expect, it also posts one ⚠️ to the
   ops channel: Amazon's layout probably changed.

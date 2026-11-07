@@ -62,6 +62,7 @@ class AddOutcome:
     cart_count_before: int | None = None
     cart_count_after: int | None = None
     extra_asins: list[str] = field(default_factory=list)
+    store: str | None = None  # the cart it was found in, when not the line's own store's
 
 
 def _submits(form: dom.Node) -> list[dom.Node]:
@@ -240,6 +241,16 @@ def add_one(
             return out
         after, now_in = cart_state(driver.open(cart_url).html)
         out.cart_count_after = after
+        if asin not in now_in:
+            # A line tagged with the wrong store lands in the other cart (live, 2026-11-07: Amazon
+            # items tagged Whole Foods went to the main cart). No "before" for that cart: an item
+            # already in it was the human's, and the add page wouldn't have changed that.
+            other = next(s for s, u in CART_URLS.items() if u != cart_url)
+            _, other_in = cart_state(driver.open(CART_URLS[other]).html)
+            if asin in other_in:
+                out.store = other
+                out.outcome = "added"
+                return out
         # Only the ASIN in this vendor's active rows counts: `nav-cart-count` jumped 1 → 4 for one
         # Amazon item while the cart held 8 (live, 2026-11-04).
         extra = sorted(now_in - in_cart - {asin})
