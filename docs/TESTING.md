@@ -288,6 +288,50 @@ CDP), `SMOKE_E2E=1` (a real photo job through R2, the worker and the local VLM),
 (a real tier-1 add of known ASINs, then removed), and M9's deploy health check after every update.
 The first Saturday builds and receipt sweeps are watched by hand (M8 Notes *Not verifiable here*).
 
+## Verification loops (Claude checking its own work)
+
+Two loops for seeing a change working, beyond the tiers above. Neither gates merges.
+
+### Seeded screens: works anywhere, including cloud sessions and CI
+
+- `.claude/launch.json` → **`dev-seeded`** (`pnpm --filter web dev:seeded`): a throwaway
+  `db/dev-seeded.db` with the synthetic seed (the same seed as e2e), `next dev` with
+  `DEV_AUTH_BYPASS=1`, sign-in as the fake `alex@example.com` / `sam@example.com`.
+- `pnpm --filter web shot [paths…]`: Playwright phone screenshots (390×844 @2x) of each path, in
+  light and dark, saved to the gitignored `web/.shots/`. It starts its own seeded server on port
+  3211 unless `--base-url` / `SHOT_BASE_URL` is given (`--email` / `SHOT_EMAIL` picks who signs
+  in). It prints every console error, page error, failed request and HTTP status ≥ 400, and exits
+  1 if there were any. Chromium is Playwright's own, else `/opt/pw-browsers/chromium`, else
+  `PLAYWRIGHT_CHROMIUM_PATH`. The fixed bottom nav is drawn at the bottom of the full-height shot.
+
+### Prod copy: real data, on demand, read-only
+
+The repo is public. **Prod data and prod-copy screenshots never go in commits, PRs, fixtures, CI
+logs or uploaded artifacts**; in chat, report counts only.
+
+- `make prod-copy` (`db/src/prod-copy.ts`) copies production into the gitignored
+  `.scratch/prod-copy.db` (schema, rows, indexes, migration journal) and prints row counts per
+  table. The source connection only ever runs `SELECT`: every other statement is refused before
+  it is sent. Nothing is scheduled; the DB is small, so copy fresh when needed. It prints neither
+  the token nor the database host.
+- Credentials: `PROD_RO_TURSO_URL` + `PROD_RO_TURSO_TOKEN`, a **read-only** token
+  (`turso db tokens create <db> --read-only`). Locally they live in
+  `~/.config/pandabase/prod-ro.env` (outside the repo; `PROD_RO_ENV_FILE` overrides), as
+  `KEY=value` lines. In a cloud session, set both as **environment secrets** and add only the
+  database's exact Turso host to the environment's network allowlist: the host part of
+  `PROD_RO_TURSO_URL` (shaped `<db>-<org>.<region>.turso.io`; `turso db show <db>` prints the
+  URL). The allowlist takes exact hostnames only — a wildcard such as `*.turso.io` is refused.
+  The real host stays in the secret settings, never in the repo. Never the read-write
+  `TURSO_AUTH_TOKEN`.
+- `.claude/launch.json` → **`dev-prod-copy`** (`pnpm --filter web dev:prod-copy`): `next dev` on
+  the copy, signed in through the dev bypass as one real member (the first created, or
+  `PROD_COPY_MEMBER`). It refuses to start unless `TURSO_DATABASE_URL` (default: the copy) is an
+  existing `file:` URL, and blanks the Turso token, Google, R2 and agent/worker secrets (set to
+  `""`, which Next keeps over any `.env` file). Writes made while clicking around land in the
+  copy only.
+- `pnpm --filter web shot --prod-copy [paths…]` screenshots the copy into `web/.shots/prod-copy/`
+  (gitignored). Look at them locally; don't attach them anywhere.
+
 ## Security review (tier A PR, 2026-10-26)
 
 Scope: auth (`withAuth` scopes, token comparison, session + `ALLOWED_EMAILS` + member, dev bypass,

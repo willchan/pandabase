@@ -10,6 +10,9 @@ export default defineConfig([
   globalIgnores([
     ".next/**",
     ".next-e2e/**",
+    ".next-seeded/**",
+    ".next-prod-copy/**",
+    ".shots/**",
     ".next-system/**",
     "playwright-report/**",
     "test-results/**",

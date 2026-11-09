@@ -3,7 +3,7 @@
 	secrets vercel-env up up-local down logs update update-pause update-resume update-status rollback \
 	install-update-timer deploy-test migrations-check install-agent-tools install-agent-skills install-agent-cron \
 	install-chromium install-ollama-env backfill smoke ops-check e2e-system system-lint eval-agent \
-	preview-reset e2e-preview e2e-system-remote-local
+	preview-reset e2e-preview e2e-system-remote-local prod-copy
 
 PY_PROJECTS := worker agent/tools
 
@@ -61,6 +61,11 @@ e2e-system-remote-local:
 eval-agent:
 	cd agent/tools && uv run pytest -c ../../tests/system/pytest.ini -o python_files=eval_*.py -rs \
 	  ../../tests/system
+
+# Production → .scratch/prod-copy.db (gitignored) with a READ-ONLY token; prints row counts only.
+# PROD_RO_TURSO_URL / PROD_RO_TURSO_TOKEN, else ~/.config/pandabase/prod-ro.env (docs/TESTING.md).
+prod-copy:
+	pnpm db:prod-copy
 
 # Everything CI runs.
 check: lint typecheck test py-check system-lint db-check contracts-check ops-check

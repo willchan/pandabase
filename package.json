@@ -22,6 +22,7 @@
     "db:seed": "pnpm --filter @pandabase/db seed",
     "db:reset": "pnpm --filter @pandabase/db reset",
     "db:rebuild-state": "pnpm --filter @pandabase/db rebuild-state",
+    "db:prod-copy": "pnpm --filter @pandabase/db prod-copy",
     "drizzle-kit": "pnpm --filter @pandabase/db exec drizzle-kit"
   },
   "devDependencies": {

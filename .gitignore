@@ -47,6 +47,10 @@ __pycache__/
 # playwright (web e2e)
 .next-e2e/
 .next-system/
+.next-seeded/
+.next-prod-copy/
+# pnpm shot output (web/.shots; prod-copy shots under it never leave the machine)
+.shots/
 playwright-report/
 test-results/
 # Mac Mini ops (make secrets / README): real OpenClaw patches with ids filled in
@@ -55,3 +59,6 @@ test-results/
 
 # Mac Mini updater state (make update: lock, last deploy, rolled-back shas, pause flag)
 /.deploy/
+
+# make prod-copy: the local copy of production (real household data — never commit)
+/.scratch/

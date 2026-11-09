@@ -74,6 +74,11 @@ pnpm --filter web test -- lib/domain   # domain tests + coverage (≥ 95% lines 
 pnpm --filter web test -- app/api lib/repo lib/diagnostics   # API integration tests (in-memory libSQL)
 pnpm --filter web test:e2e   # Playwright: next dev + DEV_AUTH_BYPASS on a fresh db/e2e.db (phone viewport)
 pnpm --filter web test -- app components lib/services lib/auth   # server actions, components, services
+pnpm --filter web dev:seeded   # next dev on a throwaway seeded db (dev sign-in as alex@example.com)
+pnpm --filter web shot / /pantry   # phone screenshots, light + dark → web/.shots; nonzero on console/request errors
+make prod-copy               # prod → .scratch/prod-copy.db, READ-ONLY token, counts only (docs/TESTING.md)
+pnpm --filter web dev:prod-copy   # next dev on the prod copy as a real member (refuses non-file: DBs)
+                             # prod data / prod-copy shots never go in commits, PRs, fixtures or CI logs
 pnpm contracts:gen           # Zod → contracts/openapi.json → worker/agent Pydantic models (commit them)
 make contracts-check         # regenerate + fail if the generated contracts differ from git
 docker build -t pandabase-worker worker   # worker image (CI job worker-image)

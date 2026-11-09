@@ -9,7 +9,14 @@ export default defineConfig({
     include: ["**/*.test.ts", "**/*.test.tsx"],
     // next-auth imports `next/server` without an extension; let Vite resolve it.
     server: { deps: { inline: ["next-auth", "@auth/core"] } },
-    exclude: ["node_modules/**", ".next/**", ".next-e2e/**", "e2e/**"],
+    exclude: [
+      "node_modules/**",
+      ".next/**",
+      ".next-e2e/**",
+      ".next-seeded/**",
+      ".next-prod-copy/**",
+      "e2e/**",
+    ],
     coverage: {
       // Always on: the domain logic must stay ≥ 95% line-covered (PLAN M3).
       enabled: true,

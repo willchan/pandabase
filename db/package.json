@@ -22,7 +22,8 @@
     "seed": "tsx src/seed.ts",
     "reset": "tsx src/reset.ts",
     "rebuild-state": "tsx src/rebuild-state.ts",
-    "migrations-status": "tsx src/migrations-status.ts"
+    "migrations-status": "tsx src/migrations-status.ts",
+    "prod-copy": "tsx src/prod-copy.ts"
   },
   "devDependencies": {
     "@types/node": "^24.19.2",

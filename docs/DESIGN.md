@@ -918,6 +918,7 @@ rejected (≥ 5 answered, < 50% accepted)) and keeps the top 3.
 |---|---|---|---|
 | local | `db/dev.db` (libSQL file; the default when `TURSO_DATABASE_URL` is unset), seeded fake household | `DEV_AUTH_BYPASS` | `pnpm db:reset && pnpm db:seed`, `pnpm dev` |
 | preview | Turso `pandabase-preview` (synthetic data only) | session signed by the preview `AUTH_SECRET`; allowlist = the seed's `@example.com` members | Vercel previews; **own** agent/worker/cron tokens, `AUTH_SECRET`, `ALLOWED_EMAILS` and R2 bucket `pandabase-media-preview` (scoped token), never production's (§10 #49) |
+| prod copy | `.scratch/prod-copy.db` (gitignored file copied by `make prod-copy` with a read-only token, on demand) | `DEV_AUTH_BYPASS` as one real member | `dev-prod-copy` / `shot --prod-copy` for checking changes on real data; refuses non-`file:` URLs, blanks every service secret; never leaves the machine (docs/TESTING.md *Verification loops*) |
 | production | Turso `pandabase` | Google | Vercel; deployed by `deploy.yml` after migrations (see *Continuous deployment*) |
 
 Timestamps stored UTC; `HOUSEHOLD_TZ=America/Los_Angeles` defines "today" and schedules.
