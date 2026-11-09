@@ -9,6 +9,7 @@ import json
 
 from pydantic import BaseModel, ValidationError
 
+from pandabase_worker.config import MAX_OUTPUT_TOKENS
 from pandabase_worker.contracts import MergeSuggestInput, MergeSuggestResult, Suggestion
 from pandabase_worker.jobs import JobFailure, Outcome
 from pandabase_worker.jobs.context import JobContext
@@ -65,6 +66,7 @@ def run(ctx: JobContext) -> Outcome:
         ctx.prompt.system,
         ctx.prompt.render(items=items),
         LlmMerges,
+        max_tokens=MAX_OUTPUT_TOKENS.get("merge_suggest"),
     )
     result = to_result(inf.value, inp)
     return Outcome(

@@ -175,11 +175,16 @@ class Worker:
                 **out.telemetry,
             )
         except ParseFailure as err:
-            error = f"model output invalid after one repair: {err.error}"
+            error = (
+                f"model output invalid: {err.error}"
+                if err.truncated
+                else f"model output invalid after one repair: {err.error}"
+            )
             req = self._failed(job, error, keyframes, err.model, prompt_version, err.raw)
             fields = {**base, "model": err.model, "prompt_version": prompt_version}
             t.emit("vlm_inference", **fields, latency_ms=err.latency_ms, parse_failure=True)
-            t.emit("vlm_parse_failure", **fields, error=err.error[:500])
+            extra = {"truncated": True} if err.truncated else {}
+            t.emit("vlm_parse_failure", **fields, error=err.error[:500], **extra)
         except (JobFailure, MediaError, OllamaError) as err:
             req = self._failed(job, str(err), keyframes, None, prompt_version, None)
         except Exception as err:  # a bug in the worker must not wedge the job until lease expiry
