@@ -27,12 +27,16 @@ class OllamaError(Exception):
 class ParseFailure(Exception):
     """The model's output was not valid JSON for the schema, even after the repair retry."""
 
-    def __init__(self, model: str, error: str, raw: list[str], latency_ms: int) -> None:
+    def __init__(
+        self, model: str, error: str, raw: list[str], latency_ms: int, *, truncated: bool = False
+    ) -> None:
         super().__init__(error)
         self.model = model
         self.error = error
         self.raw = raw
         self.latency_ms = latency_ms
+        # The answer hit the `max_tokens` cap (`done_reason: "length"`): likely a repetition loop.
+        self.truncated = truncated
 
 
 @dataclass
@@ -79,9 +83,12 @@ class OllamaClient:
         user: str,
         schema: type[T],
         images: list[bytes] | None = None,
+        max_tokens: int | None = None,
     ) -> Inference[T]:
         """Ask `model` for JSON matching `schema`; on invalid output, repair once, then raise
-        `ParseFailure`. Temperature 0, `keep_alive` 2m, thinking off."""
+        `ParseFailure`. Temperature 0, `keep_alive` 2m, thinking off. `max_tokens` caps the
+        answer (`num_predict`); an answer cut off at the cap raises `ParseFailure` at once, with
+        `truncated`: a repair turn would replay the runaway answer into the context."""
         user_msg: dict[str, Any] = {"role": "user", "content": user}
         if images:
             user_msg["images"] = [base64.b64encode(i).decode() for i in images]
@@ -90,8 +97,15 @@ class OllamaClient:
         start = self._clock()
         error = ""
         for attempt in range(2):
-            content = self._chat(model, messages, schema.model_json_schema())
+            content, done_reason = self._chat(
+                model, messages, schema.model_json_schema(), max_tokens
+            )
             raw.append(content)
+            if done_reason == "length" and max_tokens is not None:
+                error = (
+                    f"output cut off at the {max_tokens}-token cap (the model was likely looping)"
+                )
+                raise ParseFailure(model, error, raw, self._elapsed(start), truncated=True)
             try:
                 value = schema.model_validate_json(_strip_fences(content))
             except ValidationError as err:
@@ -104,7 +118,17 @@ class OllamaClient:
             ]
         raise ParseFailure(model, error, raw, self._elapsed(start))
 
-    def _chat(self, model: str, messages: list[dict[str, Any]], schema: dict[str, Any]) -> str:
+    def _chat(
+        self,
+        model: str,
+        messages: list[dict[str, Any]],
+        schema: dict[str, Any],
+        max_tokens: int | None,
+    ) -> tuple[str, str | None]:
+        """The reply's text and Ollama's `done_reason` ("stop", or "length" at the cap)."""
+        options: dict[str, Any] = {"temperature": 0, "num_ctx": NUM_CTX}
+        if max_tokens is not None:
+            options["num_predict"] = max_tokens
         body: dict[str, Any] = {
             "model": model,
             "messages": messages,
@@ -112,7 +136,7 @@ class OllamaClient:
             "stream": False,
             "think": False,
             "keep_alive": KEEP_ALIVE,
-            "options": {"temperature": 0, "num_ctx": NUM_CTX},
+            "options": options,
         }
         res = self._post_chat(body)
         if res.status_code == 400 and "thinking" in res.text:
@@ -122,8 +146,13 @@ class OllamaClient:
             res = self._post_chat(body)
         if res.status_code >= 400:
             raise OllamaError(f"ollama {res.status_code}: {res.text[:300]}")
-        content = res.json().get("message", {}).get("content")
-        return content if isinstance(content, str) else ""
+        data = res.json()
+        content = data.get("message", {}).get("content")
+        reason = data.get("done_reason")
+        return (
+            content if isinstance(content, str) else "",
+            reason if isinstance(reason, str) else None,
+        )
 
     def _post_chat(self, body: dict[str, Any]) -> httpx.Response:
         try:

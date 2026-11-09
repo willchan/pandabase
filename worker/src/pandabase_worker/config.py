@@ -14,6 +14,11 @@ DEFAULT_TEXT_MODEL = "qwen3.5:4b"
 # Context window per request: a receipt image + prompt + ~100 lines of JSON fits in 8K tokens,
 # and a small window keeps the KV cache (and so resident memory) small.
 NUM_CTX = 8192
+# Output cap per job type (Ollama `num_predict`; DESIGN §5). With none, an answer stuck in a
+# repetition loop runs until the context fills — ~4 min on the 4B model, the whole timeout. A
+# 40-item merge_suggest answer needs well under 1K tokens. Receipts and trash-cam have no cap yet:
+# a long receipt's JSON can need most of the context.
+MAX_OUTPUT_TOKENS: Mapping[str, int] = {"merge_suggest": 2048}
 # DESIGN §5: images are normalized to ≤ 2048px on the long side before keyframe upload / VLM.
 MAX_IMAGE_PX = 2048
 JPEG_QUALITY = 90
