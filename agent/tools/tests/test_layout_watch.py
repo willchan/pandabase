@@ -136,12 +136,17 @@ def test_probe_reports_a_missing_whole_foods_add_button(no_sleep: Callable[[floa
 
 
 def test_probe_off_the_product_page_is_a_layout_problem(no_sleep: Callable[[float], None]) -> None:
-    # e.g. a bot check or a redirect: whatever page we land on, it isn't /dp/<ASIN>.
-    captcha = "https://www.amazon.com/errors/validateCaptcha"
-    driver = _pages(amazon=(captcha, "product_buy_box.html"))
+    # A redirect: whatever page we land on, it isn't /dp/<ASIN>.
+    driver = _pages(amazon=("https://www.amazon.com/gp/help/x", "product_buy_box.html"))
     res = probe(driver, PROBES, Telemetry(), no_sleep)
     assert res["checks"][0]["reason"] == "not_product_page"
     assert res["status"] == "layout_changed"
+    # Amazon's bot check is named as such (guard: `challenge`).
+    captcha = "https://www.amazon.com/errors/validateCaptcha"
+    res = probe(_pages(amazon=(captcha, "product_buy_box.html")), PROBES, Telemetry(), no_sleep)
+    assert res["checks"][0]["reason"] == "amazon_challenge"
+    assert res["status"] == "amazon_challenge"
+    assert "bot check" in probe_reply(res)
 
 
 def test_probe_signed_out_says_sign_in_not_layout(no_sleep: Callable[[float], None]) -> None:

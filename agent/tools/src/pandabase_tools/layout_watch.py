@@ -20,7 +20,7 @@ from typing import TYPE_CHECKING, Any
 from urllib.parse import urlsplit
 
 from . import cart_add, dom, guard
-from .browser import Driver, NotSignedIn
+from .browser import Challenged, Driver, NotSignedIn
 from .config import CartConfig
 from .telemetry import Telemetry
 
@@ -69,6 +69,8 @@ def _check(driver: Driver, store: str, asin: str) -> dict[str, Any]:
             out["reason"] = "no_add_form"
         else:
             out["found"] = True
+    except Challenged:
+        out["reason"] = "amazon_challenge"  # bot check: a person clears it in the profile
     except NotSignedIn:
         out["reason"] = "not_signed_in"
     except guard.UnsafeUrl as err:
@@ -100,6 +102,8 @@ def probe(
         status = "ok"
     elif any(c["reason"] == "not_signed_in" for c in bad):
         status = "not_signed_in"
+    elif any(c["reason"] == "amazon_challenge" for c in bad):
+        status = "amazon_challenge"
     elif any(c["reason"] in ("no_add_form", "not_product_page") for c in bad):
         status = "layout_changed"
     else:
@@ -120,6 +124,11 @@ def probe_reply(res: Mapping[str, Any]) -> str:
         return (
             "⚠️ Weekly Amazon check: the cart profile is signed out of Amazon — "
             "sign in before Saturday's cart."
+        )
+    if status == "amazon_challenge":
+        return (
+            "⚠️ Weekly Amazon check: Amazon showed a bot check in the cart profile — open that "
+            "browser profile and clear it before Saturday's cart."
         )
     bad = [c for c in res["checks"] if not c["found"]]
     where = " and ".join(f"{STORE_NAMES[c['store']]} ({c['reason']})" for c in bad)

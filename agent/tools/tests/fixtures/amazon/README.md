@@ -34,3 +34,6 @@ form's `action`, `ASIN.n` inputs, and visible text.
 | `order_details_arriving.html` | order still in flight |
 | `order_details_layout_changed.html` | final order with zero ASIN links (agent fallback) |
 | `product_jsonld.html`, `product_offscreen.html`, `product_no_price.html` | price checks |
+| `order_details_live_instore_purchased_at.html` | live Whole Foods in-store purchase (`/fopo/`): "Purchased at <store>" / "Purchased on <date>", no "in store" wording |
+| `order_details_live_pickup_undated.html` | live Whole Foods pickup (`/uff/`) a year on: "Ordered on", no "Picked up" anywhere, hidden alert boilerplate ("could not be cancelled", "in process") |
+| `order_details_live_returned.html` | Amazon order returned in full: "Refund Total" equal to the grand total, "Return complete" |

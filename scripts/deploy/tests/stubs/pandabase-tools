@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # pandabase-tools stub: the worker reports the image tag compose runs (PANDABASE_WORKER_TAG in
 # the repo .env) unless that sha is listed in $STUB/broken, in which case the last healthy one.
+# `receipts sweep` replays $STUB/sweeps.
 printf 'tools %s\n' "$*" >>"$STUB/calls"
 root="$(cd "$(dirname "$STUB")/root" && pwd)"
 case "$1 $2 $3" in
@@ -15,5 +16,11 @@ case "$1 $2 $3" in
     ;;
   "api get /api/grocery/cycle/current") [ -f "$STUB/api-down" ] && { echo '{"error":"invalid token"}'; exit 1; }; echo '{"cycle":null}' ;;
   "api post /api/telemetry") printf '%s\n' "$5" >>"$STUB/telemetry" ;;
+  "api post /api/catalog/merge-suggestions/run") echo '{"created":true}' ;;
+  "receipts sweep --member")
+    # One sweep result per line of $STUB/sweeps, in order (backfill.bats).
+    head -n 1 "$STUB/sweeps"
+    tail -n +2 "$STUB/sweeps" >"$STUB/sweeps.rest" && mv "$STUB/sweeps.rest" "$STUB/sweeps"
+    ;;
   *) echo "tools stub: $*" >&2; exit 2 ;;
 esac

@@ -45,10 +45,18 @@ SIGNIN_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"^/ap/(?:signin|mfa|cvf|challenge)"),
     re.compile(r"^/ax/claim"),
 )
+# Amazon's bot check (seen 2026-11 after many automated page loads). A human must clear it, and
+# loading more pages only makes it worse: every tool stops at once.
+CHALLENGE_PATTERNS: tuple[re.Pattern[str], ...] = (
+    re.compile(r"^/checkpoint"),
+    re.compile(r"^/errors/validatecaptcha"),
+)
 
 
 class UnsafeUrl(Exception):
-    """A navigation the tools must never make. `reason` is `checkout`, `signin` or `host`."""
+    """A navigation the tools must never make.
+
+    `reason` is `checkout`, `signin`, `challenge` or `host`."""
 
     def __init__(self, url: str, reason: str) -> None:
         super().__init__(f"refused {reason} URL: {url}")
@@ -71,6 +79,8 @@ def classify_url(url: str) -> str | None:
         return "checkout"
     if any(p.search(path) for p in SIGNIN_PATTERNS):
         return "signin"
+    if any(p.search(path) for p in CHALLENGE_PATTERNS):
+        return "challenge"
     return None
 
 
