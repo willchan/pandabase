@@ -182,7 +182,13 @@ export interface ExistingSuggestion {
 }
 
 export type DropReason =
-  "self" | "unknown" | "merged" | "both_confirmed" | "low_confidence" | "duplicate";
+  | "self"
+  | "unknown"
+  | "merged"
+  | "both_confirmed"
+  | "low_confidence"
+  | "no_shared_word"
+  | "duplicate";
 
 export interface SuggestionReviews {
   reviews: (ReturnType<typeof newReview> & {
@@ -203,12 +209,42 @@ const pairKey = (a: string, b: string) => (a < b ? `${a}|${b}` : `${b}|${a}`);
  * The unverified side is the one merged away, and each item gets at most one suggestion (the most
  * confident).
  */
+const nameTokens = (name: string): string[] =>
+  name
+    .toLowerCase()
+    .replace(/['’®™]/g, "")
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean)
+    .map((t) => (t.length > 3 && t.endsWith("s") && !t.endsWith("ss") ? t.slice(0, -1) : t));
+
+/**
+ * Whether two item names have a meaningful word in common: once the words both names start with
+ * (usually the brand: "OXO Good Grips …") are set aside, a word that isn't in `genericWords` or a
+ * number. One name being a prefix of the other ("Mary's Chicken" / "Mary's Chicken Whole
+ * Chicken") counts. The local model's confidence alone let "jar opener" / "dish brush" through.
+ */
+export function sharesMeaningfulWord(
+  a: string,
+  b: string,
+  genericWords: readonly string[],
+): boolean {
+  const ta = nameTokens(a);
+  const tb = nameTokens(b);
+  let k = 0;
+  while (k < ta.length && k < tb.length && ta[k] === tb[k]) k++;
+  if (k > 0 && (k === ta.length || k === tb.length)) return true;
+  const generic = new Set(genericWords.map((w) => nameTokens(w)[0] ?? w));
+  const meaningful = (t: string) => !generic.has(t) && !/^\d/.test(t) && t.length > 1;
+  const rest = new Set(ta.slice(k).filter(meaningful));
+  return tb.slice(k).some((t) => meaningful(t) && rest.has(t));
+}
+
 export function mergeSuggestionReviews(
   input: {
     suggestions: readonly MergeSuggestion[];
     items: ReadonlyMap<
       string,
-      { trust: "confirmed" | "unverified"; mergedIntoItemId: string | null }
+      { trust: "confirmed" | "unverified"; mergedIntoItemId: string | null; name: string }
     >;
     existing: readonly ExistingSuggestion[];
     now: string;
@@ -221,6 +257,7 @@ export function mergeSuggestionReviews(
     merged: 0,
     both_confirmed: 0,
     low_confidence: 0,
+    no_shared_word: 0,
     duplicate: 0,
   };
   const root = (id: string): string | null => {
@@ -277,6 +314,13 @@ export function mergeSuggestionReviews(
     }
     if (s.confidence < config.mergeSuggest.minConfidence) {
       dropped.low_confidence++;
+      continue;
+    }
+    if (
+      s.confidence < config.mergeSuggest.unsharedMinConfidence &&
+      !sharesMeaningfulWord(src.name, target.name, config.mergeSuggest.genericWords)
+    ) {
+      dropped.no_shared_word++;
       continue;
     }
     // Keep the confirmed item; the unverified one folds into it.

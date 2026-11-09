@@ -170,7 +170,12 @@ export async function applyMergeSuggestions(
   const items = new Map(
     (
       await tx
-        .select({ id: item.id, trust: item.trust, mergedIntoItemId: item.mergedIntoItemId })
+        .select({
+          id: item.id,
+          trust: item.trust,
+          mergedIntoItemId: item.mergedIntoItemId,
+          name: item.canonicalName,
+        })
         .from(item)
     ).map((i) => [i.id, i]),
   );

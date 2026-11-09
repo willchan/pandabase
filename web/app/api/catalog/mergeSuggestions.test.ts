@@ -232,7 +232,8 @@ describe("suggested merges", () => {
         title: `Synthetic Snack Bar Flavor ${i}`,
       })),
     );
-    expect((await cron()).body.merge_suggest_jobs).toBe(1);
+    // A run (its job count depends on mergeSuggest.batchSize).
+    expect((await cron()).body.merge_suggest_jobs).toBeGreaterThan(0);
     // Same day: the job is still queued → nothing new.
     expect((await cron()).body.merge_suggest_jobs).toBe(0);
     // The worker finishes it; more items arrive; a week hasn't passed → nothing.
@@ -250,7 +251,7 @@ describe("suggested merges", () => {
     );
     expect((await cron()).body.merge_suggest_jobs).toBe(0);
     h.advance(6 * DAY);
-    expect((await cron()).body.merge_suggest_jobs).toBe(1);
+    expect((await cron()).body.merge_suggest_jobs).toBeGreaterThan(0);
     expect((await metrics("merge_suggest_requested")).map((p) => p.trigger)).toEqual([
       "cron",
       "cron",
