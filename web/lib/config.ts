@@ -122,8 +122,11 @@ export const DEFAULT_CONFIG = {
   },
   /** §4.5 Suggested merges (`merge_suggest` jobs over unverified items). */
   mergeSuggest: {
-    /** Most items sent in one job (clamped to `MERGE_SUGGEST_ITEMS`). */
-    batchSize: 150,
+    /**
+     * Most items sent in one job (clamped to `MERGE_SUGGEST_ITEMS`). Sized for the worker's 8k
+     * context: 150 items with aliases is ~10k prompt tokens, which timed out (2026-11-09).
+     */
+    batchSize: 40,
     /** When the catalog doesn't fit one job: confirmed items sent along with each candidate. */
     targetsPerItem: 8,
     /** Product titles / receipt texts sent per item as `aliases`. */
@@ -134,6 +137,46 @@ export const DEFAULT_CONFIG = {
     cadenceDays: 7,
     /** Suggestions below this confidence don't become reviews. */
     minConfidence: 0.5,
+    /**
+     * A pair whose names share no meaningful word (after the brand both start with and
+     * `genericWords`) needs at least this confidence ("kleenex" / "facial tissues").
+     */
+    unsharedMinConfidence: 0.95,
+    /** Words that don't make two names "share a word". */
+    genericWords: [
+      "organic",
+      "natural",
+      "fresh",
+      "family",
+      "size",
+      "pack",
+      "count",
+      "value",
+      "everyday",
+      "classic",
+      "original",
+      "premium",
+      "style",
+      "brand",
+      "new",
+      "plus",
+      "mini",
+      "large",
+      "small",
+      "extra",
+      "jumbo",
+      "whole",
+      "free",
+      "the",
+      "and",
+      "of",
+      "for",
+      "with",
+      "a",
+      "an",
+      "in",
+      "by",
+    ] as string[],
   },
   /** §5 step 5 Trash Cam: a resolved detection at or above this confidence is applied. */
   trashCam: { applyConfidence: 0.8 },

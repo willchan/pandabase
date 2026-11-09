@@ -535,15 +535,21 @@ Implementation notes (`web/lib/domain/receipts.ts`):
     Both queue nothing while a merge_suggest job is still queued or claimed.
   - *Batches* (`planMergeSuggestBatches`): candidates = unverified, unmerged items; targets =
     confirmed, unmerged items; aliases = product titles + receipt texts (≤ `aliasesPerItem`). If
-    everything fits `mergeSuggest.batchSize` (clamped to the contract's 2–150), one job gets it all;
+    everything fits `mergeSuggest.batchSize` (40; clamped to the contract's 2–150), one job gets it all;
     otherwise each candidate travels with its `targetsPerItem` closest targets (token-set ratio on
     names) and candidates are grouped by category (their own, else their closest target's), whole
-    groups packed per job, so look-alike new items meet. Merged items are never sent.
+    groups packed per job, so look-alike new items meet. Merged items are never sent. 40 keeps a
+    job well inside the worker's 8k text-model context: 150 items with an alias each measured
+    ~10k prompt tokens on 2026-11-09, ran past the 240 s Ollama timeout, and when it did finish
+    returned junk (dozens of 0.9 pairs, invented ids).
   - *Results* (`mergeSuggestionReviews`): one `merge_suggestion` review per kept suggestion (30d,
     default `none`, `cleanup` urgency). Dropped: unknown ids, self-pairs, a source merged meanwhile (a
     merged target is followed to where it went), two confirmed items, confidence below
-    `minConfidence` (0.5), and pairs (either way round) that already have a pending or dismissed
-    suggestion. The unverified side is the one merged away; one suggestion per source item (most
+    `minConfidence` (0.5), pairs whose names share no meaningful word unless the confidence is ≥
+    `unsharedMinConfidence` (0.95; `sharesMeaningfulWord`: the words both names start with — usually
+    the brand — and `genericWords` such as "organic" are set aside, plurals folded, one name a
+    prefix of the other counts), and pairs (either way round) that already have a pending or
+    dismissed suggestion. The unverified side is the one merged away; one suggestion per source item (most
     confident). An expired suggestion may be asked again.
 - **Resetting the digital import** (`pnpm db:reset-imports [--apply]`, `db/src/reset-imports.ts`;
   Bootstrap action `reset-imports`): ingest dedupes on the order id, so a parser fix can't correct
@@ -1198,3 +1204,4 @@ docker-compose.yml (+ docker-compose.build.yml), Makefile, CLAUDE.md, README.md,
 | 61 | A velocity item that ran out more than 60 days ago and wasn't bought again is *lapsed*: left out of the cart plan and the Friday check-in until it's bought or added again | The 12-month receipt import (live, Nov 2026) filled the first real cart with items last bought 5–11 months earlier ("runs out 315 days ago"): an EMA learned from two purchases a year ago never expires. 60 days is past any weekly item's cycle and still keeps slow consumables (air filters, brush heads) whose runout is recent |
 | 62 | A buggy digital import is undone by a one-off reset (delete the import's footprint, then re-run the backfill), not by re-ingesting or patching rows | Ingest dedupes on the order id, so a re-import can't correct rows; patching by hand would have to redo matching, EMA learning and reviews. The reset refuses when it finds human-entered data, so nothing a person did is lost silently |
 | 63 | Auto-created item names drop a configured list of store brands, not any first segment that looks like a brand | Whole Foods house-brand titles lead with the brand ("365 By Whole Foods Market, Organic Peeled Garlic"), which named items after the brand; a generic "brand, product" rule misreads titles like "Annie's Bunny Grahams, Chocolate Chip". Other brands' names are left to merge suggestions and people |
+| 64 | A merge suggestion needs a meaningful word shared by the two names (brand prefix and generic words aside) unless the model is ≥ 0.95 sure; batches are 40 items | The 4B text model's confidence isn't calibrated: it paired floss with cutting-board oil, a jar opener with a dish brush (both "OXO Good Grips") and pant liners with dish soap at 0.7–0.9, and a stricter prompt traded those for new wrong pairs (bananas with apples, and a pair primed by its own example). A deterministic check drops all of those while keeping the right pairs it found; true synonyms with no word in common ("kleenex" / "facial tissues") need ≥ 0.95. 150-item batches overflowed the 8k context and timed out |

@@ -329,6 +329,7 @@ export async function renderWeekly(
   const mergeDropped = [
     "duplicate",
     "low_confidence",
+    "no_shared_word",
     "merged",
     "self",
     "unknown",
@@ -650,12 +651,14 @@ export async function renderWeekly(
       text: `Weekly add-button check failed: ${s(t.p.store) ?? "?"} ${s(t.p.asin) ?? ""} (${s(t.p.reason) ?? "not found"}).`,
     });
   }
-  extracts["cart_injection.jsonl"] = [...cartLines, ...toolErrors, ...probes, ...layoutAlerts].map((t) => ({
-    at: t.at,
-    metric: t.metric,
-    source: t.source,
-    ...t.p,
-  }));
+  extracts["cart_injection.jsonl"] = [...cartLines, ...toolErrors, ...probes, ...layoutAlerts].map(
+    (t) => ({
+      at: t.at,
+      metric: t.metric,
+      source: t.source,
+      ...t.p,
+    }),
+  );
   const outcomeCount = (o: string) => cartLines.filter((t) => t.p.outcome === o).length;
   const tier1 = outcomeCount("tier1");
   const failedCart = cartLines.filter((t) => t.p.outcome === "failed");
