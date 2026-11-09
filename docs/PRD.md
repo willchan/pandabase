@@ -63,7 +63,9 @@ A Discord **thread per cycle** in `#pandabase`, acting as a running grocery list
   to find, what failed, with cart links. At 10:30 the agent searches for what's left and posts
   what it added by search. The nudge and the build run without the language model, so they can't
   be skipped or made up.
-  Builds from predictions alone if nobody replied. If most of the lines it tried (and at least
+  Builds from predictions alone if nobody replied. Something we ran out of more than two months
+  ago and never bought again is left out (we stopped buying it); adding it to the list brings it
+  back. If most of the lines it tried (and at least
   two) fail because the product page wasn't what the tools expect, it also posts one ⚠️ to the
   ops channel: Amazon's layout probably changed.
 - **Friday afternoon add-button check:** before the build, one Amazon and one Whole Foods product

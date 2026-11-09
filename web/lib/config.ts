@@ -23,6 +23,12 @@ export const DEFAULT_CONFIG = {
 
   /** §4.2 / §4.3 `runout ≤ today + lowWithinDays` → low / in the cart plan. */
   lowWithinDays: 3,
+  /**
+   * §4.3 Lapsed: a velocity item that ran out more than this many days ago and was never bought
+   * again isn't planned or put on the Friday check-in (the household stopped buying it, or buys
+   * it somewhere we don't see). It's planned again once bought or added to the list.
+   */
+  lapsedAfterDays: 60,
   /** §4.2 Overbuy: stock on hand at acquisition would have lasted at least this long. */
   overbuyDaysOfStock: 14,
   /** §4.2 Overbuy for static items: `on_hand_before > reorder_threshold × this`. */
