@@ -39,3 +39,6 @@
 ## cart_injection.jsonl
 
 ## ux.jsonl
+
+## data_quality.jsonl
+{"check":"store_split","lines":23,"by_store":{"wholefoods":22,"amazon":1},"top_share":0.957,"flagged":true}

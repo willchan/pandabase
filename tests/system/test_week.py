@@ -626,7 +626,15 @@ def test_16_weekly_diagnostics(stack: Stack) -> None:
     root = stack.tmp / "diagnostics"
     assert (root / f"{week}.md").exists()
     names = {p.name for p in (root / week).iterdir()}
-    extracts = ("velocity", "receipt_lines", "vlm", "product_choice", "cart_injection", "ux")
+    extracts = (
+        "velocity",
+        "receipt_lines",
+        "vlm",
+        "product_choice",
+        "cart_injection",
+        "ux",
+        "data_quality",
+    )
     assert names == {f"{n}.jsonl" for n in extracts}
     # This week (the default is the last complete one) shows what the run just did.
     from datetime import datetime

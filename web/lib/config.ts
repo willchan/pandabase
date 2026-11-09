@@ -188,6 +188,31 @@ export const DEFAULT_CONFIG = {
    * vlm.jsonl cut to `rawExcerptChars` (enough to see a repetition loop). */
   diagnostics: { slowRouteMs: 1000, workerGapMinutes: 30, rawExcerptChars: 2000 },
 
+  /**
+   * §7 data-quality checks (weekly report §3). A week's receipt lines with at least
+   * `storeSplitMinLines` lines, `storeSplitShare` or more of them from one store, are flagged (an
+   * importer that tags every order with one store looks like this). Item names containing an
+   * `adLikeNames` phrase (case-insensitive) are flagged as page furniture imported as groceries.
+   * Planned items whose runout is more than `lapsedAfterDays` in the past are flagged too.
+   */
+  dataQuality: {
+    storeSplitShare: 0.95,
+    storeSplitMinLines: 20,
+    adLikeNames: [
+      "business card",
+      "credit card",
+      "gift card",
+      "purchase subscription",
+      "subscribe & save",
+      "prime membership",
+      "free trial",
+      "apply now",
+      "learn more",
+      "shop now",
+      "sign in",
+    ] as string[],
+  },
+
   /** §4.6 `impact_score` weights. */
   impact: { inCartPlan: 10, inPleaseCheck: 3, otherwise: 1 },
 

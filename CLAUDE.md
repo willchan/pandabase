@@ -80,6 +80,7 @@ pnpm --filter web dev:seeded   # next dev on a throwaway seeded db (dev sign-in 
 pnpm --filter web shot / /pantry   # phone screenshots, light + dark → web/.shots; nonzero on console/request errors
 make prod-copy               # prod → .scratch/prod-copy.db, READ-ONLY token, counts only (docs/TESTING.md)
 pnpm --filter web dev:prod-copy   # next dev on the prod copy as a real member (refuses non-file: DBs)
+pnpm --filter web data-quality   # weekly data-quality checks on the prod copy: counts only
                              # prod data / prod-copy shots never go in commits, PRs, fixtures or CI logs
 pnpm contracts:gen           # Zod → contracts/openapi.json → worker/agent Pydantic models (commit them)
 make contracts-check         # regenerate + fail if the generated contracts differ from git

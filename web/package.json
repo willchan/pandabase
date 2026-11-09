@@ -13,7 +13,8 @@
     "test:e2e": "playwright test",
     "dev:seeded": "tsx scripts/dev-server.ts --mode seeded",
     "dev:prod-copy": "tsx scripts/dev-server.ts --mode prod-copy",
-    "shot": "tsx scripts/shot.ts"
+    "shot": "tsx scripts/shot.ts",
+    "data-quality": "tsx scripts/data-quality.ts"
   },
   "dependencies": {
     "@libsql/client": "0.18.0",
