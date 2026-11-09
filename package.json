@@ -18,6 +18,7 @@
     "db:migrate:prod": "pnpm --filter @pandabase/db migrate:prod",
     "db:migrations-status": "pnpm --filter @pandabase/db migrations-status",
     "db:add-member": "pnpm --filter @pandabase/db add-member",
+    "db:reset-imports": "pnpm --filter @pandabase/db reset-imports",
     "db:seed": "pnpm --filter @pandabase/db seed",
     "db:reset": "pnpm --filter @pandabase/db reset",
     "db:rebuild-state": "pnpm --filter @pandabase/db rebuild-state",

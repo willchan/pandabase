@@ -1,9 +1,10 @@
 name: Bootstrap
 
-# First-run database steps without a terminal (docs/SETUP-CLOUD.md): migrate a Turso database,
-# or add / update a household member (`pnpm db:add-member`), using the chosen GitHub
-# environment's TURSO_* secrets. Run it from GitHub (web or app): Actions → Bootstrap → Run workflow.
-# Both actions are idempotent. Inputs are validated by scripts/deploy/bootstrap.sh (dry run:
+# Database steps without a terminal (docs/SETUP-CLOUD.md): migrate a Turso database, add / update
+# a household member (`pnpm db:add-member`), or reset the digital receipt import
+# (`pnpm db:reset-imports`, DESIGN §4.5), using the chosen GitHub environment's TURSO_* secrets.
+# Run it from GitHub (web or app): Actions → Bootstrap → Run workflow. Every action is idempotent;
+# reset-imports only counts unless `apply` is ticked, and prints counts only (never names). Inputs are validated by scripts/deploy/bootstrap.sh (dry run:
 # validate only). This repo is public, so its run logs are too: no email is ever an input (the
 # member is picked by position in the environment's ALLOWED_EMAILS secret), and the Discord id is
 # masked before any step's env could print it.
@@ -12,9 +13,9 @@ on:
   workflow_dispatch:
     inputs:
       action:
-        description: "migrate = create/update tables; add-member = add or update one member"
+        description: "migrate = create/update tables; add-member = add or update one member; reset-imports = undo the Amazon receipt import"
         type: choice
-        options: [migrate, add-member]
+        options: [migrate, add-member, reset-imports]
         default: migrate
       target:
         description: "Which database (GitHub environment)"
@@ -42,6 +43,10 @@ on:
         default: keep
       cart:
         description: "add-member: this member's Amazon account fills the cart"
+        type: boolean
+        default: false
+      apply:
+        description: "reset-imports: really delete (unticked = count only)"
         type: boolean
         default: false
       dry_run:
@@ -84,6 +89,7 @@ jobs:
           MEMBER_PROFILE: ${{ inputs.profile }}
           MEMBER_SWEEP: ${{ inputs.sweep }}
           MEMBER_CART: ${{ inputs.cart }}
+          RESET_APPLY: ${{ inputs.apply }}
       - name: Environment is configured
         if: ${{ !inputs.dry_run }}
         run: scripts/deploy/require-env.sh "$TARGET" TURSO_DATABASE_URL TURSO_AUTH_TOKEN
@@ -113,5 +119,6 @@ jobs:
           MEMBER_PROFILE: ${{ inputs.profile }}
           MEMBER_SWEEP: ${{ inputs.sweep }}
           MEMBER_CART: ${{ inputs.cart }}
+          RESET_APPLY: ${{ inputs.apply }}
           TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
           TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}

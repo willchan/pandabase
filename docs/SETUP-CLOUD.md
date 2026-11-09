@@ -434,6 +434,18 @@ are inputs, which GitHub may show on the run's page; Discord ids are
 already visible to anyone in your server, but use a first name, not a
 full name.
 
+### Resetting the Amazon receipt import
+
+If a receipt import went wrong (wrong store, junk lines), action
+`reset-imports` removes everything that import created so the backfill can
+run again. Pause the nightly receipt sweep first. Run it with **apply**
+unticked to see the counts; tick **apply** to delete. It refuses, and
+deletes nothing, if anyone has answered a review about those receipts or
+entered counts for those items; the run's summary lists what it found.
+Then run `make backfill MEMBER=…` on the Mac Mini (after moving
+`~/.pandabase/state/receipts-<member>.json` aside) and turn the sweep back
+on.
+
 ### Finding a Discord user id
 
 1. Discord app → your avatar (bottom right) → **Settings** (gear) →
