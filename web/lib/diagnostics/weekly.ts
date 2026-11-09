@@ -424,6 +424,7 @@ export async function renderWeekly(
       attempts: j.attempts,
       error: j.error,
       keyframe_r2_keys: j.keyframeR2Keys ?? [],
+      ...(j.status === "failed" ? rawExcerpt(j.rawModelResponse, config) : {}),
     })),
   ];
   const latencies = metric("vlm_inference")
@@ -432,6 +433,8 @@ export async function renderWeekly(
   const parseFailures = vlm.filter(
     (t) => t.metric === "vlm_parse_failure" || t.p.parse_failure === true,
   ).length;
+  // Answers the worker cut off at its output cap (`MAX_OUTPUT_TOKENS`): likely repetition loops.
+  const cutOff = vlm.filter((t) => t.metric === "vlm_parse_failure" && t.p.truncated === true).length;
   const totalsFailed =
     metric("job_finished").filter((t) => t.p.workerTotalsCheck === "fail").length +
     metric("vlm_inference").filter((t) => t.p.totals_check === "fail").length;
@@ -508,6 +511,11 @@ export async function renderWeekly(
     });
   if (totalsFailed > 0)
     findings.push({ score: 3, text: `${totalsFailed} paper receipt(s) failed the totals check.` });
+  if (cutOff)
+    findings.push({
+      score: 2,
+      text: `${cutOff} model answer(s) hit the length cap — likely repetition loops; read \`raw_excerpt\` in vlm.jsonl.`,
+    });
   const failedJobs = jobsDone.filter((j) => j.status === "failed");
   if (failedJobs.length)
     findings.push({ score: 2, text: `${failedJobs.length} media job(s) failed.` });
@@ -515,7 +523,7 @@ export async function renderWeekly(
     "4. VLM",
     [
       `Inference latency p50 / p95: ${latencies.length ? `${num(percentile(latencies, 50), 0)} ms / ${num(percentile(latencies, 95), 0)} ms` : "–"} (${latencies.length} calls). ` +
-        `Parse failures: ${parseFailures}. Totals-check failures: ${totalsFailed}. Labels written: ${labels.length}.`,
+        `Parse failures: ${parseFailures}${cutOff ? ` (${cutOff} cut off at the length cap)` : ""}. Totals-check failures: ${totalsFailed}. Labels written: ${labels.length}.`,
       "",
       table(["Model × prompt", "Jobs", "Failed", "Human-correction rate"], modelRows),
       "",
@@ -952,5 +960,17 @@ export async function renderWeekly(
       name,
       jsonl: rows.map((r) => JSON.stringify(r)).join("\n") + (rows.length ? "\n" : ""),
     })),
+  };
+}
+
+/** The last kept model answer of a failed job, cut to `diagnostics.rawExcerptChars`. */
+function rawExcerpt(raw: unknown, config: Config): { raw_excerpt?: string; raw_chars?: number } {
+  const responses = asRecord(raw).responses;
+  const last = Array.isArray(responses) ? responses.at(-1) : undefined;
+  if (typeof last !== "string" || last === "") return {};
+  const max = config.diagnostics.rawExcerptChars;
+  return {
+    raw_excerpt: last.length > max ? `${last.slice(0, max)}…` : last,
+    raw_chars: last.length,
   };
 }
