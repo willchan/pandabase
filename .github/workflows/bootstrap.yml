@@ -1,21 +1,22 @@
 name: Bootstrap
 
 # Database steps without a terminal (docs/SETUP-CLOUD.md): migrate a Turso database, add / update
-# a household member (`pnpm db:add-member`), or reset the digital receipt import
-# (`pnpm db:reset-imports`, DESIGN §4.5), using the chosen GitHub environment's TURSO_* secrets.
-# Run it from GitHub (web or app): Actions → Bootstrap → Run workflow. Every action is idempotent;
-# reset-imports only counts unless `apply` is ticked, and prints counts only (never names). Inputs are validated by scripts/deploy/bootstrap.sh (dry run:
-# validate only). This repo is public, so its run logs are too: no email is ever an input (the
-# member is picked by position in the environment's ALLOWED_EMAILS secret), and the Discord id is
-# masked before any step's env could print it.
+# a household member (`pnpm db:add-member`), reset the digital receipt import
+# (`pnpm db:reset-imports`, DESIGN §4.5) or re-name brand-named items (`pnpm db:rename-items`),
+# using the chosen GitHub environment's TURSO_* secrets. Run it from GitHub (web or app):
+# Actions → Bootstrap → Run workflow. Every action is idempotent; reset-imports and rename-items
+# only count unless `apply` is ticked, and print counts only (never names). Inputs are validated
+# by scripts/deploy/bootstrap.sh (dry run: validate only). This repo is public, so its run logs
+# are too: no email is ever an input (the member is picked by position in the environment's
+# ALLOWED_EMAILS secret), and the Discord id is masked before any step's env could print it.
 
 on:
   workflow_dispatch:
     inputs:
       action:
-        description: "migrate = create/update tables; add-member = add or update one member; reset-imports = undo the Amazon receipt import"
+        description: "migrate = create/update tables; add-member = add or update one member; reset-imports = undo the Amazon receipt import; rename-items = re-name brand-named items"
         type: choice
-        options: [migrate, add-member, reset-imports]
+        options: [migrate, add-member, reset-imports, rename-items]
         default: migrate
       target:
         description: "Which database (GitHub environment)"
@@ -46,7 +47,7 @@ on:
         type: boolean
         default: false
       apply:
-        description: "reset-imports: really delete (unticked = count only)"
+        description: "reset-imports / rename-items: really change (unticked = count only)"
         type: boolean
         default: false
       dry_run:
