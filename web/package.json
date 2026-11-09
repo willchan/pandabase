@@ -10,7 +10,10 @@
     "lint": "eslint .",
     "typecheck": "next typegen && tsc --noEmit",
     "test": "vitest run",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "dev:seeded": "tsx scripts/dev-server.ts --mode seeded",
+    "dev:prod-copy": "tsx scripts/dev-server.ts --mode prod-copy",
+    "shot": "tsx scripts/shot.ts"
   },
   "dependencies": {
     "@libsql/client": "0.18.0",
