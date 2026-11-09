@@ -748,8 +748,12 @@ JSON on stdout; exit 0 ok, 1 error, 2 usage, 3 profile locked, 4 refused URL):
   in-store), extract lines from `/dp/` and `/gp/product/` links (block = widest ancestor
   mentioning only that ASIN; title, `Qty`/`N of`, `$` price; `<main>` only, recommendation
   sections skipped), date at household-local noon, and ingest with
-  `external_order_id` dedupe. In-flight orders wait for the next sweep; cancelled ones are
-  skipped. Zero ASINs on a final order → `needs_agent_extraction` with page text, and
+  `external_order_id` dedupe. Amazon's page header and footer (`header`/`footer`/`nav`, ids
+  `navbar`, `nav-…`, `navFooter`, `rhf`) are dropped first: live order pages have no `<main>`,
+  and the chrome names "Whole Foods Market" (store links, the delivery-location badge) and links
+  products ("Amazon Business Card"). The vendor is `wholefoods` when the remaining page names
+  Whole Foods, else `amazon`. In-flight orders wait for the next sweep; cancelled ones are
+  skipped ("could not be cancelled" is not a cancellation). Zero ASINs on a final order → `needs_agent_extraction` with page text, and
   `selector_error`; the skill ingests its own extraction with `receipts ingest`.
 - `photos.py` (`photo submit`) — classify (caption keywords when unambiguous → the local image
   description → default `paper_receipt`), presigned upload, `POST /api/jobs`;

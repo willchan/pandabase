@@ -320,3 +320,38 @@ def test_transient_api_error_retries_with_same_key(tmp_path: Path) -> None:
     ]
     assert len(keys) == 2 and keys[0] == keys[1]
     assert "114-0000004-0000004" in server.ingested
+
+
+# --- Live order pages (2026-11-08): no <main>, Amazon's header and footer around the order -----
+# Every Amazon order was ingested as Whole Foods (the header's delivery-location badge and store
+# links say "Whole Foods Market"), the footer's "Amazon Business Card" link was a line on every
+# order, and a Whole Foods pickup saying "Your order could not be cancelled" read as cancelled, so
+# the sweep skipped it. Synthetic pages with the live structure.
+
+
+def test_live_amazon_order_ignores_the_page_header_and_footer() -> None:
+    o = parse("order_details_live_delivery.html", "114-0000006-0000006")
+    assert (o.status, o.fulfillment, o.vendor) == ("final", "delivery", "amazon")
+    assert [(x.asin, x.title, x.unit_price_cents) for x in o.lines] == [
+        ("B0SYNTH010", "Synthetic Dish Scrub Brush", 998)
+    ]
+
+
+def test_live_whole_foods_pickup_is_final_not_cancelled() -> None:
+    o = parse("order_details_live_pickup.html", "111-0000007-0000007")
+    assert (o.status, o.fulfillment, o.vendor) == ("final", "pickup", "wholefoods")
+    assert [x.asin for x in o.lines] == ["B0SYNTHWF6", "B0SYNTHWF7"]
+    assert o.total_cents == 1398
+
+
+@pytest.mark.parametrize(
+    ("text", "status"),
+    [
+        ("Your order could not be cancelled. Picked up Nov 7", "final"),
+        ("This order can't be cancelled. Delivered Nov 7", "final"),
+        ("Your order was cancelled.", "cancelled"),
+        ("Cancelled", "cancelled"),
+    ],
+)
+def test_cancelled_only_when_the_order_was(text: str, status: str) -> None:
+    assert order_status(text) == status

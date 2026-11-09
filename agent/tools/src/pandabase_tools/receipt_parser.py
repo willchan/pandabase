@@ -61,7 +61,11 @@ MONTHS = {
 DATE = r"(?:[A-Za-z]+day,?\s+)?([A-Za-z]{3,9})\.?\s+(\d{1,2})(?:,\s*(\d{4}))?"
 ORDER_ID_PARAM = re.compile(r"[?&]order(?:ID|Id|id)=([A-Za-z0-9-]{6,40})")
 
-CANCELLED = re.compile(r"\b(?:cancell?ed|order was cancell?ed)\b", re.I)
+# Not after "not be" / "can't be": live Whole Foods pickups say "Your order could not be cancelled"
+# (2026-11-08), which made every picked-up order read as cancelled.
+CANCELLED = re.compile(
+    r"(?<!not be )(?<!can't be )(?<!can\u2019t be )(?<!cannot be )\bcancell?ed\b", re.I
+)
 IN_STORE = re.compile(
     r"\b(?:purchased|bought|shopped) in[- ]store\b|\bin[- ]store (?:purchase|order)\b", re.I
 )
@@ -196,6 +200,25 @@ class ParsedOrder:
     text: str
 
 
+# Amazon's page chrome — the header (`#navbar`, `#nav-…`: search box, store links, the
+# delivery-location badge) and footer (`#navFooter`, `#rhf`) — wraps every page and names
+# "Whole Foods Market" and links products ("Amazon Business Card"). Live, 2026-11-08: with no
+# `<main>` on real order pages, every order read as Whole Foods (the location badge was a Whole
+# Foods store) and the footer card link was "bought" on every order.
+CHROME_IDS = re.compile(r"^(?:navbar|navFooter|nav-|rhf|skiplink)")
+
+
+def strip_chrome(root: dom.Node) -> dom.Node:
+    """Drop the page header/footer (`header`/`footer`/`nav` elements, `CHROME_IDS`) in place."""
+    for node in list(root.iter()):
+        chrome = node.tag in ("header", "footer", "nav") or CHROME_IDS.match(
+            node.attrs.get("id", "")
+        )
+        if chrome and node.parent is not None and node in node.parent.children:
+            node.parent.children.remove(node)
+    return root
+
+
 def _item_scope(root: dom.Node) -> dom.Node:
     mains = root.find_all("main")
     return mains[0] if mains else root
@@ -239,7 +262,7 @@ def extract_lines(root: dom.Node) -> list[c.ReceiptLineIn]:
 
 
 def parse_order_details(snap: Snapshot, order_id: str, today: date) -> ParsedOrder:
-    root = dom.parse(snap.html)
+    root = strip_chrome(dom.parse(snap.html))
     text = root.text()
     ordered = parse_date(ORDER_DATE.search(text), today.year)
     acquired = parse_date(STATUS_DATE.search(text), (ordered or today).year)
