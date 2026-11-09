@@ -14,8 +14,11 @@ import {
 import { and, asc, gte, inArray, lt } from "drizzle-orm";
 import type { SQLiteColumn } from "drizzle-orm/sqlite-core";
 import type { Config } from "../config";
+import { adLikePhrase, staleRunoutDays, storeSplit } from "../domain/dataQuality";
 import { addDays, dateInIsoWeek, isoWeekLabel, localDate, zonedToUtc } from "../domain/time";
+import { activeCycle } from "../repo/cycles";
 import { asRecord, type Q } from "../repo/db";
+import { planFor } from "../services/cycles";
 
 export interface WeeklyReport {
   week: string;
@@ -141,6 +144,7 @@ export async function renderWeekly(
     "product_choice.jsonl": [],
     "cart_injection.jsonl": [],
     "ux.jsonl": [],
+    "data_quality.jsonl": [],
   };
 
   // 2. Velocity --------------------------------------------------------------------------------
@@ -363,6 +367,93 @@ export async function renderWeekly(
       text: `Suggested merges: only ${pct(mergeOutcome("confirmed"), mergeAnswered)} of ${mergeAnswered} answered were accepted.`,
     });
   }
+  // Data quality (DESIGN §7): one store with (nearly) every line this week; ad-like item names
+  // anywhere in the catalog; planned items that ran out longer ago than "lapsed". The last two
+  // describe the catalog and the plan as of `now`, not the week.
+  const split = storeSplit(
+    lines.filter((l) => !l.ignored).map((l) => byReceipt.get(l.receiptId)!.vendor),
+    config,
+  );
+  const plan = await planFor(q, await activeCycle(q), { now: ctx.now, config });
+  const plannedIds = new Set(plan.plan.lines.map((l) => l.itemId).filter((x) => x !== null));
+  const adLike = (
+    await q
+      .select({ id: item.id, name: item.canonicalName, mergedInto: item.mergedIntoItemId })
+      .from(item)
+      .orderBy(asc(item.canonicalName), asc(item.id))
+  )
+    .filter((i) => i.mergedInto === null)
+    .map((i) => ({ ...i, phrase: adLikePhrase(i.name, config) }))
+    .filter((i) => i.phrase !== null);
+  const stalePlanned = plan.plan.lines
+    .map((l) => {
+      const e = l.itemId ? plan.estimates.get(l.itemId) : undefined;
+      const days = e ? staleRunoutDays(e.estimate.runoutAt, ctx.now, config) : null;
+      return e && days !== null
+        ? { name: e.item.canonicalName, runoutAt: e.estimate.runoutAt!, days, reason: l.reason }
+        : null;
+    })
+    .filter((x) => x !== null)
+    .sort((a, b) => b.days - a.days || a.name.localeCompare(b.name));
+  extracts["data_quality.jsonl"] = [
+    {
+      check: "store_split",
+      lines: split.lines,
+      by_store: Object.fromEntries(split.byStore.map((b) => [b.store, b.lines])),
+      top_share: Number(split.topShare.toFixed(3)),
+      flagged: split.flagged,
+    },
+    ...adLike.map((i) => ({
+      check: "ad_like_name",
+      item: i.name,
+      item_id: i.id,
+      phrase: i.phrase,
+      planned: plannedIds.has(i.id),
+    })),
+    ...stalePlanned.map((x) => ({
+      check: "stale_runout_planned",
+      item: x.name,
+      runout_at: x.runoutAt,
+      days_ago: x.days,
+      reason: x.reason,
+    })),
+  ];
+  if (split.flagged) {
+    findings.push({
+      score: 3,
+      text: `${pct(split.byStore[0]!.lines, split.lines)} of this week's ${split.lines} receipt lines are from ${split.byStore[0]!.store} — check the importer's store tagging.`,
+    });
+  }
+  if (adLike.length) {
+    const planned = adLike.filter((i) => plannedIds.has(i.id)).length;
+    findings.push({
+      score: planned ? 3 : 2,
+      text: `${adLike.length} item(s) look like page text, not groceries (${adLike
+        .slice(0, 3)
+        .map((i) => i.name)
+        .join(", ")})${planned ? `; ${planned} in the cart plan` : ""}.`,
+    });
+  }
+  if (stalePlanned.length) {
+    findings.push({
+      score: 3,
+      text: `${stalePlanned.length} planned item(s) ran out over ${config.lapsedAfterDays} days ago (${stalePlanned
+        .slice(0, 3)
+        .map((x) => x.name)
+        .join(", ")}).`,
+    });
+  }
+  const qualityRows = [
+    [
+      "Store split (this week)",
+      split.lines
+        ? `${split.byStore.map((b) => `${b.store} ${b.lines}`).join(", ")} — top ${pct(split.byStore[0]!.lines, split.lines)}${split.flagged ? " ⚠️" : ""}`
+        : "no lines",
+    ],
+    ["Ad-like item names (catalog)", adLike.length],
+    [`Planned, ran out > ${config.lapsedAfterDays} d ago (now)`, stalePlanned.length],
+  ];
+
   const receiptSection = section(
     "3. Receipt matching",
     [
@@ -374,6 +465,10 @@ export async function renderWeekly(
       "Suggested merges:",
       "",
       table(["Merges", "Count"], mergeRows),
+      "",
+      "Data quality:",
+      "",
+      table(["Check", "Result"], qualityRows),
     ].join("\n"),
     bullets([
       ...pendingLines
@@ -385,6 +480,15 @@ export async function renderWeekly(
           (l) =>
             `Weakest fuzzy: \`${l.rawText}\` → ${items.get(l.itemId!) ?? l.itemId} (${num(l.matchScore ?? 0)})`,
         ),
+      ...adLike
+        .slice(0, 5)
+        .map(
+          (i) =>
+            `Ad-like item: ${i.name} (“${i.phrase}”${plannedIds.has(i.id) ? ", in the cart plan" : ""})`,
+        ),
+      ...stalePlanned
+        .slice(0, 5)
+        .map((x) => `Planned but ran out ${x.days} d ago: ${x.name} (${x.reason ?? "override"})`),
     ]),
     [
       ...(pendingLines.length
@@ -394,6 +498,19 @@ export async function renderWeekly(
         ? [
             "Mostly dismissed merge suggestions: raise `mergeSuggest.minConfidence` or tighten the merge_suggest prompt (new version).",
           ]
+        : []),
+      ...(split.flagged
+        ? [
+            "One store has nearly every line: compare a few receipts' `vendor` with the order pages (importer store tagging).",
+          ]
+        : []),
+      ...(adLike.length
+        ? [
+            "Ad-like items: find the receipts that created them (`receipt_line.item_id`); fix the parser, then merge or archive the items.",
+          ]
+        : []),
+      ...(stalePlanned.length
+        ? ["Planned items long past runout: check their status overrides and §4.3's lapsed rule."]
         : []),
       ...(weakFuzzy.length
         ? [
