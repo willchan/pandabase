@@ -153,6 +153,7 @@ export async function renderWeekly(
     "overbuy",
     "estimate_vs_observed",
     "presumed_discarded",
+    "item_lapsed",
   ];
   const velocity = metric(...velocityMetrics);
   extracts["velocity.jsonl"] = velocity.map((t) => ({

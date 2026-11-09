@@ -151,6 +151,16 @@ export async function setCycleStatus(
         ],
         ctx.now,
       );
+      if (res.to === "building") {
+        // Once per cycle, at build time: what the lapsed rule (§4.3) left out of this cart.
+        const { plan } = await planFor(tx, await getCycle(tx, cycleId), ctx);
+        await emitTelemetry(
+          tx,
+          "state_engine",
+          plan.lapsed.map((x) => ({ metric: "item_lapsed", cycleId, ...x })),
+          ctx.now,
+        );
+      }
     }
     return { cycle: toCycle(await getCycle(tx, cycleId)), changed: !res.noop };
   });

@@ -402,9 +402,15 @@ In v1 this does **not** modify the EMA; it's a diagnostic.
 An item is in the cart plan if:
 
 ```
-(velocity and runout ≤ today + 3)  or  status_override == critical/consumed
+(velocity and runout ≤ today + 3 and not lapsed)  or  status_override == critical/consumed
 or (static and on_hand ≤ reorder_threshold)
 ```
+
+**Lapsed:** a velocity item whose runout is more than `lapsedAfterDays` (60) days in the past —
+it ran out and was never bought again, so the household stopped buying it or buys it where we
+don't see. It isn't planned or put on *please check*; buying it again (a new runout) or an `add`
+override brings it back. The build logs each lapsed item once per cycle (`item_lapsed`, weekly
+report §2) when the cycle moves to `building` (§10 #61).
 
 then apply cycle overrides (skip removes, qty replaces, add inserts including free text).
 Quantity: velocity → enough purchase units of the chosen product to cover `ema`-based need until
@@ -1149,3 +1155,4 @@ docker-compose.yml (+ docker-compose.build.yml), Makefile, CLAUDE.md, README.md,
 | 58 | PandaBase's Mac-side settings live in its own `~/.config/pandabase/agent.env`, read by `pandabase-tools`; the skills gate on the binary only (no `requires.env`); `~/.openclaw/.env` keeps only shared keys | The same pattern as Bamboo, so every app on the Mac works one way: no app's secrets are handed to every other app's tools, a token change needs no gateway restart, and adding or removing an app doesn't touch OpenClaw's env. Not a security boundary: every app runs as `openclaw-agent` |
 | 59 | On a host whose Ollama other apps share, the host owns Ollama's settings (`OLLAMA_NUM_PARALLEL`, `OLLAMA_MAX_LOADED_MODELS`, `OLLAMA_NO_CLOUD`), which models are pulled and the memory budget; PandaBase states its model needs and `make install-ollama-env` is for a PandaBase-only Mac. The Ollama app overrides `OLLAMA_NO_CLOUD` from its Airplane mode setting, so no-cloud needs Airplane mode on too. | The settings and the RAM are shared: two apps each installing their own would fight over them, and a model choice is really a memory decision for the whole Mac (found when Bamboo joined PandaBase on one Ollama, 2026-11-07). Airplane mode: the server ran with `OLLAMA_NO_CLOUD=0` despite launchd's 1 |
 | 60 | Scheduled steps that need no judgment (Friday nudge, Saturday tier 1 + summary) run as OpenClaw command payloads; the model gets only tier 2, the Monday thread and the receipt/diagnostics skills, each told its skill file's path. A tier-1 add that isn't in the tagged store's cart is looked for in the other store's cart | Live 2026-11-06/07: told "Use $grocery-cycle: …", the local model never opened the skill, posted a cart made up from old memory notes, and both automations reported "ok". The same build showed five Amazon items tagged Whole Foods landing in the Amazon cart and counted as failures (a false layout alert; a re-run would have added them twice) |
+| 61 | A velocity item that ran out more than 60 days ago and wasn't bought again is *lapsed*: left out of the cart plan and the Friday check-in until it's bought or added again | The 12-month receipt import (live, Nov 2026) filled the first real cart with items last bought 5–11 months earlier ("runs out 315 days ago"): an EMA learned from two purchases a year ago never expires. 60 days is past any weekly item's cycle and still keeps slow consumables (air filters, brush heads) whose runout is recent |

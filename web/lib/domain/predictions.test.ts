@@ -80,6 +80,45 @@ describe("restockReason — DESIGN §4.3", () => {
   ] as const)("%s", (_, item, estimate, reason) => {
     expect(restockReason(item, estimate, now, config)).toBe(reason);
   });
+
+  // Bug (live, Nov 2026): items bought twice ~20 days apart a year ago ("runs out 315 days ago")
+  // stayed `runout` forever and filled the weekly cart. Ran out more than `lapsedAfterDays` (60)
+  // ago and never bought again → lapsed: not planned until bought or added again.
+  it.each([
+    ["ran out 60 days ago → still planned", at("2026-08-25"), "runout"],
+    ["ran out 61 days ago → lapsed", at("2026-08-24"), null],
+    ["ran out ~300 days ago (the pistachios) → lapsed", at("2025-12-28"), null],
+  ] as const)("lapsed: %s", (_, runoutAt, reason) => {
+    expect(restockReason(eggs, { onHand: 0, runoutAt, status: "out" }, now, config)).toBe(reason);
+  });
+
+  it("a lapsed item still goes in the cart when someone adds it", () => {
+    const pistachios: PlanItemInput = {
+      itemId: "nuts",
+      item: eggs,
+      baseUnit: "count",
+      switchThreshold: 0.15,
+      estimate: { onHand: 0, runoutAt: at("2025-12-28"), status: "out" },
+      products: [],
+    };
+    const add: CycleOverride = {
+      kind: "add",
+      itemId: "nuts",
+      freeText: null,
+      quantity: null,
+      productId: null,
+    };
+    const plan = (overrides: CycleOverride[]) =>
+      planCart({ items: [pistachios], overrides, vendors: ["amazon"], now, config }).lines.map(
+        (l) => l.itemId,
+      );
+    expect(plan([])).toEqual([]);
+    expect(plan([add])).toEqual(["nuts"]);
+    const run = (overrides: CycleOverride[]) =>
+      planCart({ items: [pistachios], overrides, vendors: ["amazon"], now, config }).lapsed;
+    expect(run([])).toEqual([{ itemId: "nuts", runoutAt: at("2025-12-28") }]);
+    expect(run([add])).toEqual([]);
+  });
 });
 
 describe("cartQuantity", () => {
@@ -258,6 +297,11 @@ describe("pleaseCheckReason / pleaseCheckList — PRD §4.1", () => {
       null,
     ],
     ["no runout (no EMA)", { estimate: { runoutAt: null, status: "unknown" } }, null],
+    [
+      "lapsed: ran out more than 60 days ago",
+      { estimate: { runoutAt: at("2026-08-01"), status: "out" } },
+      null,
+    ],
     [
       "audit hint, never counted",
       {

@@ -267,6 +267,29 @@ describe("cycle lifecycle", () => {
     });
   });
 
+  // DESIGN §4.3 lapsed rule: an item that ran out over `lapsedAfterDays` ago and was never bought
+  // again stays out of the cart, and the build logs which ones (weekly report, Velocity).
+  it("a build months later leaves lapsed items out of the cart and logs them once", async () => {
+    const cycle = (await current())!;
+    h.advance(120 * 86_400_000);
+    expect((await status(cycle.id, "building")).body.cycle.status).toBe("building");
+    const logged = await h.db
+      .select()
+      .from(systemTelemetry)
+      .where(eq(systemTelemetry.metricType, "item_lapsed"));
+    expect(logged.length).toBeGreaterThan(0);
+    const lapsed = new Set(logged.map((r) => (r.payload as { itemId: string }).itemId));
+    expect(logged.every((r) => (r.payload as { cycleId: string }).cycleId === cycle.id)).toBe(true);
+    const planned = (await cart(cycle.id)).map((l) => l.item_id);
+    expect(planned.filter((id) => id && lapsed.has(id))).toEqual([]);
+    await status(cycle.id, "building"); // a retry (refused: already building) logs nothing
+    const again = await h.db
+      .select()
+      .from(systemTelemetry)
+      .where(eq(systemTelemetry.metricType, "item_lapsed"));
+    expect(again).toHaveLength(logged.length);
+  });
+
   it("skip, other store and away", async () => {
     const w43 = (await current())!;
     expect((await status(w43.id, "skipped", "busy week")).body.cycle).toMatchObject({
