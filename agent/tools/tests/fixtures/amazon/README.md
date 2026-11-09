@@ -28,6 +28,8 @@ form's `action`, `ASIN.n` inputs, and visible text.
 | `orders_list_p1.html`, `orders_list_p2.html` | order history, two pages |
 | `order_details_delivery.html` | delivered Amazon order (+ a recommendations carousel) |
 | `order_details_pickup.html` | Whole Foods pickup (slugged `/Name/dp/` links) |
+| `order_details_live_delivery.html` | Amazon order shaped like a live page: no `<main>`, Amazon's header (a "Whole Foods Market" delivery-location badge, store links) and footer (an "Amazon Business Card" `/dp/` link) |
+| `order_details_live_pickup.html` | live-shaped Whole Foods pickup in the same chrome: "Your order could not be cancelled", item-grid rows, a pickup-destination box |
 | `order_details_instore.html` | Whole Foods in-store purchase (`/gp/product/` links) |
 | `order_details_arriving.html` | order still in flight |
 | `order_details_layout_changed.html` | final order with zero ASIN links (agent fallback) |
