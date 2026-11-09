@@ -309,6 +309,19 @@ def test_signed_out_profile_reports_error(tmp_path: Path) -> None:
     assert res.ingested == []
 
 
+def test_bot_challenge_stops_the_sweep(tmp_path: Path) -> None:
+    # Regression (2026-11): Amazon showed /checkpoint after many page loads. The sweep must stop at
+    # once with an error a person acts on, not keep loading pages.
+    challenge = "https://www.amazon.com/checkpoint?arb=x"
+    driver = FakeDriver(
+        lambda url: (challenge, "<html></html>") if "order-details" in url else site(url)
+    )
+    res = sweeper(Server("2026-10-01T19:00:00Z"), driver, tmp_path, lambda _: None).run("sweep")
+    assert res.errors == [{"error": "amazon_challenge", "profile": "will"}]
+    assert not res.complete
+    assert sum("order-details" in u for u in driver.opened) == 1
+
+
 def test_transient_api_error_retries_with_same_key(tmp_path: Path) -> None:
     server = Server("2026-10-01T19:00:00Z")
     server.fail_once.add("114-0000004-0000004")
@@ -355,3 +368,118 @@ def test_live_whole_foods_pickup_is_final_not_cancelled() -> None:
 )
 def test_cancelled_only_when_the_order_was(text: str, status: str) -> None:
     assert order_status(text) == status
+
+
+# --- Year-old live orders (2026-11-08 backfill): read as "in flight" and dropped -------------
+# The first backfill batch after the reset opened 20 orders from Nov 2025 and ingested 7: the other
+# 13 parsed as `unknown`, which the sweep stores as `pending` and never opens again. Live pages:
+# a Whole Foods in-store purchase says "Purchased at <store>" / "Purchased on <date>" (no "in
+# store"), a Whole Foods pickup a year on says "Ordered on" and nothing about being picked up, and
+# an order returned in full says "Refund Total" (= the grand total) and "Return complete".
+OLD = date(2026, 11, 8)  # the backfill's today; the orders are from 2025-11-08
+
+
+def parse_on(name: str, oid: str, today: date, **kw: Any) -> Any:
+    return parse_order_details(Snapshot(details_url(oid), fixture(name)), oid, today, **kw)
+
+
+def test_whole_foods_purchased_at_store_is_an_in_store_purchase() -> None:
+    o = parse_on("order_details_live_instore_purchased_at.html", "D01-0000001-0000001", OLD)
+    assert (o.status, o.fulfillment, o.vendor) == ("final", "in_store", "wholefoods")
+    assert (o.ordered_on, o.acquired_on) == (date(2025, 11, 8), date(2025, 11, 8))
+    assert [(x.asin, x.qty) for x in o.lines] == [("B0SYNTHWF8", 1.0), ("B0SYNTHWF9", 2.0)]
+    assert o.total_cents == 697
+
+
+def test_old_order_without_status_wording_is_final_on_its_order_date() -> None:
+    o = parse_on(
+        "order_details_live_pickup_undated.html",
+        "D01-0000002-0000002",
+        OLD,
+        assume_final_after_days=7,
+    )
+    assert (o.status, o.fulfillment, o.vendor) == ("final", "pickup", "wholefoods")
+    assert (o.ordered_on, o.acquired_on) == (date(2025, 11, 8), date(2025, 11, 8))
+    assert [x.asin for x in o.lines] == ["B0SYNTHWFA", "B0SYNTHWFB"]
+
+
+def test_recent_order_without_status_wording_stays_unknown() -> None:
+    # Within the window it may still be in flight: leave it for a later sweep.
+    o = parse_on(
+        "order_details_live_pickup_undated.html",
+        "D01-0000002-0000002",
+        date(2025, 11, 10),
+        assume_final_after_days=7,
+    )
+    assert o.status == "unknown" and o.acquired_on is None
+    # And without the option, nothing is assumed (the parser's old behaviour).
+    assert parse_on("order_details_live_pickup_undated.html", "x", OLD).status == "unknown"
+
+
+def test_order_returned_in_full_is_returned() -> None:
+    o = parse_on(
+        "order_details_live_returned.html", "118-0000008-0000008", OLD, assume_final_after_days=7
+    )
+    assert o.status == "returned"
+
+
+def test_partly_refunded_delivered_order_is_still_final() -> None:
+    html = fixture("order_details_delivery.html").replace(
+        "</body>", "<div>Refund Total $3.49</div><div>Return complete</div></body>"
+    )
+    o = parse_order_details(Snapshot(details_url("x"), html), "x", TODAY)
+    assert o.status == "final" and o.total_cents == 1420
+
+
+def test_backfill_ingests_old_undated_orders_and_skips_returns(tmp_path: Path) -> None:
+    list_url = BASE + "/your-orders/orders?timeFilter=live-test"
+
+    def card(oid: str, placed: str) -> str:
+        return (
+            f"<div><span>Order placed</span><span>{placed}</span><span>Order # {oid}</span>"
+            f'<a href="/your-orders/order-details?orderID={oid}">View order details</a></div>'
+        )
+
+    ids = {
+        "D01-0000001-0000001": "order_details_live_instore_purchased_at.html",
+        "D01-0000002-0000002": "order_details_live_pickup_undated.html",
+        "118-0000008-0000008": "order_details_live_returned.html",
+    }
+    recent = fixture("order_details_live_pickup_undated.html").replace(
+        "November 8, 2025", "November 5, 2026"
+    )
+    listing = "<html><body>" + "".join(card(i, "November 8, 2025") for i in ids)
+    listing += card("D01-0000004-0000004", "November 5, 2026") + "</body></html>"
+
+    def live(url: str) -> tuple[str, str] | None:
+        if url == list_url:
+            return (url, listing)
+        if url == details_url("D01-0000004-0000004"):
+            return (url, recent)
+        for oid, name in ids.items():
+            if url == details_url(oid):
+                return (url, name)
+        return None
+
+    server = Server("2025-11-15T19:00:00Z")  # sweep window from 2025-11-01
+    s = Sweeper(
+        server.api.client(),
+        FakeDriver(live),
+        ReceiptsConfig(order_list_url=list_url),
+        WILL,
+        "America/Los_Angeles",
+        tmp_path,
+        Telemetry(),
+        today=OLD,
+        sleep=lambda _: None,
+    )
+    res = s.run("sweep")
+    assert sorted(x["order_id"] for x in res.ingested) == [
+        "D01-0000001-0000001",
+        "D01-0000002-0000002",
+    ]
+    assert server.ingested["D01-0000002-0000002"]["fulfillment"] == "pickup"
+    assert server.ingested["D01-0000002-0000002"]["acquired_at"] == "2025-11-08T20:00:00Z"
+    assert res.skipped == [{"order_id": "118-0000008-0000008", "reason": "returned"}]
+    assert res.pending == ["D01-0000004-0000004"]  # 3 days old: may still be in flight
+    assert res.errors == []

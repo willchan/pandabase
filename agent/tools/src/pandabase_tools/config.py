@@ -107,6 +107,9 @@ class ReceiptsConfig(BaseModel):
     backfill_months: int = Field(default=12, ge=1, le=36)
     max_pages: int = Field(default=60, ge=1)
     page_text_limit: int = Field(default=8000, ge=500)
+    # An order page with no status wording, placed at least this many days ago, is final (live
+    # Whole Foods pickups never say "picked up" once they're old). None: never assume.
+    assume_final_after_days: int | None = Field(default=7, ge=1)
     order_list_url: str = "https://www.amazon.com/your-orders/orders?timeFilter=months-3"
     backfill_list_urls: list[str] = Field(
         default_factory=lambda: ["https://www.amazon.com/your-orders/orders?timeFilter=year-{year}"]

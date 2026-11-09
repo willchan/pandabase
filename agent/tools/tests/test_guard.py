@@ -7,10 +7,12 @@ from dataclasses import dataclass
 from typing import Any
 
 import pytest
+from playwright.sync_api import Error as PlaywrightError
 
 from pandabase_tools import guard
 from pandabase_tools.browser import (
     CdpDriver,
+    Challenged,
     NotSignedIn,
     Snapshot,
     buy_box_add_allowed,
@@ -34,6 +36,11 @@ CHECKOUT = [
 SIGNIN = [
     "https://www.amazon.com/ap/signin?openid.return_to=x",
     "https://www.amazon.com/ap/mfa?arb=1",
+]
+# Amazon's bot check (seen 2026-11 after many automated page loads): a human must clear it.
+CHALLENGE = [
+    "https://www.amazon.com/checkpoint?arb=x",
+    "https://www.amazon.com/errors/validateCaptcha?amzn=x",
 ]
 OTHER_HOST = [
     "http://www.amazon.com/gp/aws/cart/add.html?ASIN.1=B0SYNTH001",
@@ -61,6 +68,29 @@ def test_refuses_checkout_and_payment(url: str) -> None:
 @pytest.mark.parametrize("url", SIGNIN)
 def test_refuses_signin(url: str) -> None:
     assert guard.classify_url(url) == "signin"
+
+
+@pytest.mark.parametrize("url", CHALLENGE)
+def test_refuses_bot_challenges(url: str) -> None:
+    assert guard.classify_url(url) == "challenge"
+    with pytest.raises(Challenged):
+        checked(Snapshot(url, ""))
+
+
+def test_a_blocked_redirect_reports_where_it_was_going() -> None:
+    # CdpDriver's route aborts the redirect to /checkpoint, so page.goto raises; open() must say
+    # why rather than fail with a bare navigation error.
+    class Page:
+        url = "https://www.amazon.com/your-orders/order-details?orderID=1"
+
+        def goto(self, url: str, wait_until: str) -> None:
+            d.blocked.append(CHALLENGE[0])
+            raise PlaywrightError("net::ERR_BLOCKED_BY_CLIENT")
+
+    d = CdpDriver("http://127.0.0.1:9222")
+    d._page = Page()  # type: ignore[assignment]
+    with pytest.raises(Challenged):
+        d.open(SAFE[3])
 
 
 @pytest.mark.parametrize("url", OTHER_HOST)

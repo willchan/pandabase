@@ -763,7 +763,8 @@ JSON on stdout; exit 0 ok, 1 error, 2 usage, 3 profile locked, 4 refused URL):
   emits `cart_layout_alert {cycle_id, …}`; the skill posts it to `ops_channel`. **Weekly check:**
   `cart probe` opens `/dp/<ASIN>` for `cart.probe_asins.amazon` and `.wholefoods`, and reports per
   store `found` (landed on that `/dp/` page and `cart_add.add_control` finds its control) or a
-  reason (`no_add_form`, `not_product_page`, `not_signed_in`, `refused_*`, an exception name),
+  reason (`no_add_form`, `not_product_page`, `not_signed_in`, `amazon_challenge`, `refused_*`, an
+  exception name; a bot check gets its own status and ops message),
   telemetry `cart_probe {store, asin, found, reason}`. It clicks nothing and opens no cart page;
   it takes the profile lock (busy → "skipped" line with `--reply`).
 - `receipt_parser.py` (`receipts sweep [--backfill]`) — attaches over CDP to a member's profile.
@@ -778,8 +779,13 @@ JSON on stdout; exit 0 ok, 1 error, 2 usage, 3 profile locked, 4 refused URL):
   `navbar`, `nav-…`, `navFooter`, `rhf`) are dropped first: live order pages have no `<main>`,
   and the chrome names "Whole Foods Market" (store links, the delivery-location badge) and links
   products ("Amazon Business Card"). The vendor is `wholefoods` when the remaining page names
-  Whole Foods, else `amazon`. In-flight orders wait for the next sweep; cancelled ones are
-  skipped ("could not be cancelled" is not a cancellation). Zero ASINs on a final order → `needs_agent_extraction` with page text, and
+  Whole Foods, else `amazon`. Final also covers live Whole Foods in-store pages ("Purchased at
+  <store>" / "Purchased on <date>" lines) and, since old Whole Foods pickup pages never say
+  "picked up", any order page with no status wording placed at least
+  `receipts.assume_final_after_days` (7) ago, acquired on its order date. In-flight orders wait
+  for the next sweep; cancelled ones are skipped ("could not be cancelled" is not a
+  cancellation), and so are orders refunded in full ("Refund Total" ≥ the grand total; reason
+  `returned`). Zero ASINs on a final order → `needs_agent_extraction` with page text, and
   `selector_error`; the skill ingests its own extraction with `receipts ingest`.
 - `photos.py` (`photo submit`) — classify (caption keywords when unambiguous → the local image
   description → default `paper_receipt`), presigned upload, `POST /api/jobs`;
@@ -793,7 +799,11 @@ JSON on stdout; exit 0 ok, 1 error, 2 usage, 3 profile locked, 4 refused URL):
   (`buy_box_add_allowed`, above), else one `browser.control_allowed` accepts — it refuses any whose
   id/name/value/label/text says Buy Now, 1-Click, Turbo, checkout, place order or subscribe, or
   whose form action fails the guard (the injector's page analysis applies the same rule). The tools
-  never launch a browser, sign in, or store credentials (signed out → `not_signed_in`).
+  never launch a browser, sign in, or store credentials (signed out → `not_signed_in`). Amazon's
+  bot check (`/checkpoint`, `/errors/validateCaptcha`) is guard reason `challenge` → `Challenged`
+  (a `NotSignedIn`, so every tool stops); the sweep reports `amazon_challenge`, and a redirect the
+  route aborted is reported as where it was going. `make backfill` stops at the first sweep run
+  that reports any error — it never retries on its own.
 - `lock.py` — per-profile lease file in the state dir: every browser command (including
   `cart search` / `cart add`) holds it while driving a profile; `lock acquire`/`release` remain
   for a human doing manual work on a profile.

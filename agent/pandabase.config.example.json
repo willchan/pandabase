@@ -39,6 +39,7 @@
     "sweep_lookback_days": 14,
     "initial_sweep_days": 30,
     "backfill_months": 12,
-    "max_pages": 60
+    "max_pages": 60,
+    "assume_final_after_days": 7
   }
 }
