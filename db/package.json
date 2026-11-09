@@ -6,7 +6,8 @@
   "exports": {
     ".": "./src/index.ts",
     "./seed": "./src/seed.ts",
-    "./rebuild-state": "./src/rebuild-state.ts"
+    "./rebuild-state": "./src/rebuild-state.ts",
+    "./reset-imports": "./src/reset-imports.ts"
   },
   "scripts": {
     "lint": "eslint .",
@@ -17,6 +18,7 @@
     "migrate": "tsx src/migrate.ts",
     "migrate:prod": "tsx src/migrate.ts --prod",
     "add-member": "tsx src/add-member.ts",
+    "reset-imports": "tsx src/reset-imports.ts",
     "seed": "tsx src/seed.ts",
     "reset": "tsx src/reset.ts",
     "rebuild-state": "tsx src/rebuild-state.ts",

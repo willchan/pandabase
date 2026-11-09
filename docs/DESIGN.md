@@ -540,6 +540,26 @@ Implementation notes (`web/lib/domain/receipts.ts`):
     `minConfidence` (0.5), and pairs (either way round) that already have a pending or dismissed
     suggestion. The unverified side is the one merged away; one suggestion per source item (most
     confident). An expired suggestion may be asked again.
+- **Resetting the digital import** (`pnpm db:reset-imports [--apply]`, `db/src/reset-imports.ts`;
+  Bootstrap action `reset-imports`): ingest dedupes on the order id, so a parser fix can't correct
+  rows an earlier import already wrote. The reset deletes the import's footprint so the backfill can
+  run again: `source = digital` receipts and their lines; the items those lines reference that the
+  import *created* (an item's `created_at` equals a referencing receipt's — ingest stamps both
+  alike); those items' products, `vendor_alias`es, inventory events (digital-receipt and system
+  ones), `preference_event`s and `price_quote`s; reviews about those receipts or items or from
+  merge_suggest jobs, and the merge_suggest jobs themselves; and the stored replies for `receipt:`
+  ingest idempotency keys (the scraper's keys are deterministic, so a re-import within the 24 h
+  window would otherwise replay the old responses). `inventory_state` is then rebuilt. Members,
+  settings, away periods, grocery cycles (including ones an imported order closed) and telemetry
+  are kept. It re-plans inside its transaction and refuses — deleting nothing, exit 3 — if any of
+  that is tied to human data: an answered (confirmed / corrected / dismissed or reviewer-stamped)
+  review, a `labeled_observation` about an imported receipt, line, item or merge job, a non-import
+  inventory event on an imported item, a cycle override, an override or reject preference event,
+  a paper/manual receipt line naming an imported item or product, a merge between imported and
+  other items, an item with settings (audit hint, shelf life, reorder threshold), or an item a
+  digital line matched but didn't create. Without `--apply` it only counts. It prints counts only
+  (per table, lines by store, reviews by kind, each blocker), never names, since Actions logs are
+  public.
 
 ### 4.6 Review expiry & trust
 
@@ -934,8 +954,9 @@ lines, 46 for 8). `web/test/roundTrips.ts` counts round trips, so a test can pin
   naming every empty secret that `migrate` and `deploy-web` need, so an unconfigured environment
   fails before anything changes instead of at the first tool that needs a secret.
 - **Bootstrap (no terminal):** `.github/workflows/bootstrap.yml` (`workflow_dispatch`, runnable
-  from GitHub's web UI or mobile app; `docs/SETUP-CLOUD.md`) runs `pnpm db:migrate:prod` or
-  `pnpm db:add-member` in the `production` or `preview` environment via
+  from GitHub's web UI or mobile app; `docs/SETUP-CLOUD.md`) runs `pnpm db:migrate:prod`,
+  `pnpm db:add-member` or `pnpm db:reset-imports` (§4.5; counts only unless `apply`) in the
+  `production` or `preview` environment via
   `scripts/deploy/bootstrap.sh`, which validates every input (dry-run mode: validate only) before
   installing anything. The repo is public, so its logs are: the member's email is never an input
   but the N-th address of the environment's `ALLOWED_EMAILS` secret, every address and the
@@ -1160,3 +1181,4 @@ docker-compose.yml (+ docker-compose.build.yml), Makefile, CLAUDE.md, README.md,
 | 59 | On a host whose Ollama other apps share, the host owns Ollama's settings (`OLLAMA_NUM_PARALLEL`, `OLLAMA_MAX_LOADED_MODELS`, `OLLAMA_NO_CLOUD`), which models are pulled and the memory budget; PandaBase states its model needs and `make install-ollama-env` is for a PandaBase-only Mac. The Ollama app overrides `OLLAMA_NO_CLOUD` from its Airplane mode setting, so no-cloud needs Airplane mode on too. | The settings and the RAM are shared: two apps each installing their own would fight over them, and a model choice is really a memory decision for the whole Mac (found when Bamboo joined PandaBase on one Ollama, 2026-11-07). Airplane mode: the server ran with `OLLAMA_NO_CLOUD=0` despite launchd's 1 |
 | 60 | Scheduled steps that need no judgment (Friday nudge, Saturday tier 1 + summary) run as OpenClaw command payloads; the model gets only tier 2, the Monday thread and the receipt/diagnostics skills, each told its skill file's path. A tier-1 add that isn't in the tagged store's cart is looked for in the other store's cart | Live 2026-11-06/07: told "Use $grocery-cycle: …", the local model never opened the skill, posted a cart made up from old memory notes, and both automations reported "ok". The same build showed five Amazon items tagged Whole Foods landing in the Amazon cart and counted as failures (a false layout alert; a re-run would have added them twice) |
 | 61 | A velocity item that ran out more than 60 days ago and wasn't bought again is *lapsed*: left out of the cart plan and the Friday check-in until it's bought or added again | The 12-month receipt import (live, Nov 2026) filled the first real cart with items last bought 5–11 months earlier ("runs out 315 days ago"): an EMA learned from two purchases a year ago never expires. 60 days is past any weekly item's cycle and still keeps slow consumables (air filters, brush heads) whose runout is recent |
+| 62 | A buggy digital import is undone by a one-off reset (delete the import's footprint, then re-run the backfill), not by re-ingesting or patching rows | Ingest dedupes on the order id, so a re-import can't correct rows; patching by hand would have to redo matching, EMA learning and reviews. The reset refuses when it finds human-entered data, so nothing a person did is lost silently |

@@ -16,7 +16,7 @@ EOF
   chmod +x "$STUB/bin/pnpm"
   : >"$STUB/calls"
   export STUB PATH="$STUB/bin:$PATH"
-  unset DRY_RUN GITHUB_ACTIONS MEMBER_INDEX MEMBER_DISCORD MEMBER_PROFILE MEMBER_SWEEP MEMBER_CART
+  unset DRY_RUN GITHUB_ACTIONS MEMBER_INDEX MEMBER_DISCORD MEMBER_PROFILE MEMBER_SWEEP MEMBER_CART RESET_APPLY
   export TURSO_DATABASE_URL="libsql://pandabase-test.turso.io" TURSO_AUTH_TOKEN="tok-secret-123"
   export BOOTSTRAP_TARGET=production ALLOWED_EMAILS=" Will@Example.com, partner@example.com"
 }
@@ -111,11 +111,30 @@ member() {
   [ ! -s "$STUB/calls" ]
 }
 
+@test "reset-imports counts by default and deletes only with apply" {
+  export BOOTSTRAP_ACTION=reset-imports
+  bootstrap
+  [ "$status" -eq 0 ]
+  [ "$(cat "$STUB/calls")" = "[db:reset-imports]" ]
+  : >"$STUB/calls"
+  export RESET_APPLY=true
+  bootstrap
+  [ "$status" -eq 0 ]
+  [ "$(cat "$STUB/calls")" = "[db:reset-imports][--apply]" ]
+  [[ "$output" != *"tok-secret-123"* ]]
+  : >"$STUB/calls"
+  export RESET_APPLY=yes
+  bootstrap
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"apply must be true or false"* ]]
+  [ ! -s "$STUB/calls" ]
+}
+
 @test "unknown action is rejected" {
   export BOOTSTRAP_ACTION=seed
   bootstrap
   [ "$status" -eq 2 ]
-  [[ "$output" == *"action must be migrate or add-member"* ]]
+  [[ "$output" == *"action must be migrate, add-member or reset-imports"* ]]
   [ ! -s "$STUB/calls" ]
 }
 
@@ -161,7 +180,8 @@ member() {
 
 @test "bootstrap.yml offers the actions and targets the script accepts" {
   local wf="$REPO_SRC/.github/workflows/bootstrap.yml"
-  grep -qF 'options: [migrate, add-member]' "$wf"
+  grep -qF 'options: [migrate, add-member, reset-imports]' "$wf"
+  grep -qF 'RESET_APPLY: ${{ inputs.apply }}' "$wf"
   grep -qF 'options: [production, preview]' "$wf"
   grep -qF 'options: [keep, daily, weekly, off]' "$wf"
   grep -qF 'options: ["1", "2", "3", "4"]' "$wf"

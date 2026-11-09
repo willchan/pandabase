@@ -90,6 +90,8 @@ A Discord **thread per cycle** in `#pandabase`, acting as a running grocery list
   when the backfill finishes (and weekly after that, once enough new items pile up) the local model
   suggests which are items we already have ("these 3 look like *Eggs*") in Cleanup → Merges. A
   suggestion nobody answers expires after 30 days and changes nothing.
+  If an import goes wrong, it can be reset and re-run; the reset refuses if anyone has already
+  answered a review or entered counts for the imported items, so nothing a person did is lost.
 
 ### 4.3 Trash Cam
 
