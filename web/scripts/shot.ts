@@ -119,7 +119,12 @@ try {
     await signIn(page);
     for (const p of paths) {
       current = p;
-      await page.goto(new URL(p, baseUrl).href, { waitUntil: "networkidle" });
+      // `load` with room for a cold `next dev` compile and big pages (hundreds of reviews on
+      // real data); then let the network settle, but don't fail a page that keeps polling.
+      const started = Date.now();
+      await page.goto(new URL(p, baseUrl).href, { waitUntil: "load", timeout: 120_000 });
+      await page.waitForLoadState("networkidle", { timeout: 10_000 }).catch(() => {});
+      console.log(`${p} [${scheme}] loaded in ${((Date.now() - started) / 1000).toFixed(1)}s`);
       await page.waitForTimeout(300);
       const file = path.join(out, `${slug(p)}-${scheme}.png`);
       // A `fullPage` capture leaves fixed elements (the bottom nav) where the first screen put
