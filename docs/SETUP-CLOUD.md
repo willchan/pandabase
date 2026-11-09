@@ -446,6 +446,11 @@ Then run `make backfill MEMBER=…` on the Mac Mini (after moving
 `~/.pandabase/state/receipts-<member>.json` aside) and turn the sweep back
 on.
 
+Action `rename-items` re-names items that were auto-created with a store
+brand as their name ("365 By Whole Foods Market"). Unticked **apply**
+counts them; ticked renames them. Names someone changed or confirmed are
+left alone.
+
 ### Finding a Discord user id
 
 1. Discord app → your avatar (bottom right) → **Settings** (gear) →

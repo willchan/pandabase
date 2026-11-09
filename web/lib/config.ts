@@ -65,6 +65,22 @@ export const DEFAULT_CONFIG = {
     freshVerifiedDays: 7,
   },
 
+  /** §4.5 Names for auto-created items (`deriveItemName`). */
+  itemNames: {
+    /**
+     * Store brands dropped from the start of a product title before naming its item ("365 By Whole
+     * Foods Market, Organic Peeled Garlic" → "Organic Peeled Garlic"). Longest match wins; case
+     * doesn't matter.
+     */
+    storeBrands: [
+      "365 by Whole Foods Market",
+      "365 Everyday Value",
+      "Whole Foods Market",
+      "Amazon Fresh",
+      "Amazon Basics",
+    ] as string[],
+  },
+
   /** §4.4 Product choice & learning. */
   product: {
     defaultSwitchThreshold: 0.15,

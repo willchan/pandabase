@@ -233,9 +233,12 @@ export function parseUnitQuantity(title: string): number | null {
   return null;
 }
 
-/** Title-derived name for an auto-created item: text before the first comma/dash, sizes removed. */
-export function deriveItemName(title: string): string {
-  const head = title.split(/,| - | – |\|/)[0] ?? title;
+/**
+ * Title-derived name for an auto-created item: a leading store brand (`storeBrands`, e.g. "365 by
+ * Whole Foods Market") dropped, then the text before the first comma/dash, sizes removed.
+ */
+export function deriveItemName(title: string, storeBrands: readonly string[] = []): string {
+  const head = withoutStoreBrand(title, storeBrands).split(/,| - | – |\|/)[0] ?? title;
   const cleaned = head
     .replace(/\(.*?\)/g, " ")
     .replace(
@@ -249,6 +252,19 @@ export function deriveItemName(title: string): string {
     .map((w) => (w === w.toUpperCase() && w.length > 3 ? w[0] + w.slice(1).toLowerCase() : w))
     .join(" ");
   return name || title.trim();
+}
+
+/** `title` without a leading store brand and the separator after it; `title` if nothing is left. */
+function withoutStoreBrand(title: string, storeBrands: readonly string[]): string {
+  const t = title.trim();
+  const lower = t.toLowerCase();
+  for (const brand of [...storeBrands].sort((a, b) => b.length - a.length)) {
+    const b = brand.toLowerCase();
+    if (!lower.startsWith(b) || /[a-z0-9]/i.test(t.charAt(b.length))) continue;
+    const rest = t.slice(b.length).replace(/^[\s,:|–-]+/, "");
+    if (/[a-z]/i.test(rest)) return rest;
+  }
+  return t;
 }
 
 /** Base units for a receipt line: purchase units × base units per purchase unit (12 vs 18 eggs). */

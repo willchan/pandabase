@@ -59,6 +59,28 @@ const amazonOrder = {
 };
 
 describe("digital receipts", () => {
+  // Regression (2026-11-09): house-brand titles named the item after the brand.
+  it("names a new item after the product, not a leading store brand", async () => {
+    const res = await ingest({
+      ...amazonOrder,
+      vendor: "wholefoods",
+      external_order_id: "111-0000365-0000365",
+      lines: [
+        {
+          raw_text: "365 By Whole Foods Market, Organic Peeled Garlic, 6 Ounce",
+          title: "365 By Whole Foods Market, Organic Peeled Garlic, 6 Ounce",
+          asin: "B0SYNTH365",
+          qty: 1,
+          unit_price_cents: 499,
+          line_total_cents: 499,
+        },
+      ],
+    });
+    expect(res.status).toBe(200);
+    const [it] = await h.db.select().from(item).where(eq(item.id, res.body.new_item_ids[0]!));
+    expect(it?.canonicalName).toBe("Organic Peeled Garlic");
+  });
+
   it("resolves ASINs, auto-creates unknown products, applies inventory and dedupes", async () => {
     const water = await h.itemId("Sparkling Water");
     const before = await h.db.select().from(inventoryState).where(eq(inventoryState.itemId, water));
