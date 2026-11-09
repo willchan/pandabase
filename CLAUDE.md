@@ -65,6 +65,8 @@ pnpm db:add-member --email E --name N [--discord ID] [--profile P] [--sweep dail
                              # no terminal: Actions → Bootstrap (bootstrap.yml; docs/SETUP-CLOUD.md)
 pnpm db:reset-imports [--apply]   # undo the digital receipt import (counts only without --apply;
                              # refuses on human data; DESIGN §4.5). No terminal: Bootstrap reset-imports
+pnpm db:rename-items [--apply]    # re-name auto-created items named after a store brand (counts only
+                             # without --apply; DESIGN §4.5). No terminal: Bootstrap rename-items
 pnpm db:generate             # after editing db/src/schema/*: new migration in db/migrations (commit it)
 pnpm db:migrate              # apply migrations; db:migrate:prod for Turso (needs TURSO_AUTH_TOKEN)
 pnpm db:rebuild-state        # recompute inventory_state from inventory_event (§4.2 projection)

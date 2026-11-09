@@ -291,7 +291,9 @@ describe("job lifecycle", () => {
     const res = await complete({
       job_id: job.id,
       attempt: c.attempt,
-      result: { suggestions: [{ item_id: kombucha, merge_into_item_id: eggs, confidence: 0.9 }] },
+      // ≥ mergeSuggest.unsharedMinConfidence: the names share no word (this test is about the
+      // job → review path, not the pair).
+      result: { suggestions: [{ item_id: kombucha, merge_into_item_id: eggs, confidence: 0.97 }] },
     });
     expect(res.body).toMatchObject({ outcome: "review", review_ids: [expect.any(String)] });
     // Not from Discord → no notification.

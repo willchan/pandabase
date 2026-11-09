@@ -213,6 +213,39 @@ describe("deriveItemName", () => {
   ])("%j → %j", (title, name) => expect(deriveItemName(title)).toBe(name));
 });
 
+// Regression (2026-11-09 re-import): Whole Foods house-brand titles put the brand before the first
+// comma ("365 By Whole Foods Market, Organic Peeled Garlic, 6 Ounce"), so items were named
+// "365 By Whole Foods Market" — 9 of the 44 cart-plan lines. Without a comma the brand used up the
+// 6-word budget ("365 by Whole Foods Market Organic").
+describe("deriveItemName drops a leading store brand", () => {
+  const brands = config.itemNames.storeBrands;
+  it.each([
+    ["365 By Whole Foods Market, Organic Peeled Garlic, 6 Ounce", "Organic Peeled Garlic"],
+    ["365 by Whole Foods Market, Trimmed Green Beans, 12 oz", "Trimmed Green Beans"],
+    ["365 Everyday Value, Organic Hass Avocados, 4 Count", "Organic Hass Avocados"],
+    ["365 Everyday Value, Gulf Wild White Shrimp, 32 oz", "Gulf Wild White Shrimp"],
+    [
+      "365 by Whole Foods Market Organic Diced Tomatoes No Salt, 14.5 oz",
+      "Organic Diced Tomatoes No Salt",
+    ],
+    ["Whole Foods Market Organic Sourdough Loaf", "Organic Sourdough Loaf"],
+    // Not a brand prefix: unchanged.
+    ["Organic Broccoli, 1 Each", "Organic Broccoli"],
+    [
+      "Once Upon a Farm Organic Apple, Cherry & Elderberry Immunity Blend",
+      "Once Upon a Farm Organic Apple",
+    ],
+    // Nothing left after the brand: keep the brand rather than an empty name.
+    ["365 by Whole Foods Market", "365 by Whole Foods Market"],
+  ])("%j → %j", (title, name) => expect(deriveItemName(title, brands)).toBe(name));
+
+  it("without brands behaves as before", () => {
+    expect(deriveItemName("365 By Whole Foods Market, Organic Peeled Garlic, 6 Ounce")).toBe(
+      "365 By Whole Foods Market",
+    );
+  });
+});
+
 describe("confirmedAlias", () => {
   it("creates a confirmed 1.0 alias", () => {
     expect(

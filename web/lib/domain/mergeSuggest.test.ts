@@ -168,17 +168,17 @@ describe("scheduledMergeSuggestRun", () => {
 describe("mergeSuggestionReviews", () => {
   const items = new Map(
     [
-      ["eggs", "confirmed", null],
-      ["milk", "confirmed", null],
-      ["hh-eggs", "unverified", null],
-      ["vital", "unverified", null],
-      ["old", "unverified", "eggs"],
-      ["older", "unverified", "old"],
-      ["loop-a", "unverified", "loop-b"],
-      ["loop-b", "unverified", "loop-a"],
-    ].map(([id, trust, into]) => [
+      ["eggs", "confirmed", null, "Eggs"],
+      ["milk", "confirmed", null, "Whole Milk"],
+      ["hh-eggs", "unverified", null, "Happy Hens Large Eggs"],
+      ["vital", "unverified", null, "Vital Farms Pasture-Raised Eggs"],
+      ["old", "unverified", "eggs", "Eggs Dozen"],
+      ["older", "unverified", "old", "Brown Eggs"],
+      ["loop-a", "unverified", "loop-b", "Eggs A"],
+      ["loop-b", "unverified", "loop-a", "Eggs B"],
+    ].map(([id, trust, into, name]) => [
       id!,
-      { trust: trust as "confirmed" | "unverified", mergedIntoItemId: into ?? null },
+      { trust: trust as "confirmed" | "unverified", mergedIntoItemId: into ?? null, name: name! },
     ]),
   );
   const s = (
@@ -269,5 +269,70 @@ describe("mergeSuggestionReviews", () => {
     expect(run([s("hh-eggs", "eggs", 0.3)], [], cfg({ minConfidence: 0.2 })).reviews).toHaveLength(
       1,
     );
+  });
+});
+
+// Regression (2026-11): the local text model paired different kinds of product at 0.7–0.9 —
+// floss with cutting-board oil, a jar opener with a dish brush (same "OXO Good Grips" brand),
+// pant liners with dish soap. A pair now needs a meaningful word in common once the brand both
+// names start with and generic words ("organic") are set aside, or a confidence of ≥ 0.95.
+describe("mergeSuggestionReviews requires a shared word", () => {
+  const named = (pairs: [string, string][]) =>
+    new Map(
+      pairs.map(([id, name]) => [
+        id,
+        { trust: "unverified" as const, mergedIntoItemId: null, name },
+      ]),
+    );
+  const items = named([
+    ["floss", "Cocofloss Woven Dental Floss"],
+    ["oil", "Clark's Cutting Board Oil"],
+    ["opener", "OXO Good Grips Twisting Jar Opener"],
+    ["brush", "OXO Good Grips Dish Scrub Brush"],
+    ["liners", "Natracare Mini Pant Liners"],
+    ["liners2", "Natracare Natural Organic Mini Panty Liners"],
+    ["soap", "Seventh Generation Dish Liquid Soap Free"],
+    ["banana", "Organic Banana"],
+    ["apple", "Honeycrisp Apple"],
+    ["onion", "Organic Green Onion"],
+    ["onion2", "Green Onion Organic"],
+    ["chicken", "Mary'S Chicken Organic Whole Chicken"],
+    ["chicken2", "Mary's Chicken"],
+    ["kleenex", "Kleenex"],
+    ["tissues", "Facial Tissues"],
+  ]);
+  const run = (a: string, b: string, confidence = 0.8) =>
+    mergeSuggestionReviews(
+      {
+        suggestions: [{ item_id: a, merge_into_item_id: b, confidence }],
+        items,
+        existing: [],
+        now: NOW,
+      },
+      cfg(),
+    );
+
+  it.each([
+    ["floss", "oil"],
+    ["opener", "brush"],
+    ["liners", "soap"],
+    ["banana", "apple"],
+  ])("drops %s → %s", (a, b) => {
+    const r = run(a, b, 0.9);
+    expect(r.reviews).toEqual([]);
+    expect(r.dropped.no_shared_word).toBe(1);
+  });
+
+  it.each([
+    ["liners", "liners2"],
+    ["onion", "onion2"],
+    ["chicken", "chicken2"],
+  ])("keeps %s → %s", (a, b) => {
+    expect(run(a, b).reviews).toHaveLength(1);
+  });
+
+  it("keeps a synonym with no word in common only when the model is very sure", () => {
+    expect(run("kleenex", "tissues", 0.9).dropped.no_shared_word).toBe(1);
+    expect(run("kleenex", "tissues", 0.96).reviews).toHaveLength(1);
   });
 });

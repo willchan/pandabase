@@ -19,6 +19,7 @@
     "migrate:prod": "tsx src/migrate.ts --prod",
     "add-member": "tsx src/add-member.ts",
     "reset-imports": "tsx src/reset-imports.ts",
+    "rename-items": "tsx src/rename-items.ts",
     "seed": "tsx src/seed.ts",
     "reset": "tsx src/reset.ts",
     "rebuild-state": "tsx src/rebuild-state.ts",
