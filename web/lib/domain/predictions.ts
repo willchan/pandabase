@@ -6,6 +6,12 @@ import { addDays, localDate } from "./time";
 
 export type RestockReason = "runout" | "critical" | "consumed" | "static_threshold";
 
+/** Ran out more than `lapsedAfterDays` ago and never bought again (DESIGN §4.3). */
+export function isLapsed(runoutAt: string, now: string, config: Config): boolean {
+  const tz = config.householdTz;
+  return localDate(runoutAt, tz) < addDays(localDate(now, tz), -config.lapsedAfterDays);
+}
+
 /** Why an item belongs in the cart plan, or null. */
 export function restockReason(
   item: InventoryItem,
@@ -15,7 +21,7 @@ export function restockReason(
 ): RestockReason | null {
   if (estimate.status === "critical" || estimate.status === "consumed") return estimate.status;
   if (item.trackingType === "velocity") {
-    if (estimate.runoutAt === null) return null;
+    if (estimate.runoutAt === null || isLapsed(estimate.runoutAt, now, config)) return null;
     const horizon = addDays(localDate(now, config.householdTz), config.lowWithinDays);
     return localDate(estimate.runoutAt, config.householdTz) <= horizon ? "runout" : null;
   }
@@ -41,7 +47,11 @@ export function pleaseCheckReason(input: {
   const { item, estimate, lastVerifiedAt, inPlan, now, config } = input;
   if (inPlan) return null;
   const tz = config.householdTz;
-  if (item.trackingType === "velocity" && estimate.runoutAt !== null) {
+  if (
+    item.trackingType === "velocity" &&
+    estimate.runoutAt !== null &&
+    !isLapsed(estimate.runoutAt, now, config)
+  ) {
     const horizon = addDays(
       localDate(now, tz),
       config.lowWithinDays + config.checkin.pleaseCheckMarginDays,
@@ -122,6 +132,8 @@ export interface CartPlan {
   lines: CartLine[];
   /** Items flagged for restock but removed by a `skip` override. */
   skippedItemIds: string[];
+  /** Velocity items left out as lapsed (`isLapsed`) and not added back by an override. */
+  lapsed: { itemId: string; runoutAt: string }[];
   /** Items with several candidate products: the agent should post price quotes. */
   needsPriceCheckItemIds: string[];
 }
@@ -174,9 +186,14 @@ export function planCart(input: {
     overrides: [],
   });
 
+  const lapsed: CartPlan["lapsed"] = [];
   for (const i of items) {
     const reason = restockReason(i.item, i.estimate, now, config);
     if (reason) lines.set(i.itemId, lineFor(i, reason));
+    const { runoutAt } = i.estimate;
+    if (i.item.trackingType === "velocity" && runoutAt && isLapsed(runoutAt, now, config)) {
+      lapsed.push({ itemId: i.itemId, runoutAt });
+    }
   }
 
   for (const o of overrides) {
@@ -241,6 +258,7 @@ export function planCart(input: {
   return {
     lines: all,
     skippedItemIds: [...skipped],
+    lapsed: lapsed.filter((x) => !lines.has(x.itemId)),
     needsPriceCheckItemIds: all.filter((l) => l.choice?.needsPriceCheck).map((l) => l.itemId!),
   };
 }
