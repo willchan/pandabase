@@ -1,5 +1,5 @@
 # Thin wrappers over pnpm/uv. Targets marked "stub" are filled in by the milestone named.
-.PHONY: install dev lint typecheck test check py-check db-reset db-seed db-check contracts contracts-check \
+.PHONY: mac-rollout install dev lint typecheck test check py-check db-reset db-seed db-check contracts contracts-check \
 	secrets vercel-env up up-local down logs update update-pause update-resume update-status rollback \
 	install-update-timer deploy-test migrations-check install-agent-tools install-agent-skills install-agent-cron \
 	install-chromium install-ollama-env backfill smoke ops-check e2e-system system-lint eval-agent \
@@ -151,6 +151,11 @@ install-agent-skills:
 install-agent-cron:
 	scripts/ops/install-agent-cron.sh
 
+# After a PR merges: update to green main, re-run the three agent installers, restart the gateway
+# only if its env changed, list the automations (scripts/ops/mac-rollout.sh). DRY_RUN=1 prints.
+mac-rollout:
+	scripts/ops/mac-rollout.sh
+
 # OLLAMA_NUM_PARALLEL=1, OLLAMA_MAX_LOADED_MODELS=1 for the native Ollama app (LaunchAgent).
 install-ollama-env:
 	scripts/ops/install-ollama-env.sh
@@ -184,7 +189,7 @@ ops-check: deploy-test migrations-check
 	docker compose -f docker-compose.yml -f docker-compose.build.yml config --quiet
 	xmllint --noout ops/launchd/*.plist
 	python3 -c 'import plistlib, sys; [plistlib.load(open(f, "rb")) for f in sys.argv[1:]]' ops/launchd/*.plist
-	$(MAKE) -s -n smoke backfill install-agent-skills update install-update-timer >/dev/null
+	$(MAKE) -s -n smoke backfill install-agent-skills mac-rollout update install-update-timer >/dev/null
 	cd agent/tools && uv run ruff check --config pyproject.toml ../../scripts/smoke/cart_check.py && \
 	  uv run ruff format --check --config pyproject.toml ../../scripts/smoke/cart_check.py && \
 	  uv run mypy ../../scripts/smoke/cart_check.py

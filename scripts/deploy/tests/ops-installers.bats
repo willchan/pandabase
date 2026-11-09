@@ -70,7 +70,15 @@ JSON
   [ "$status" -eq 0 ]
   [[ "$output" != *"unbound variable"* ]]
   called "openclaw automations add --name pandabase-receipts-alex"
-  ! grep -F -- "--agent" "$STUB/calls"
+}
+
+# Bug (live 2026-11-07): with Bamboo's agent also configured, OpenClaw refused to add a job without
+# --agent, so the new 10:30 job failed until it was re-run as OPENCLAW_AGENT=main.
+@test "install-agent-cron defaults every job to --agent main" {
+  run /bin/bash "$ROOT_DIR/scripts/ops/install-agent-cron.sh"
+  [ "$status" -eq 0 ]
+  grep -F "pandabase-receipts-alex" "$STUB/calls" | grep -qF -- "--agent main"
+  grep -F "pandabase-cart-probe" "$STUB/calls" | grep -qF -- "--agent main"
 }
 
 @test "install-agent-cron passes --agent when OPENCLAW_AGENT is set" {
