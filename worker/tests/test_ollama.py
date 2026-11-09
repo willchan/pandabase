@@ -4,9 +4,18 @@ import httpx
 import pytest
 from conftest import OLLAMA, FakeOllama, Rig, fixture, receipt_image
 
+from pandabase_worker.config import MAX_OUTPUT_TOKENS
+from pandabase_worker.jobs.merge_suggest import LlmMerges
 from pandabase_worker.jobs.paper_receipt import VlmReceipt
 from pandabase_worker.jobs.trash_cam import VlmTrashCam
 from pandabase_worker.ollama import OllamaClient, OllamaError, ParseFailure
+
+MERGE_INPUT = {
+    "items": [
+        {"item_id": "01ITEMTOWEL", "name": "paper towel"},
+        {"item_id": "01ITEMTOWELS", "name": "paper towels"},
+    ]
+}
 
 
 def client(fake: FakeOllama) -> OllamaClient:
@@ -107,3 +116,42 @@ def test_think_flag_is_dropped_for_models_without_thinking() -> None:
     assert inf.value.detections[0].name == "oat milk"
     assert fake.requests[0]["think"] is False
     assert "think" not in fake.requests[1]
+
+
+def test_an_answer_cut_off_at_the_length_cap_fails_without_a_repair() -> None:
+    # Regression (2026-11-09): with no output cap, a merge_suggest answer that looped (the same
+    # suggestion repeated) ran until the 8K context filled, hitting the 240 s timeout on all three
+    # attempts. Now the cap stops it, and a cut-off answer is never sent back for "repair" — that
+    # would replay the loop into the context and loop again.
+    fake = FakeOllama()
+    fake.queue("merge_suggest.looping")
+    with pytest.raises(ParseFailure) as exc:
+        client(fake).generate("qwen3.5:4b", "sys", "user", LlmMerges, max_tokens=2048)
+    assert exc.value.truncated is True
+    assert exc.value.error == "output cut off at the 2048-token cap (the model was likely looping)"
+    assert len(exc.value.raw) == 1
+    assert len(fake.requests) == 1
+    assert fake.requests[0]["options"]["num_predict"] == 2048
+
+
+def test_no_output_cap_unless_asked() -> None:
+    fake = FakeOllama()
+    fake.queue("paper_receipt.ok")
+    client(fake).generate("qwen3.5:9b", "sys", "user", VlmReceipt)
+    assert "num_predict" not in fake.requests[0]["options"]
+
+
+def test_a_merge_job_cut_off_fails_fast_with_truncated_telemetry(rig: Rig) -> None:
+    job = rig.engine.add("merge_suggest", input=MERGE_INPUT)
+    rig.ollama.queue("merge_suggest.looping")
+    assert rig.worker.run_once()
+    (body,) = job.completes
+    assert body["status"] == "failed"
+    assert body["error"].startswith("model output invalid: output cut off at the 2048-token cap")
+    # The cut-off answer is kept on the job, so the loop can be inspected (diagnostics vlm.jsonl).
+    (kept,) = body["raw_model_response"]["responses"]
+    assert kept.startswith('{"suggestions": [')
+    assert rig.ollama.requests[0]["options"]["num_predict"] == MAX_OUTPUT_TOKENS["merge_suggest"]
+    (pf,) = rig.engine.metrics("vlm_parse_failure")
+    assert pf["truncated"] is True
+    assert pf["job_type"] == "merge_suggest"

@@ -56,7 +56,8 @@ evening Claude Code sessions. Therefore:
   `qwen3-vl:8b` (older generation, similar size) and `gemma4:e4b` (stronger general chat, weaker
   document OCR); configurable via `OLLAMA_VLM_MODEL`. Requests turn thinking off (`think: false`).
 - `merge_suggest` (text only) uses **`qwen3.5:4b`** (≈ 3.4GB, `OLLAMA_TEXT_MODEL`).
-- Requests use `num_ctx` 8192 to keep the KV cache small. The worker only claims job types whose
+- Requests use `num_ctx` 8192 to keep the KV cache small. `merge_suggest` answers are capped at
+  2048 tokens (`num_predict`, worker `MAX_OUTPUT_TOKENS`; #65). The worker only claims job types whose
   model is pulled (`GET /api/tags`), since every claim costs the job an attempt.
 - Only one Chromium profile is driven at a time (tools take a file lock).
 - Host Ollama settings `OLLAMA_NUM_PARALLEL=1` and `OLLAMA_MAX_LOADED_MODELS=1` (re-applied at
@@ -640,7 +641,13 @@ unless its build time has passed or its label is taken, then the next free week.
 a `---user---` line, the user message; highest N wins; `prompt_version` = `{job_type}.v{N}`).
 Each model call asks Ollama for JSON matching the job's output schema (`format`), validates it,
 and on invalid output sends one repair turn (the bad reply + the validation error); a second
-invalid reply fails the attempt (`vlm_parse_failure`). The first keyframe is the normalized photo
+invalid reply fails the attempt (`vlm_parse_failure`). An answer cut off at the job type's output
+cap (Ollama `done_reason: "length"`) fails the attempt at once, with no repair turn, and its
+`vlm_parse_failure` carries `truncated: true`: at temperature 0 a small model can fall into a
+repetition loop, and a repair turn would replay the loop into its context. Every attempt's raw
+replies are kept on the job (`raw_model_response`), and a failed job's last reply reaches the `vlm`
+extract as `raw_excerpt` (first `diagnostics.rawExcerptChars`) and `raw_chars`; the report counts
+cut-off answers and flags them as a finding. The first keyframe is the normalized photo
 (EXIF-rotated, ≤ 2048px, re-encoded JPEG, so EXIF/GPS is stripped), uploaded before inference and
 listed in `complete` even on failure. `complete` sends `Idempotency-Key: complete:{job_id}:{attempt}`;
 a 409 drops the result. SIGTERM finishes the current job, then exits (a second signal exits at
@@ -1212,3 +1219,4 @@ docker-compose.yml (+ docker-compose.build.yml), Makefile, CLAUDE.md, README.md,
 | 62 | A buggy digital import is undone by a one-off reset (delete the import's footprint, then re-run the backfill), not by re-ingesting or patching rows | Ingest dedupes on the order id, so a re-import can't correct rows; patching by hand would have to redo matching, EMA learning and reviews. The reset refuses when it finds human-entered data, so nothing a person did is lost silently |
 | 63 | Auto-created item names drop a configured list of store brands, not any first segment that looks like a brand | Whole Foods house-brand titles lead with the brand ("365 By Whole Foods Market, Organic Peeled Garlic"), which named items after the brand; a generic "brand, product" rule misreads titles like "Annie's Bunny Grahams, Chocolate Chip". Other brands' names are left to merge suggestions and people |
 | 64 | A merge suggestion needs a meaningful word shared by the two names (brand prefix and generic words aside) unless the model is ≥ 0.95 sure; batches are 40 items | The 4B text model's confidence isn't calibrated: it paired floss with cutting-board oil, a jar opener with a dish brush (both "OXO Good Grips") and pant liners with dish soap at 0.7–0.9, and a stricter prompt traded those for new wrong pairs (bananas with apples, and a pair primed by its own example). A deterministic check drops all of those while keeping the right pairs it found; true synonyms with no word in common ("kleenex" / "facial tissues") need ≥ 0.95. 150-item batches overflowed the 8k context and timed out |
+| 65 | `merge_suggest` answers are capped at 2048 tokens; an answer cut off at the cap fails the attempt with no repair turn | With no cap, a 40-item batch that looped (temperature 0, 4B model) ran until the 8K context filled — the full 240 s timeout, three times over (2026-11-09). The cap makes a loop fail in about a minute so the retry gets a fresh chance; repairing a looped answer would feed the loop back in. Failed jobs' output now reaches the weekly `vlm` extract so the loop can be read before choosing a fix (`maxItems` in the schema, or Ollama's repeat penalty) |

@@ -1,6 +1,6 @@
 // Weekly diagnostics: snapshot against the seeded DB with a fixed `now`, plus every §7 section
 // fed by emitted telemetry.
-import { groceryCycleOverride, item, systemTelemetry } from "@pandabase/db";
+import { auditJob, groceryCycleOverride, item, systemTelemetry } from "@pandabase/db";
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { DEFAULT_CONFIG } from "@/lib/config";
@@ -288,6 +288,66 @@ describe("weekly diagnostics", () => {
     const vlm = report.extracts.find((e) => e.name === "vlm.jsonl")!.jsonl;
     expect(vlm).toContain('"metric":"worker_gap","from":"2026-10-19T16:55:00.000Z"');
     expect(vlm).toContain('"metric":"merge_suggestions_created"');
+  });
+
+  it("counts answers cut off at the length cap and keeps an excerpt of failed jobs' output", async () => {
+    // 2026-11-09: a merge_suggest answer looped until the 240 s timeout, and nothing in the report
+    // showed what the model had written. Now the worker caps the answer, and a failed job's kept
+    // output reaches vlm.jsonl (excerpt only) so the loop can be read.
+    const loop = '{"suggestions": [' + '{"item_id": "a", "merge_into_item_id": "b"}, '.repeat(100);
+    await h.db.insert(auditJob).values([
+      {
+        id: "01JOBLOOPING000000000000000",
+        jobType: "merge_suggest",
+        status: "failed",
+        attempts: 3,
+        model: "qwen3.5:4b",
+        promptVersion: "merge_suggest.v1",
+        error: "model output invalid: output cut off at the 2048-token cap",
+        rawModelResponse: { responses: [loop] },
+        createdAt: "2026-10-21T18:00:00.000Z",
+        updatedAt: "2026-10-21T18:10:00.000Z",
+      },
+      {
+        id: "01JOBFINE00000000000000000",
+        jobType: "merge_suggest",
+        status: "completed",
+        attempts: 1,
+        rawModelResponse: { responses: ['{"suggestions": []}'] },
+        createdAt: "2026-10-21T18:00:00.000Z",
+        updatedAt: "2026-10-21T18:01:00.000Z",
+      },
+    ]);
+    await h.db.insert(systemTelemetry).values(
+      [1, 2, 3].map((attempt) => ({
+        id: `01HTRUNC${String(attempt).padStart(18, "0")}`,
+        source: "worker",
+        metricType: "vlm_parse_failure",
+        payload: { job_type: "merge_suggest", attempt, truncated: true, error: "cut off" },
+        createdAt: "2026-10-21T18:05:00.000Z",
+      })),
+    );
+    const report = await renderWeekly(h.db, "2026-W43", {
+      now: "2026-10-27T20:00:00.000Z",
+      config: DEFAULT_CONFIG,
+    });
+    expect(report.markdown).toContain("Parse failures: 3 (3 cut off at the length cap).");
+    expect(report.markdown).toContain(
+      "3 model answer(s) hit the length cap — likely repetition loops; read `raw_excerpt` in vlm.jsonl.",
+    );
+    const rows = report.extracts
+      .find((e) => e.name === "vlm.jsonl")!
+      .jsonl.split("\n")
+      .filter(Boolean)
+      .map((l) => JSON.parse(l) as Record<string, unknown>);
+    const failed = rows.find((r) => r.job_id === "01JOBLOOPING000000000000000")!;
+    const excerpt = DEFAULT_CONFIG.diagnostics.rawExcerptChars;
+    expect(failed.raw_excerpt).toBe(loop.slice(0, excerpt) + "…");
+    expect(failed.raw_chars).toBe(loop.length);
+    // Completed jobs' output stays out of the extract.
+    expect(rows.find((r) => r.job_id === "01JOBFINE00000000000000000")).not.toHaveProperty(
+      "raw_excerpt",
+    );
   });
 
   it("reports deploys per component, with Mac Mini rollbacks", async () => {

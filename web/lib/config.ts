@@ -184,8 +184,9 @@ export const DEFAULT_CONFIG = {
   /** §2.7 retention, purged by the daily cron. */
   retention: { telemetryDays: 180, idempotencyHours: 24 },
   /** §7 diagnostics: requests slower than this count as slow routes; heartbeat gaps longer than
-   * `workerGapMinutes` count as worker downtime. */
-  diagnostics: { slowRouteMs: 1000, workerGapMinutes: 30 },
+   * `workerGapMinutes` count as worker downtime; a failed job's kept model output goes into
+   * vlm.jsonl cut to `rawExcerptChars` (enough to see a repetition loop). */
+  diagnostics: { slowRouteMs: 1000, workerGapMinutes: 30, rawExcerptChars: 2000 },
 
   /**
    * §7 data-quality checks (weekly report §3). A week's receipt lines with at least
