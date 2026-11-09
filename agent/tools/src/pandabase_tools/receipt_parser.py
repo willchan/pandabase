@@ -30,11 +30,11 @@ from zoneinfo import ZoneInfo
 from . import contracts as c
 from . import dom, guard
 from .api import ApiClient, ApiError
-from .browser import Driver, NotSignedIn, Snapshot
+from .browser import Challenged, Driver, NotSignedIn, Snapshot
 from .config import Member, ReceiptsConfig
 from .telemetry import Telemetry
 
-Status = Literal["final", "pending", "cancelled", "unknown"]
+Status = Literal["final", "pending", "cancelled", "returned", "unknown"]
 Fulfillment = Literal["delivery", "pickup", "in_store", "unknown"]
 
 MONTHS = {
@@ -66,8 +66,12 @@ ORDER_ID_PARAM = re.compile(r"[?&]order(?:ID|Id|id)=([A-Za-z0-9-]{6,40})")
 CANCELLED = re.compile(
     r"(?<!not be )(?<!can't be )(?<!can\u2019t be )(?<!cannot be )\bcancell?ed\b", re.I
 )
+# Live Whole Foods in-store purchases (2026-11-08) say only "Purchased at <store>" and
+# "Purchased on <date>", each on its own line.
 IN_STORE = re.compile(
-    r"\b(?:purchased|bought|shopped) in[- ]store\b|\bin[- ]store (?:purchase|order)\b", re.I
+    r"\b(?:purchased|bought|shopped) in[- ]store\b|\bin[- ]store (?:purchase|order)\b"
+    r"|^\s*purchased (?:at|on)\b",
+    re.I | re.M,
 )
 FINAL = re.compile(r"\b(?:delivered|picked up)\b", re.I)
 PENDING = re.compile(
@@ -76,16 +80,20 @@ PENDING = re.compile(
     re.I,
 )
 STATUS_DATE = re.compile(
-    r"\b(?:delivered|picked up|(?:purchased|bought) in[- ]store)\s*:?\s*(?:on\s+)?" + DATE,
+    r"\b(?:delivered|picked up|(?:purchased|bought) in[- ]store|purchased)\s*:?\s*(?:on\s+)?"
+    + DATE,
     re.I,
 )
-ORDER_DATE = re.compile(r"\b(?:order placed|ordered on|order date|placed on)\s*:?\s*" + DATE, re.I)
+ORDER_DATE = re.compile(
+    r"\b(?:order placed|ordered on|order date|placed on|purchased on)\s*:?\s*" + DATE, re.I
+)
 QTY = re.compile(r"\b(?:qty|quantity)\s*:?\s*(\d+(?:\.\d+)?)\b", re.I)
 QTY_PREFIX = re.compile(r"^\s*(\d{1,3})\s*(?:of|x|\u00d7)\s", re.I)
 PRICE = re.compile(r"\$\s?(\d{1,5}(?:,\d{3})*)\.(\d{2})")
 GRAND_TOTAL = re.compile(
     r"\b(?:grand total|order total|total charged|total)\s*:?\s*\$\s?([\d,]+)\.(\d{2})", re.I
 )
+REFUND_TOTAL = re.compile(r"\brefund total\s*:?\s*\$\s?([\d,]+)\.(\d{2})", re.I)
 SUBTOTAL = re.compile(r"\bitem\(?s\)?\s*subtotal\s*:?\s*\$\s?([\d,]+)\.(\d{2})", re.I)
 NOT_ORDER_ITEMS = re.compile(
     r"\b(?:recommended|customers (?:who|also)|sponsored|inspired by|frequently bought|you might)\b",
@@ -261,13 +269,31 @@ def extract_lines(root: dom.Node) -> list[c.ReceiptLineIn]:
     return list(seen.values())
 
 
-def parse_order_details(snap: Snapshot, order_id: str, today: date) -> ParsedOrder:
+def parse_order_details(
+    snap: Snapshot, order_id: str, today: date, *, assume_final_after_days: int | None = None
+) -> ParsedOrder:
+    """`assume_final_after_days`: an order with no status wording at all (live Whole Foods pickups
+    never say "picked up" once they're old) that was placed at least this many days ago is final,
+    acquired on its order date. `None` assumes nothing."""
     root = strip_chrome(dom.parse(snap.html))
     text = root.text()
     ordered = parse_date(ORDER_DATE.search(text), today.year)
     acquired = parse_date(STATUS_DATE.search(text), (ordered or today).year)
     if acquired and ordered and acquired < ordered:  # "Delivered Jan 2" for a Dec 30 order
         acquired = acquired.replace(year=acquired.year + 1)
+    total = _cents(GRAND_TOTAL.search(text))
+    refund = _cents(REFUND_TOTAL.search(text))
+    status = order_status(text)
+    if status != "cancelled" and refund is not None and total and refund >= total:
+        status = "returned"  # refunded in full: nothing to stock
+    elif (
+        status == "unknown"
+        and assume_final_after_days is not None
+        and ordered is not None
+        and (today - ordered).days >= assume_final_after_days
+    ):
+        status = "final"
+        acquired = acquired or ordered
     if IN_STORE.search(text):
         fulfillment: Fulfillment = "in_store"
     elif re.search(r"\bpick(?:ed)?[- ]?up\b", text, re.I):
@@ -278,14 +304,14 @@ def parse_order_details(snap: Snapshot, order_id: str, today: date) -> ParsedOrd
         fulfillment = "unknown"
     return ParsedOrder(
         order_id=order_id,
-        status=order_status(text),
+        status=status,
         fulfillment=fulfillment,
         vendor="wholefoods" if re.search(r"whole\s*foods", text, re.I) else "amazon",
         ordered_on=ordered,
         acquired_on=acquired or (ordered if IN_STORE.search(text) else None),
         lines=extract_lines(root),
         subtotal_cents=_cents(SUBTOTAL.search(text)),
-        total_cents=_cents(GRAND_TOTAL.search(text)),
+        total_cents=total,
         text=text,
     )
 
@@ -424,6 +450,8 @@ class Sweeper:
             if not run["collect_done"]:
                 self._collect(run, result)
             self._process(run, result, max_orders)
+        except Challenged:
+            result.errors.append({"error": "amazon_challenge", "profile": self.member.profile})
         except NotSignedIn:
             result.errors.append({"error": "not_signed_in", "profile": self.member.profile})
         except guard.UnsafeUrl as err:
@@ -491,8 +519,8 @@ class Sweeper:
             oid = o["order_id"]
             if oid in self.state.done:
                 continue
-            if o["status"] == "cancelled":
-                result.skipped.append({"order_id": oid, "reason": "cancelled"})
+            if o["status"] in ("cancelled", "returned"):
+                result.skipped.append({"order_id": oid, "reason": o["status"]})
                 continue
             if o["status"] == "pending":  # in flight per the list; "unknown" gets a closer look
                 result.pending.append(oid)
@@ -502,10 +530,12 @@ class Sweeper:
             handled += 1
             url = o["details_url"] or self.cfg.order_details_url.format(order_id=oid)
             snap = self._open(url)
-            order = parse_order_details(snap, oid, self.today)
-            if order.status == "cancelled":
-                result.skipped.append({"order_id": oid, "reason": "cancelled"})
-                o["status"] = "cancelled"
+            order = parse_order_details(
+                snap, oid, self.today, assume_final_after_days=self.cfg.assume_final_after_days
+            )
+            if order.status in ("cancelled", "returned"):
+                result.skipped.append({"order_id": oid, "reason": order.status})
+                o["status"] = order.status
                 continue
             if order.status != "final":
                 result.pending.append(oid)

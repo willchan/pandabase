@@ -55,7 +55,10 @@ complete}`.
    "⚠️ Amazon is signed out in <member>'s browser on the Mac Mini — please sign in there. I'll
    pick up the receipts on the next run." Before posting, read the channel's recent messages
    (message tool `action: "read"`); if the same warning was posted in the last 7 days, stay
-   silent. Other errors: stay silent (they're in telemetry and the weekly diagnostics).
+   silent. `amazon_challenge` → the same, with "⚠️ Amazon showed a bot check in <member>'s
+   browser on the Mac Mini — please open it there and clear it." Don't run another sweep until
+   the next scheduled one. Other errors: stay silent (they're in telemetry and the weekly
+   diagnostics).
 4. Exit code 3 (`profile_locked`): the browser is busy (e.g. the cart build); run once more in
    15 minutes, then give up silently until the next scheduled sweep.
 

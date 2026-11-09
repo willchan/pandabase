@@ -154,6 +154,11 @@ class NotSignedIn(Exception):
     """The profile's Amazon session is gone; a human must sign in to that Chromium profile."""
 
 
+class Challenged(NotSignedIn):
+    """Amazon's bot check (`/checkpoint`, captcha): a human must clear it in that profile. A
+    `NotSignedIn`, so every tool already stops on it; the receipt sweep reports it by name."""
+
+
 class Driver(Protocol):
     def open(self, url: str) -> Snapshot: ...
 
@@ -172,6 +177,8 @@ def checked(snapshot: Snapshot) -> Snapshot:
     reason = guard.classify_url(snapshot.url)
     if reason == "signin":
         raise NotSignedIn(snapshot.url)
+    if reason == "challenge":
+        raise Challenged(snapshot.url)
     if reason:
         raise guard.UnsafeUrl(snapshot.url, reason)
     return snapshot
@@ -231,8 +238,17 @@ class CdpDriver:
         return checked(Snapshot(self.page.url, self.page.content()))
 
     def open(self, url: str) -> Snapshot:
+        from playwright.sync_api import Error as PlaywrightError
+
         guard.check_url(url)
-        self.page.goto(url, wait_until="domcontentloaded")
+        blocked = len(self.blocked)
+        try:
+            self.page.goto(url, wait_until="domcontentloaded")
+        except PlaywrightError:
+            # `_route` aborted a redirect (sign-in, bot check, checkout): say which.
+            if len(self.blocked) > blocked:
+                return checked(Snapshot(self.blocked[-1], ""))
+            raise
         return self._snapshot()
 
     def click_confirm(self) -> Snapshot | None:

@@ -80,7 +80,9 @@ A Discord **thread per cycle** in `#pandabase`, acting as a running grocery list
 
 - **Digital (Amazon / Whole Foods):** daily sweep of Will's order history, weekly for his wife's.
   Delivery, pickup and phone-linked in-store purchases. An order is ingested once
-  delivered/picked up. Re-ingesting is harmless.
+  delivered/picked up (or, for an old order whose page no longer says, a week after it was
+  placed); orders returned in full are skipped. Re-ingesting is harmless. If Amazon shows a bot
+  check, the import stops and asks in the ops channel for someone to clear it.
 - **Paper receipts:** photo in Discord → local VLM transcribes → app matches lines to items using
   store-specific aliases → one review item per receipt in the web UI. Exact known matches apply
   immediately; strong guesses apply provisionally; weak ones wait 14 days then expire.

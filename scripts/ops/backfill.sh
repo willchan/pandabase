@@ -2,6 +2,8 @@
 # `make backfill [MEMBER=name]`: 12-month receipt backfill (DESIGN §6, PRD §4.4). Repeats
 # `pandabase-tools receipts sweep --member M --backfill` until it reports `complete` — each run
 # resumes where the last stopped, and orders are deduped by id, so re-running is always safe.
+# A run that reports errors (signed out, Amazon's bot check, an ingest error) stops the backfill:
+# it never retries on its own.
 # Default: every member whose receipt_sweep isn't "off". Their Chromium must be signed in.
 # Afterwards it queues merge suggestions once (as the digital-receipt-scraper skill does).
 #
@@ -55,6 +57,16 @@ backfill_member() {
     if [ "$(printf '%s' "$out" | jq -r '.needs_agent_extraction | length > 0')" = true ]; then
       printf '%s' "$out" | jq -r '.needs_agent_extraction[] | "  needs agent: order \(.order_id)"'
       warn "orders with no readable items: ask the agent \"backfill receipts for $member\" to extract them"
+    fi
+    # Never retry a failed run: a sign-in page or Amazon's bot check needs a person, and more
+    # page loads make a bot check worse. Every error stops here; re-running resumes.
+    if [ "$(printf '%s' "$out" | jq -r '.errors | length > 0')" = true ]; then
+      printf '%s' "$out" | jq -r '.errors[] | "  error: \(.error)\(if .order_id then " (order \(.order_id))" else "" end)"' >&2
+      case "$(printf '%s' "$out" | jq -r '[.errors[].error] | join(" ")')" in
+        *amazon_challenge*) die "backfill $member stopped: Amazon showed a bot check — clear it in $member's browser, wait, then re-run" ;;
+        *not_signed_in*) die "backfill $member stopped: Amazon is signed out in $member's browser — sign in, then re-run" ;;
+        *) die "backfill $member stopped on the errors above — re-run to resume" ;;
+      esac
     fi
     if [ "$(printf '%s' "$out" | jq -r '.complete')" = true ]; then
       info "✓ $member: backfill complete"
