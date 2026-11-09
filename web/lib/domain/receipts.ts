@@ -364,7 +364,7 @@ export async function applyReceipt(
           createdByAsin.set(key, created);
           fx.newItems.push({
             id: created.itemId,
-            canonicalName: deriveItemName(title),
+            canonicalName: deriveItemName(title, config.itemNames.storeBrands),
             ...NEW_ITEM_DEFAULTS,
             trackingType: "static",
             trust: "unverified",

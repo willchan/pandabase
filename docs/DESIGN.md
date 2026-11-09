@@ -463,7 +463,12 @@ with a known product. A cart build that picks the cheaper product logs a `switch
 **Digital:** line ASIN → `vendor_alias(kind=asin)` / `product.asin` → item. Unknown ASIN →
 auto-create `product` + `unverified` item (title-derived name, `unit_quantity` parsed from title,
 else 1 with trust provisional) + a `new_product` review item (merge/ignore; default on expiry:
-keep as is). Ignored ASINs are skipped.
+keep as is). Ignored ASINs are skipped. The name (`deriveItemName`) drops a leading store brand
+(`itemNames.storeBrands`: "365 by Whole Foods Market", "365 Everyday Value", …), then keeps the
+text before the first comma/dash, sizes removed, at most 6 words. `pnpm db:rename-items [--apply]`
+(Bootstrap `rename-items`) re-derives the names of unverified, unmerged items still named exactly
+as the old rule named them from one of their product titles; names a person gave or confirmed are
+never touched.
 
 **Paper:** normalize `raw_text` (upper-case, collapse whitespace, strip prices/codes), then:
 
@@ -1192,3 +1197,4 @@ docker-compose.yml (+ docker-compose.build.yml), Makefile, CLAUDE.md, README.md,
 | 60 | Scheduled steps that need no judgment (Friday nudge, Saturday tier 1 + summary) run as OpenClaw command payloads; the model gets only tier 2, the Monday thread and the receipt/diagnostics skills, each told its skill file's path. A tier-1 add that isn't in the tagged store's cart is looked for in the other store's cart | Live 2026-11-06/07: told "Use $grocery-cycle: …", the local model never opened the skill, posted a cart made up from old memory notes, and both automations reported "ok". The same build showed five Amazon items tagged Whole Foods landing in the Amazon cart and counted as failures (a false layout alert; a re-run would have added them twice) |
 | 61 | A velocity item that ran out more than 60 days ago and wasn't bought again is *lapsed*: left out of the cart plan and the Friday check-in until it's bought or added again | The 12-month receipt import (live, Nov 2026) filled the first real cart with items last bought 5–11 months earlier ("runs out 315 days ago"): an EMA learned from two purchases a year ago never expires. 60 days is past any weekly item's cycle and still keeps slow consumables (air filters, brush heads) whose runout is recent |
 | 62 | A buggy digital import is undone by a one-off reset (delete the import's footprint, then re-run the backfill), not by re-ingesting or patching rows | Ingest dedupes on the order id, so a re-import can't correct rows; patching by hand would have to redo matching, EMA learning and reviews. The reset refuses when it finds human-entered data, so nothing a person did is lost silently |
+| 63 | Auto-created item names drop a configured list of store brands, not any first segment that looks like a brand | Whole Foods house-brand titles lead with the brand ("365 By Whole Foods Market, Organic Peeled Garlic"), which named items after the brand; a generic "brand, product" rule misreads titles like "Annie's Bunny Grahams, Chocolate Chip". Other brands' names are left to merge suggestions and people |

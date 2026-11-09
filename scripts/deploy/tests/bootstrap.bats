@@ -130,11 +130,23 @@ member() {
   [ ! -s "$STUB/calls" ]
 }
 
+@test "rename-items counts by default and renames only with apply" {
+  export BOOTSTRAP_ACTION=rename-items
+  bootstrap
+  [ "$status" -eq 0 ]
+  [ "$(cat "$STUB/calls")" = "[db:rename-items]" ]
+  : >"$STUB/calls"
+  export RESET_APPLY=true
+  bootstrap
+  [ "$status" -eq 0 ]
+  [ "$(cat "$STUB/calls")" = "[db:rename-items][--apply]" ]
+}
+
 @test "unknown action is rejected" {
   export BOOTSTRAP_ACTION=seed
   bootstrap
   [ "$status" -eq 2 ]
-  [[ "$output" == *"action must be migrate, add-member or reset-imports"* ]]
+  [[ "$output" == *"action must be migrate, add-member, reset-imports or rename-items"* ]]
   [ ! -s "$STUB/calls" ]
 }
 
@@ -180,7 +192,7 @@ member() {
 
 @test "bootstrap.yml offers the actions and targets the script accepts" {
   local wf="$REPO_SRC/.github/workflows/bootstrap.yml"
-  grep -qF 'options: [migrate, add-member, reset-imports]' "$wf"
+  grep -qF 'options: [migrate, add-member, reset-imports, rename-items]' "$wf"
   grep -qF 'RESET_APPLY: ${{ inputs.apply }}' "$wf"
   grep -qF 'options: [production, preview]' "$wf"
   grep -qF 'options: [keep, daily, weekly, off]' "$wf"
