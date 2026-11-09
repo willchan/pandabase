@@ -1,10 +1,13 @@
 // Weekly diagnostics: snapshot against the seeded DB with a fixed `now`, plus every §7 section
 // fed by emitted telemetry.
-import { auditJob, systemTelemetry } from "@pandabase/db";
+import { auditJob, groceryCycleOverride, item, systemTelemetry } from "@pandabase/db";
+import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { DEFAULT_CONFIG } from "@/lib/config";
 import { setup, SEED_NOW, type Harness } from "@/test/harness";
 import { HANDLERS } from "@/test/routes";
+import { activeCycle } from "@/lib/repo/cycles";
+import { planFor } from "@/lib/services/cycles";
 import { lastCompleteWeek, percentile, renderWeekly, weekRange } from "./weekly";
 
 let h: Harness;
@@ -400,15 +403,13 @@ describe("weekly diagnostics", () => {
     );
     expect(md).toContain("1 deploy step(s) failed or rolled back.");
 
-    await h.db
-      .insert(systemTelemetry)
-      .values(
-        deploy(6, "2026-10-23T10:15:00.000Z", {
-          component: "mac_mini",
-          sha: sha2,
-          outcome: "rollback_failed",
-        }),
-      );
+    await h.db.insert(systemTelemetry).values(
+      deploy(6, "2026-10-23T10:15:00.000Z", {
+        component: "mac_mini",
+        sha: sha2,
+        outcome: "rollback_failed",
+      }),
+    );
     const md2 = (
       await renderWeekly(h.db, "2026-W43", {
         now: "2026-10-27T20:00:00.000Z",
@@ -416,7 +417,8 @@ describe("weekly diagnostics", () => {
       })
     ).markdown;
     expect(md2).toContain("1 Mac Mini rollback(s) failed — the worker may be down.");
-    expect(md2).toContain("Mac Mini rollbacks: 2.");    expect(md2).not.toContain("production smoke failed");
+    expect(md2).toContain("Mac Mini rollbacks: 2.");
+    expect(md2).not.toContain("production smoke failed");
   });
 
   it("reports a failed production smoke with its failed checks and the rollback hint", async () => {
@@ -459,10 +461,62 @@ describe("weekly diagnostics", () => {
       "product_choice.jsonl",
       "cart_injection.jsonl",
       "ux.jsonl",
+      "data_quality.jsonl",
     ]);
     const bad = await h.call(HANDLERS.diagnosticsWeekly.GET, "/api/diagnostics/weekly", {
       query: { week: "W42" },
     });
     expect(bad.status).toBe(400);
+  });
+
+  // Regression shapes (2026-11, W45): the order page's footer link "Amazon Business Card" was
+  // imported as an item on every order; and an item long past its runout must not sit in the plan.
+  it("data quality: flags ad-like item names and planned items long past runout", async () => {
+    const cycle = (await activeCycle(h.db))!;
+    const seeded = await planFor(h.db, cycle, ctx);
+    const target = seeded.plan.lines.find((l) => l.reason === "runout")!.itemId!;
+    await h.db
+      .update(item)
+      .set({ canonicalName: "Amazon Business Card" })
+      .where(eq(item.id, target));
+    // Half a year on, every velocity runout is lapsed; an `add` puts this one back in the plan.
+    const later = { ...ctx, now: "2027-05-01T16:00:00.000Z" };
+    await h.db.insert(groceryCycleOverride).values({
+      id: "01TDQ000000000000000000001",
+      cycleId: cycle.id,
+      kind: "add",
+      itemId: target,
+    });
+
+    const report = await renderWeekly(h.db, "2026-W42", later);
+    const dq = report.extracts
+      .find((e) => e.name === "data_quality.jsonl")!
+      .jsonl.trim()
+      .split("\n")
+      .map((l) => JSON.parse(l) as Record<string, unknown>);
+    expect(dq.find((r) => r.check === "ad_like_name")).toMatchObject({
+      item: "Amazon Business Card",
+      phrase: "business card",
+      planned: true,
+    });
+    // An `add` line has no restock reason. (Seeded "consumed" items show up too: nobody bought
+    // them in half a year.)
+    expect(
+      dq.find((r) => r.check === "stale_runout_planned" && r.item === "Amazon Business Card"),
+    ).toMatchObject({ reason: null });
+    expect(report.markdown).toContain("| Ad-like item names (catalog) | 1 |");
+    expect(report.markdown).toMatch(/\| Planned, ran out > 60 d ago \(now\) \| [1-9]\d* \|/);
+    expect(report.markdown).toContain(
+      "1 item(s) look like page text, not groceries (Amazon Business Card); 1 in the cart plan.",
+    );
+    expect(report.markdown).toMatch(
+      /planned item\(s\) ran out over 60 days ago \(.*Amazon Business Card/,
+    );
+  });
+
+  it("data quality: a week without receipts isn't flagged and says so", async () => {
+    const report = await renderWeekly(h.db, "2025-W01", ctx);
+    expect(report.markdown).toContain("| Store split (this week) | no lines |");
+    expect(report.markdown).not.toContain("check the importer's store tagging");
   });
 });

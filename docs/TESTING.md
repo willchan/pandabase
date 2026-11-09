@@ -331,6 +331,9 @@ logs or uploaded artifacts**; in chat, report counts only.
   existing `file:` URL, and blanks the Turso token, Google, R2 and agent/worker secrets (set to
   `""`, which Next keeps over any `.env` file). Writes made while clicking around land in the
   copy only.
+- `pnpm --filter web data-quality` runs the weekly report's data-quality checks (DESIGN §7) on
+  the copy for every week with receipts and prints counts only (`--names` adds item names for
+  your own terminal). It refuses a non-`file:` database.
 - `pnpm --filter web shot --prod-copy [paths…]` screenshots the copy into `web/.shots/prod-copy/`
   (gitignored). Look at them locally; don't attach them anywhere.
 

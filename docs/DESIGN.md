@@ -915,7 +915,12 @@ sha, outcome, previous_sha?, reason?, run_url?, host?}` — posted with the agen
 1. Summary (top 3 findings)
 2. Velocity (updates, outliers, estimate-vs-observed error by item, overbuys)
 3. Receipt matching (auto/provisional/expired rates per store, worst aliases; suggested merges:
-   runs, reviews created, dropped by reason, accepted / merged elsewhere / dismissed / expired)
+   runs, reviews created, dropped by reason, accepted / merged elsewhere / dismissed / expired); **data quality**:
+   the week's store split — flagged when one store has ≥ `dataQuality.storeSplitShare` (95%) of
+   ≥ `storeSplitMinLines` (20) non-ignored lines, the shape of an importer tagging every order with
+   one store; catalog items whose name contains a `dataQuality.adLikeNames` phrase ("business
+   card", "purchase subscription", …: page text imported as groceries); and, as of `now`, cart-plan
+   lines whose runout is more than `lapsedAfterDays` in the past — `data_quality` extract)
 4. VLM (latency p50/p95, totals-check failures, human-correction rate per model × prompt version;
    worker health: last heartbeat, version and models, `ollama_ok`, heartbeats with Ollama down,
    silences longer than `diagnostics.workerGapMinutes` (30) from the week's start, between beats or
@@ -932,8 +937,9 @@ sha, outcome, previous_sha?, reason?, run_url?, host?}` — posted with the agen
 
 `GET /api/diagnostics/weekly?week=` (default: the last complete household-TZ ISO week) returns
 `{week, markdown, extracts:[{name, jsonl}]}`; extracts are `velocity`, `receipt_lines`, `vlm`,
-`product_choice`, `cart_injection`, `ux` (`.jsonl`), always present. The summary ranks findings
-(cart failures and tier-1 rate below 90% first, then paper exact-alias rate below 70%, totals-check
+`product_choice`, `cart_injection`, `ux`, `data_quality` (`.jsonl`), always present. The summary ranks findings
+(cart failures, tier-1 rate below 90%, one-store weeks, ad-like items in the plan (else
+score 2) and planned items long past runout first, then paper exact-alias rate below 70%, totals-check
 failures, server errors, failed Mac Mini rollbacks and worker silence (no heartbeat, or a gap), then Ollama unreachable, failed or rolled-back deploys, overbuys, estimate error, pending lines, failed jobs, overrides,
 then expired reviews, slow routes over `diagnostics.slowRouteMs` and merge suggestions mostly
 rejected (≥ 5 answered, < 50% accepted)) and keeps the top 3.
