@@ -187,6 +187,10 @@ export const DEFAULT_CONFIG = {
    * `workerGapMinutes` count as worker downtime. */
   diagnostics: { slowRouteMs: 1000, workerGapMinutes: 30 },
 
+  /** PRD §4.6 Cleanup page: cards rendered per tab before "Show more" (each new-product card carries
+   * a picker of every item, so a few hundred pending reviews at once made the page take ~35s). */
+  cleanup: { pageSize: 20 },
+
   /** §4.6 `impact_score` weights. */
   impact: { inCartPlan: 10, inPleaseCheck: 3, otherwise: 1 },
 

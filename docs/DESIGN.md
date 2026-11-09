@@ -957,6 +957,12 @@ writes, such as the `inventory_state` re-projection reads (`inventoryStateReads`
 `inventoryStateWrites`), go at the end of that same batch. `answerReceiptReview` ("Confirm
 receipt") takes 5 round trips for any receipt; before this it took about 3 per line (27 for 2
 lines, 46 for 8). `web/test/roundTrips.ts` counts round trips, so a test can pin this down.
+Reads follow the same rule: `pendingReviews` (Cleanup, This Week, Insights) is 5 queries for any
+number of reviews, fetching receipts, their lines and failed jobs for all pending reviews at once
+rather than per review. The Cleanup page also renders at most `cleanup.pageSize` (20) cards per tab,
+with a "Show more" link (`?tab=…&show=…`): each new-product card carries a picker of every item,
+so on a household with ~460 pending new-product reviews after the receipt import the page sent
+over 200k `<option>`s and took ~35s under `next dev` (2s after both changes).
 
 ### Continuous deployment (M9)
 
@@ -1206,3 +1212,4 @@ docker-compose.yml (+ docker-compose.build.yml), Makefile, CLAUDE.md, README.md,
 | 62 | A buggy digital import is undone by a one-off reset (delete the import's footprint, then re-run the backfill), not by re-ingesting or patching rows | Ingest dedupes on the order id, so a re-import can't correct rows; patching by hand would have to redo matching, EMA learning and reviews. The reset refuses when it finds human-entered data, so nothing a person did is lost silently |
 | 63 | Auto-created item names drop a configured list of store brands, not any first segment that looks like a brand | Whole Foods house-brand titles lead with the brand ("365 By Whole Foods Market, Organic Peeled Garlic"), which named items after the brand; a generic "brand, product" rule misreads titles like "Annie's Bunny Grahams, Chocolate Chip". Other brands' names are left to merge suggestions and people |
 | 64 | A merge suggestion needs a meaningful word shared by the two names (brand prefix and generic words aside) unless the model is ≥ 0.95 sure; batches are 40 items | The 4B text model's confidence isn't calibrated: it paired floss with cutting-board oil, a jar opener with a dish brush (both "OXO Good Grips") and pant liners with dish soap at 0.7–0.9, and a stricter prompt traded those for new wrong pairs (bananas with apples, and a pair primed by its own example). A deterministic check drops all of those while keeping the right pairs it found; true synonyms with no word in common ("kleenex" / "facial tissues") need ≥ 0.95. 150-item batches overflowed the 8k context and timed out |
+| 65 | Cleanup renders a page of cards per tab (`cleanup.pageSize`, 20) with "Show more", and `pendingReviews` reads in a constant number of queries | Live data after the receipt import had ~490 pending reviews: a query per receipt/job review and a whole-catalog picker on every new-product card made Cleanup take ~35s. Highest impact sorts first, so the first page is what matters; the rest expire to their default anyway |
