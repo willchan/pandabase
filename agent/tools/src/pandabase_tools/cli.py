@@ -397,6 +397,47 @@ def cmd_diagnostics_write(env: Env) -> Any:
     return {"week": res.week, "files": files, "summary": summary_lines(res.markdown)}
 
 
+def data_quality_reply(week: str, rows: list[dict[str, Any]], web_url: str | None) -> str:
+    """One ops-channel message for the weekly data checks (`data_quality.jsonl`), or `NO_REPLY`
+    when nothing is flagged. The checks exist because import bugs went unnoticed for weeks
+    (2026-11: every order tagged Whole Foods, footer ads imported as purchases)."""
+    out: list[str] = []
+    for r in rows:
+        if r.get("check") == "store_split" and r.get("flagged"):
+            stores = sorted((r.get("by_store") or {}).items(), key=lambda kv: -kv[1])
+            top = stores[0][0] if stores else "one store"
+            out.append(
+                f"{round(100 * float(r.get('top_share', 0)))}% of {r.get('lines')} receipt lines "
+                f"were tagged {top}: check the importer's store tagging."
+            )
+    ads = [r for r in rows if r.get("check") == "ad_like_name"]
+    if ads:
+        planned = sum(1 for r in ads if r.get("planned"))
+        names = ", ".join(str(r.get("item")) for r in ads[:3]) + (" …" if len(ads) > 3 else "")
+        out.append(
+            f"{len(ads)} item(s) look like ads or account lines"
+            + (f", {planned} of them in this week's plan" if planned else "")
+            + f": {names}."
+        )
+    stale = [r for r in rows if r.get("check") == "stale_runout_planned"]
+    if stale:
+        names = ", ".join(f"{r.get('item')} ({r.get('days_ago')} d)" for r in stale[:3])
+        out.append(f"{len(stale)} planned item(s) ran out long ago: {names}.")
+    if not out:
+        return "NO_REPLY"
+    link = f"\nDetails: {web_url.rstrip('/')}/insights" if web_url else ""
+    return f"⚠️ Data check for {week}:\n" + "\n".join(f"- {line}" for line in out) + link
+
+
+def cmd_diagnostics_check(env: Env) -> str:
+    """Plain text for an OpenClaw command automation: the last complete week's data checks, or
+    `NO_REPLY` when they're all clear."""
+    res = env.api.diagnostics(env.args.week)
+    ex = next((e for e in res.extracts if e.name in ("data_quality", "data_quality.jsonl")), None)
+    rows = [json.loads(line) for line in (ex.jsonl if ex else "").splitlines() if line.strip()]
+    return data_quality_reply(res.week, rows, env.cfg.web_url)
+
+
 def reply_line(n: contracts.JobNotification, web_url: str | None) -> str:
     job = n.job
     if job.status == "failed":
@@ -571,6 +612,9 @@ def build_parser() -> argparse.ArgumentParser:
     dw.add_argument("--week")
     dw.add_argument("--dir")
     dw.set_defaults(fn=cmd_diagnostics_write)
+    dc = d.add_parser("check", help="ops message for flagged weekly data checks (or NO_REPLY)")
+    dc.add_argument("--week")
+    dc.set_defaults(fn=cmd_diagnostics_check)
 
     jb = sub.add_parser("jobs").add_subparsers(dest="cmd", required=True)
     jr = jb.add_parser("replies", help="text replies for finished photo jobs (or NO_REPLY)")

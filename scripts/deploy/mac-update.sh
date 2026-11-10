@@ -10,7 +10,10 @@
 #   3. record the current sha and image tag → git merge --ff-only <target> → uv sync (tools;
 #      skills load from the repo, so they update with the checkout) → PANDABASE_WORKER_TAG=<target>
 #      in .env → docker compose pull && up -d
-#   4. health check: worker running + a heartbeat from <target> + agent-token API round trip
+#   4. health check: worker running + a heartbeat from <target> + agent-token API round trip;
+#      healthy and the update touched the agent's jobs, configs or installers → re-run them
+#      (scripts/ops/mac-rollout.sh --installers-only); if that fails, post once to #pandabase and
+#      keep the update (the worker is fine; `make mac-rollout` retries)
 #   5. failure → roll back to the recorded sha and tag, remember <target> as bad, post once to
 #      #pandabase; `deploy` telemetry either way
 #
@@ -89,6 +92,27 @@ rollback_to() {
   }
 }
 
+# Paths whose change needs the agent installers re-run (skills load from the checkout, so a
+# SKILL.md edit alone doesn't). Before 2026-11, someone ran them by hand after each such merge.
+AGENT_INSTALL_PATHS='^(agent/cron\.example\.json|agent/[^/]*\.example\.[^/]*|scripts/ops/(install-agent-[a-z]+|lib|mac-rollout)\.sh)$'
+
+# After a healthy update from PREV to TARGET: re-run the agent installers if that diff needs it.
+agent_installers() {
+  local prev="$1" target="$2" changed
+  changed="$(git diff --name-only "$prev" "$target" | grep -E "$AGENT_INSTALL_PATHS" || true)"
+  if [ -z "$changed" ]; then
+    return 0
+  fi
+  log "agent installers: changed $(printf '%s\n' "$changed" | paste -sd ' ' -)"
+  if run "${PANDABASE_AGENT_INSTALL:-$ROOT/scripts/ops/mac-rollout.sh}" --installers-only; then
+    log "agent installers done"
+  else
+    warn "agent installers failed after the update to ${target:0:7}"
+    [ "$DRY_RUN" = 1 ] ||
+      discord_post "⚠️ PandaBase updated to \`${target:0:7}\`, but re-running the agent installers failed. The worker is fine; run \`make mac-rollout\` on the Mac Mini as the agent to retry and see the error."
+  fi
+}
+
 do_update() {
   if ! acquire_lock; then
     log "another update is running (pid $(cat "$STATE_DIR/update.lock/pid" 2>/dev/null || echo ?)); exiting"
@@ -148,6 +172,7 @@ do_update() {
     log "healthy at ${target:0:7}"
     printf 'outcome=success\n' >>"$STATE_DIR/last-deploy"
     emit_deploy mac_mini "$target" success "$prev_sha"
+    agent_installers "$prev_sha" "$target"
     return 0
   fi
 

@@ -10,7 +10,9 @@
 #   3. openclaw gateway restart       only when install-agent-skills changed the gateway env
 #   4. list the pandabase-* automations (schedule, on/off, agent, last run) to check the result
 #
-#   DRY_RUN=1   print what would run; changes nothing
+#   --installers-only   skip step 1 (scripts/deploy/mac-update.sh calls this after an update
+#                       that touched the agent's jobs, configs or installers)
+#   DRY_RUN=1           print what would run; changes nothing
 set -euo pipefail
 # shellcheck source=scripts/ops/lib.sh
 . "$(dirname "$0")/lib.sh"
@@ -18,8 +20,12 @@ set -euo pipefail
 need openclaw jq
 cd "$ROOT"
 
-info "1/4 update to the newest green main"
-"$ROOT/scripts/deploy/mac-update.sh"
+if [ "${1:-}" = --installers-only ]; then
+  note "1/4 skipped (--installers-only)"
+else
+  info "1/4 update to the newest green main"
+  "$ROOT/scripts/deploy/mac-update.sh"
+fi
 info "now at $(git rev-parse --short HEAD)"
 
 info "2/4 installers"

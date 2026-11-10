@@ -66,6 +66,14 @@
       "command": "pandabase-tools cart probe --reply",
       "deliver_to": "ops_channel",
       "_comment": "Command payload: no model turn. Opens one Amazon and one Whole Foods product page (cart.probe_asins) and checks the add button is still found, without clicking. Prints NO_REPLY when both are fine, else one ⚠️ line for the ops channel."
+    },
+    {
+      "name": "pandabase-data-check",
+      "cron": "20 8 * * 1",
+      "skill": "telemetry-aggregator",
+      "command": "pandabase-tools diagnostics check",
+      "deliver_to": "ops_channel",
+      "_comment": "Command payload: no model turn. Reads last week's data checks (one-store weeks, ad-like items, planned items that ran out long ago) and posts to the ops channel only when one is flagged; NO_REPLY otherwise."
     }
   ]
 }
