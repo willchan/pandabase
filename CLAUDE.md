@@ -21,6 +21,8 @@ Read only the sections your task needs.
 - **Driving a PR?** Follow `.claude/skills/steward/SKILL.md`: check mergeability before CI on every
   wake and after each push — GitHub runs no PR CI while a PR conflicts with `main`. After opening a
   PR, turn on its Auto-fix (the app's PR monitor) so CI failures and conflicts wake you.
+- **Done means seen working.** Before finishing a UI, data, importer or prediction change, follow
+  `.claude/skills/verify/SKILL.md` (seeded shots, the read-only prod copy, real page shapes).
 - **The docs are living.** Any PR that changes user-visible behavior updates `docs/PRD.md`; any PR
   that changes architecture, schema, API contracts, algorithms or agent behavior updates
   `docs/DESIGN.md` (including §10 *Key decisions* when a decision changes). Deviations from a

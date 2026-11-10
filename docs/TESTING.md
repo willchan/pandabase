@@ -291,6 +291,8 @@ The first Saturday builds and receipt sweeps are watched by hand (M8 Notes *Not 
 ## Verification loops (Claude checking its own work)
 
 Two loops for seeing a change working, beyond the tiers above. Neither gates merges.
+`.claude/skills/verify/SKILL.md` says which loop a change needs; `.claude/settings.json` allows
+the loop commands and denies production deploys, `db:migrate:prod` and remote-DB writes.
 
 ### Seeded screens: works anywhere, including cloud sessions and CI
 
