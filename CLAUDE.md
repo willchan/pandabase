@@ -118,11 +118,31 @@ make install-update-timer    # launchd: make update every 15 min (GHCR image is 
 make install-agent-tools     # agent/tools venv, pandabase-tools on PATH, configs from examples
 make install-agent-skills    # skills.load.extraDirs += agent/skills; ~/.config/pandabase/agent.env
 make install-agent-cron      # OpenClaw automations (list, then edit or add)
+make mac-rollout             # after a merge: green main + the three agent installers + gateway restart if needed
 make install-chromium        # per-member Chrome LaunchAgents (CHROMIUM_BIN; loopback-only CDP)
 make install-ollama-env      # OLLAMA_NUM_PARALLEL=1, OLLAMA_MAX_LOADED_MODELS=1, OLLAMA_NO_CLOUD=1 at login
 make backfill [MEMBER=m]     # 12-month receipt backfill, resumable
 make smoke                   # live checks; SMOKE_CART=1 / SMOKE_E2E=1 opt-ins, SMOKE_ONLY="api vlm"
 ```
+
+## Working on the live Mac Mini
+
+Lessons from live runs (November 2026). Ask before anything that changes production or loads store
+pages.
+
+- **Two accounts.** Claude sessions run as the admin user; PandaBase, OpenClaw and its tokens
+  belong to the agent account. Run there with `ssh agent '<cmd>'` from `~/Code/pandabase`, and keep
+  configs and tokens in that account's home, never the admin's.
+- **After a PR merges,** run `make mac-rollout` there rather than the installers one by one.
+- **Live data, read-only:** `scripts/ops/agent-run.sh api get /api/predictions` (also
+  `/api/items/lookup`, `/api/diagnostics/weekly?week=YYYY-Www`); for anything broader,
+  `make prod-copy`.
+- **"ok" isn't proof.** An automation can finish "ok" without doing its work (the local model once
+  posted a made-up cart). Check the run (`openclaw automations runs <id> --json`) and the output it
+  should have produced.
+- **The household's store carts hold their own items.** Never remove or change a line you didn't
+  add, and ask before any run that loads Amazon or Whole Foods pages: repeated automated loads drew
+  a `/checkpoint`.
 
 ## Playbook: "review diagnostics"
 

@@ -6,7 +6,9 @@
 # Receipt sweeps come from the members in pandabase.config.json (`receipt_sweep`: daily → every
 # day 21:00, weekly → Sunday 21:00, off → none) rather than the example's fixed names.
 #
-#   OPENCLAW_AGENT=pandabase   run the jobs as that agent (README "Photo privacy", option A)
+#   OPENCLAW_AGENT=pandabase   run the jobs as that agent (README "Photo privacy", option A).
+#                              Default `main`: once a second app (Bamboo) has its own agent,
+#                              OpenClaw refuses to *add* a job without --agent (live, 2026-11-07).
 set -euo pipefail
 # shellcheck source=scripts/ops/lib.sh
 . "$(dirname "$0")/lib.sh"
@@ -19,10 +21,7 @@ TOOLS_LIST="exec,read,write,message"  # no browser: tier 2 is `pandabase-tools c
 tz="$(jq -r '.tz' "$CRON_FILE")"
 # A command job announces to its `deliver_to` channel (a key of the config's `discord`).
 channel_id() { jq -r --arg k "$1" '.discord[$k] // empty' "$PANDABASE_CONFIG"; }
-# Empty-array expansions use ${a[@]+"${a[@]}"}: macOS /bin/bash 3.2 with `set -u` calls an empty
-# "${a[@]}" an unbound variable.
-agent_args=()
-[ -n "${OPENCLAW_AGENT:-}" ] && agent_args=(--agent "$OPENCLAW_AGENT")
+agent_args=(--agent "${OPENCLAW_AGENT:-main}")
 
 if [ "$DRY_RUN" = 1 ]; then
   existing='[]'
@@ -48,12 +47,12 @@ upsert() {
   local name="$1" cron="$2" kind="$3" payload="$4" id
   local args=(--cron "$cron" --tz "$tz")
   if [ "$kind" = command ]; then
-    args+=(--command "$payload" --announce --channel discord --to "channel:$5")
+    args+=(--command "$payload" --announce --channel discord --to "channel:$5" "${agent_args[@]}")
     if [ -n "${6:-}" ] && [ "$6" != - ]; then
       args+=(--timeout-seconds "$6" --no-output-timeout-seconds "$6")
     fi
   else
-    args+=(--session isolated --message "$payload" --tools "$TOOLS_LIST" --no-deliver ${agent_args[@]+"${agent_args[@]}"})
+    args+=(--session isolated --message "$payload" --tools "$TOOLS_LIST" --no-deliver "${agent_args[@]}")
   fi
   id="$(job_id "$name")"
   if [ -n "$id" ]; then

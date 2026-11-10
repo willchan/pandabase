@@ -161,6 +161,10 @@ Check: `scripts/ops/agent-run.sh config show` prints your members and `"token_se
    make install-agent-cron
    ```
 
+   After later merges, `make mac-rollout` does all of this in one go: it updates to the newest
+   green `main`, re-runs the agent installers (jobs default to OpenClaw's `main` agent), restarts
+   the gateway only when its env changed, and lists the `pandabase-*` automations.
+
 Check:
 
 ```sh
