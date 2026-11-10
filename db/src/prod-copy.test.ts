@@ -125,6 +125,28 @@ describe("prodSourceFromEnv", () => {
     ).toThrow(/--read-only/);
   });
 
+  it("in a cloud session, leaves the token to the proxy and talks HTTPS", () => {
+    // The network secret is added by the agent proxy; the docs promise that for HTTP(S) only.
+    expect(
+      prodSourceFromEnv({
+        PROD_RO_TOKEN_FROM_PROXY: "1",
+        PROD_RO_TURSO_URL: "libsql://db-org.aws-us-west-2.turso.io",
+        PROD_RO_ENV_FILE: path.join(tmp(), "absent.env"),
+      }),
+    ).toEqual({ url: "https://db-org.aws-us-west-2.turso.io" });
+    expect(() => prodSourceFromEnv({ PROD_RO_TOKEN_FROM_PROXY: "1" })).toThrow(/PROD_RO_TURSO_URL/);
+    expect(() =>
+      prodSourceFromEnv({
+        PROD_RO_TOKEN_FROM_PROXY: "1",
+        PROD_RO_TURSO_URL: "libsql://x.turso.io",
+        PROD_RO_TURSO_TOKEN: "t",
+      }),
+    ).toThrow(/don't also set/);
+    expect(() =>
+      prodSourceFromEnv({ PROD_RO_TOKEN_FROM_PROXY: "1", PROD_RO_TURSO_URL: "file:db/dev.db" }),
+    ).toThrow(/remote/);
+  });
+
   it("refuses a local file as the source", () => {
     expect(() =>
       prodSourceFromEnv({ PROD_RO_TURSO_URL: "file:db/dev.db", PROD_RO_TURSO_TOKEN: "t" }),
