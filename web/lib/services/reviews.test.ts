@@ -77,6 +77,32 @@ describe("pendingReviews", () => {
       expiresAt: null,
     });
   });
+
+  // Regression: on a real household (~490 pending reviews after the receipt import) Cleanup took
+  // ~35s to load because every receipt and failed-job review ran its own queries (N+1).
+  it("uses a constant number of queries however many reviews are pending", async () => {
+    const seeded = await h.db.select().from(reviewItem).where(eq(reviewItem.status, "pending"));
+    const like = (kind: string) => seeded.find((r) => r.kind === kind)!;
+    const copies = (kind: string, n: number) =>
+      Array.from({ length: n }, (_, i) => ({ ...like(kind), id: `SYNTH${kind}${i}` }));
+    const rows = [
+      ...copies("receipt", 100),
+      ...copies("failed_job", 100),
+      ...copies("new_product", 300),
+    ];
+    for (let i = 0; i < rows.length; i += 100)
+      await h.db.insert(reviewItem).values(rows.slice(i, i + 100));
+
+    const trips = countRoundTrips(h.db);
+    const list = await pendingReviews(h.db);
+    trips.restore();
+    expect(list).toHaveLength(seeded.length + 500);
+    expect(trips.count()).toBeLessThanOrEqual(5);
+    expect(list.filter((r) => r.kind === "receipt").every((r) => r.receipt?.lines === 1)).toBe(
+      true,
+    );
+    expect(list.filter((r) => r.kind === "failed_job").every((r) => r.job?.attempts)).toBe(true);
+  });
 });
 
 describe("answerReceiptReview", () => {

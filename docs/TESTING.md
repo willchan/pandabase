@@ -305,6 +305,8 @@ the loop commands and denies production deploys, `db:migrate:prod` and remote-DB
   in). It prints every console error, page error, failed request and HTTP status ≥ 400, and exits
   1 if there were any. Chromium is Playwright's own, else `/opt/pw-browsers/chromium`, else
   `PLAYWRIGHT_CHROMIUM_PATH`. The fixed bottom nav is drawn at the bottom of the full-height shot.
+  Shots keep the text caret (`caret: "initial"`): Playwright's default hides it with an inline
+  style on every input, which a still-hydrating page reports as a hydration mismatch.
 
 ### Prod copy: real data, on demand, read-only
 

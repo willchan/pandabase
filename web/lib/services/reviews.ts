@@ -124,32 +124,60 @@ export interface ReviewSummary {
  * Receipt reviews count their open lines (pending + provisional) from `receipt_line`.
  */
 export async function pendingReviews(q: Q): Promise<ReviewSummary[]> {
-  const rows = await q
-    .select()
-    .from(reviewItem)
-    .where(eq(reviewItem.status, "pending"))
-    .orderBy(desc(reviewItem.impactScore), asc(reviewItem.createdAt), asc(reviewItem.id));
-  const names = new Map(
-    (await q.select({ id: item.id, name: item.canonicalName }).from(item)).map((i) => [
-      i.id,
-      i.name,
-    ]),
-  );
+  // A constant number of queries however many reviews are pending (a real household had ~490).
+  const pending = eq(reviewItem.status, "pending");
+  const ofKind = (kind: ReviewKind, col: typeof reviewItem.receiptId | typeof reviewItem.jobId) =>
+    q
+      .select({ id: col })
+      .from(reviewItem)
+      .where(and(pending, eq(reviewItem.kind, kind)));
+  const [rows, itemRows, receiptRows, lineRows, jobRows] = await Promise.all([
+    q
+      .select()
+      .from(reviewItem)
+      .where(pending)
+      .orderBy(desc(reviewItem.impactScore), asc(reviewItem.createdAt), asc(reviewItem.id)),
+    q.select({ id: item.id, name: item.canonicalName }).from(item),
+    q
+      .select()
+      .from(receipt)
+      .where(inArray(receipt.id, ofKind("receipt", reviewItem.receiptId))),
+    q
+      .select({
+        receiptId: receiptLine.receiptId,
+        itemId: receiptLine.itemId,
+        trust: receiptLine.trust,
+        ignored: receiptLine.ignored,
+      })
+      .from(receiptLine)
+      .where(inArray(receiptLine.receiptId, ofKind("receipt", reviewItem.receiptId))),
+    q
+      .select()
+      .from(auditJob)
+      .where(inArray(auditJob.id, ofKind("failed_job", reviewItem.jobId))),
+  ]);
+  const names = new Map(itemRows.map((i) => [i.id, i.name]));
+  const receipts = new Map(receiptRows.map((x) => [x.id, x]));
+  const jobs = new Map(jobRows.map((j) => [j.id, j]));
+  const openLines = new Map<string, number>();
+  for (const l of lineRows)
+    if (isOpenLine(l)) openLines.set(l.receiptId, (openLines.get(l.receiptId) ?? 0) + 1);
   const out: ReviewSummary[] = [];
   for (const r of rows) {
     const payload = asRecord(r.payload);
-    let rec: ReviewSummary["receipt"] = null;
-    if (r.receiptId && r.kind === "receipt") {
-      const [x] = await q.select().from(receipt).where(eq(receipt.id, r.receiptId));
-      const lines = (await receiptLines(q, r.receiptId)).filter(isOpenLine);
-      if (x)
-        rec = { vendor: x.vendor, source: x.source, acquiredAt: x.acquiredAt, lines: lines.length };
-    }
-    let job: ReviewSummary["job"] = null;
-    if (r.jobId && r.kind === "failed_job") {
-      const [j] = await q.select().from(auditJob).where(eq(auditJob.id, r.jobId));
-      if (j) job = { type: j.jobType, error: j.error, attempts: j.attempts };
-    }
+    const x = r.receiptId && r.kind === "receipt" ? receipts.get(r.receiptId) : undefined;
+    const rec: ReviewSummary["receipt"] = x
+      ? {
+          vendor: x.vendor,
+          source: x.source,
+          acquiredAt: x.acquiredAt,
+          lines: openLines.get(x.id) ?? 0,
+        }
+      : null;
+    const j = r.jobId && r.kind === "failed_job" ? jobs.get(r.jobId) : undefined;
+    const job: ReviewSummary["job"] = j
+      ? { type: j.jobType, error: j.error, attempts: j.attempts }
+      : null;
     const intoId =
       typeof payload.merge_into_item_id === "string" ? payload.merge_into_item_id : null;
     out.push({
@@ -185,7 +213,8 @@ const receiptLines = (q: Q, receiptId: string) =>
     .orderBy(asc(receiptLine.id));
 
 /** A line the receipt review asks about: unmatched (pending) or matched provisionally. */
-const isOpenLine = (l: LineRow) => !l.ignored && (l.itemId === null || l.trust !== "confirmed");
+const isOpenLine = (l: Pick<LineRow, "ignored" | "itemId" | "trust">) =>
+  !l.ignored && (l.itemId === null || l.trust !== "confirmed");
 
 export type LineState = "pending" | "provisional" | "confirmed" | "ignored";
 export const lineState = (l: LineRow): LineState =>
