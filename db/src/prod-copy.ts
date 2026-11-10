@@ -153,7 +153,10 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
     console.log("copying the production database (read-only) …");
     try {
       const counts = await writeProdCopy(readOnly(client), PROD_COPY_FILE);
-      console.log(`wrote ${path.relative(process.cwd(), PROD_COPY_FILE)}\n${formatCounts(counts)}`);
+      console.log(
+        `wrote ${path.relative(process.cwd(), PROD_COPY_FILE)}\n${formatCounts(counts)}\n` +
+          "It holds real household data: delete it when you're done (make prod-copy-clean).",
+      );
     } finally {
       client.close();
     }
