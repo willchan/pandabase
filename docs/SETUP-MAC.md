@@ -170,7 +170,7 @@ Check: `scripts/ops/agent-run.sh config show` prints your members and `"token_se
 Check:
 
 ```sh
-openclaw skills check        # the PandaBase skills are eligible
+openclaw skills check --agent main   # the PandaBase skills are eligible
 openclaw automations list    # pandabase-* jobs
 openclaw infer image describe --file <any photo> --model ollama/qwen3.5:9b --timeout-ms 180000
 ```

@@ -103,6 +103,7 @@ if [ "$changed" = 1 ]; then
   warn "restart the gateway so it reads $OPENCLAW_ENV: openclaw gateway restart"
 fi
 
-# 3. Report
-run openclaw skills check
+# 3. Report. With more than one agent configured, `skills check` refuses to run without an owner
+# (November 2026), so name one, as install-agent-cron does.
+run openclaw skills check --agent "${OPENCLAW_AGENT:-main}"
 info "New sessions pick the skills up; existing ones keep their snapshot (start a new session)."
