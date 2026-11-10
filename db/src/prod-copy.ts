@@ -94,11 +94,35 @@ export function parseEnvFile(text: string): Record<string, string> {
 
 export interface ProdSource {
   url: string;
-  authToken: string;
+  /** Unset when the cloud environment's proxy adds it (`PROD_RO_TOKEN_FROM_PROXY=1`). */
+  authToken?: string;
+}
+
+/**
+ * In a cloud session the read-only token is a **network secret**: the agent proxy adds the
+ * `Authorization` header to requests for the Turso host, and the token never enters the VM. The
+ * docs only promise that for HTTP(S), so `libsql://` becomes `https://` (Hrana over HTTP, not
+ * WebSockets).
+ */
+export function viaProxy(url: string): string {
+  return url.replace(/^libsql:\/\//, "https://");
 }
 
 /** The prod URL + read-only token from the env, else from the env file; throws with what's missing. */
 export function prodSourceFromEnv(env: NodeJS.ProcessEnv = process.env): ProdSource {
+  if (env.PROD_RO_TOKEN_FROM_PROXY === "1") {
+    const url = env.PROD_RO_TURSO_URL;
+    if (!url)
+      throw new Error(
+        "PROD_RO_TOKEN_FROM_PROXY=1 but PROD_RO_TURSO_URL is not set (environment variables)",
+      );
+    if (isLocalUrl(url)) throw new Error("PROD_RO_TURSO_URL must be the remote Turso database");
+    if (env.PROD_RO_TURSO_TOKEN)
+      throw new Error(
+        "PROD_RO_TOKEN_FROM_PROXY=1: don't also set PROD_RO_TURSO_TOKEN; the proxy adds the token",
+      );
+    return { url: viaProxy(url) };
+  }
   let url = env.PROD_RO_TURSO_URL;
   let authToken = env.PROD_RO_TURSO_TOKEN;
   const file = env.PROD_RO_ENV_FILE || DEFAULT_ENV_FILE;
@@ -110,7 +134,8 @@ export function prodSourceFromEnv(env: NodeJS.ProcessEnv = process.env): ProdSou
   if (!url || !authToken)
     throw new Error(
       `PROD_RO_TURSO_URL and PROD_RO_TURSO_TOKEN are not set (env or ${file}). ` +
-        "Create a read-only token: turso db tokens create <db> --read-only",
+        "Create a read-only token: turso db tokens create <db> --read-only. In a cloud " +
+        "session, store it as a network secret and set PROD_RO_TOKEN_FROM_PROXY=1 (docs/TESTING.md).",
     );
   if (isLocalUrl(url)) throw new Error("PROD_RO_TURSO_URL must be the remote Turso database");
   return { url, authToken };

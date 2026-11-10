@@ -321,12 +321,19 @@ logs or uploaded artifacts**; in chat, report counts only.
 - Credentials: `PROD_RO_TURSO_URL` + `PROD_RO_TURSO_TOKEN`, a **read-only** token
   (`turso db tokens create <db> --read-only`). Locally they live in
   `~/.config/pandabase/prod-ro.env` (outside the repo; `PROD_RO_ENV_FILE` overrides), as
-  `KEY=value` lines. In a cloud session, set both as **environment secrets** and add only the
-  database's exact Turso host to the environment's network allowlist: the host part of
-  `PROD_RO_TURSO_URL` (shaped `<db>-<org>.<region>.turso.io`; `turso db show <db>` prints the
-  URL). The allowlist takes exact hostnames only — a wildcard such as `*.turso.io` is refused.
-  The real host stays in the secret settings, never in the repo. Never the read-write
-  `TURSO_AUTH_TOKEN`.
+  `KEY=value` lines. Never the read-write `TURSO_AUTH_TOKEN`.
+- **In a cloud session** the token is a **network secret**, so it never enters the session's VM
+  (code.claude.com/docs/en/cloud-environments, *Add network secrets*). At claude.ai/code: the
+  environment selector → the PandaBase environment's settings → **Network secrets** → **Add
+  secret**: type **Bearer**, **Allowed websites** = the database's exact Turso host (the host part
+  of `PROD_RO_TURSO_URL`, shaped `<db>-<org>.<region>.turso.io`; `turso db show <db>` prints the
+  URL), header `Authorization`, prefix `Bearer`, value = the read-only token. Then, in the
+  environment's variables (plain text, readable by anyone using the environment, so no token):
+  `PROD_RO_TURSO_URL=libsql://…` and `PROD_RO_TOKEN_FROM_PROXY=1`. A host with a network secret
+  is reachable whatever the network level, so no allowlist entry is needed. With the flag set,
+  `make prod-copy` sends no token of its own and talks HTTPS (`libsql://` → `https://`), since the
+  proxy adds secrets to HTTP(S) requests. The real host stays in the environment settings, never
+  in the repo.
 - `.claude/launch.json` → **`dev-prod-copy`** (`pnpm --filter web dev:prod-copy`): `next dev` on
   the copy, signed in through the dev bypass as one real member (the first created, or
   `PROD_COPY_MEMBER`). It refuses to start unless `TURSO_DATABASE_URL` (default: the copy) is an
