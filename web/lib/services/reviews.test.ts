@@ -22,6 +22,7 @@ import { ingestReceipt } from "./receipts";
 import {
   answerReceiptReview,
   answerTrashCam,
+  cleanupCount,
   confirmItem,
   dismissReview,
   mergeItems,
@@ -76,6 +77,24 @@ describe("pendingReviews", () => {
       itemName: "Kombucha",
       expiresAt: null,
     });
+  });
+
+  // The 2026-11 import left 462 new-product reviews; 276 were for products bought once. Those
+  // (static item, off this week's cart) are flagged so Cleanup can leave them out.
+  it("flags new products bought once and off the cart as one-time buys", async () => {
+    const np = await reviewOf("new_product");
+    const [it0] = await h.db.select().from(item).where(eq(item.id, np.itemId!));
+    const flagged = async () =>
+      (await pendingReviews(h.db)).find((r) => r.id === np.id)!.oneTimeBuy;
+    await h.db.update(item).set({ trackingType: "static" }).where(eq(item.id, it0!.id));
+    await h.db.update(reviewItem).set({ urgency: "cleanup" }).where(eq(reviewItem.id, np.id));
+    expect(await flagged()).toBe(true);
+    await h.db.update(reviewItem).set({ urgency: "this_week" }).where(eq(reviewItem.id, np.id));
+    expect(await flagged()).toBe(false);
+    await h.db.update(reviewItem).set({ urgency: "cleanup" }).where(eq(reviewItem.id, np.id));
+    await h.db.update(item).set({ trackingType: "velocity" }).where(eq(item.id, it0!.id));
+    expect(await flagged()).toBe(false);
+    expect((await pendingReviews(h.db)).filter((r) => r.oneTimeBuy).map((r) => r.kind)).toEqual([]);
   });
 
   // Regression: on a real household (~490 pending reviews after the receipt import) Cleanup took

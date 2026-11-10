@@ -75,5 +75,7 @@ export const MaintenanceResponse = named(
     opened_cycle_id: z.string().nullable(),
     /** merge_suggest jobs queued by this run (at most weekly, §4.6). */
     merge_suggest_jobs: z.number().int(),
+    /** Pending item reviews re-scored against the current cart plan (§4.6). */
+    reprioritized_reviews: z.number().int(),
   }),
 );

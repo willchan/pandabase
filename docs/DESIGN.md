@@ -590,6 +590,21 @@ Only human actions create `labeled_observation`s. `impact_score` = 10 if the ite
 cart plan, + 3 if in please_check, 1 if neither; Cleanup sorts by it. Reviews scoring above 1 are
 `this_week`, the rest `cleanup`. Expired reviews get status `expired` and their default applied.
 
+An import creates its item reviews before any cart plan exists, so a score set only at creation
+goes stale (the 2026-11 backfill left all 462 `new_product` reviews at 1, including the 44 in
+that week's cart). `reprioritizeReviews` (`web/lib/services/cycles.ts`, rule `reprioritize` in
+`web/lib/domain/review.ts`) re-scores pending **item** reviews (`new_product`, `unverified_item`,
+`merge_suggestion`, by their `item_id`) against the active cycle's plan and please-check list —
+daily in maintenance (`reprioritized_reviews` in its response) and when a cart result is recorded.
+Receipt reviews keep their ingest-time score. Changes emit `review_reprioritized {trigger,
+raised, lowered}`.
+
+Cleanup leaves out **one-time buys** (`isOneTimeBuy`): `new_product` reviews whose item is
+`static` (no usage rate, so the plan never orders it) and `cleanup`. They stay pending and expire to
+their default (keep), so nothing changes if nobody looks; a second purchase within
+`promoteToVelocityWithinDays` makes the item `velocity`, and a cart plan makes the review
+`this_week`, either of which brings it back. The Merges tab says how many are left out.
+
 ### 4.7 Grocery cycle state machine
 
 ```
@@ -876,7 +891,8 @@ the `ReceiptEffects` metrics (with `receiptId`, `vendor`), `estimate_vs_observed
 location, estimated, observed, error}`, `preference_event`, `cart_line_result {cycleId, itemId,
 productId, vendor, outcome, error}`, `cycle_opened`, `cycle_transition`, `job_created`,
 `job_finished {jobType, outcome, attempts, model, promptVersion, …}`, `job_lease_expired`,
-`review_expired {reviewId, kind, action}`, `review_resolved {reviewId, kind, outcome,
+`review_expired {reviewId, kind, action}`, `review_reprioritized {trigger: maintenance|cart_result,
+raised, lowered}`, `review_resolved {reviewId, kind, outcome,
 impactScore, ageHours, …line counts}`, `item_merged {itemId, intoItemId, reviewKind, eventScale}`,
 `item_settings_changed {itemId, fields}`, `settings_changed {keys}`, `presumed_discarded`,
 `maintenance_run`, `settings_rejected {keys}`, `merge_suggest_requested {trigger: backfill|cron,
@@ -1235,3 +1251,4 @@ docker-compose.yml (+ docker-compose.build.yml), Makefile, CLAUDE.md, README.md,
 | 64 | A merge suggestion needs a meaningful word shared by the two names (brand prefix and generic words aside) unless the model is ≥ 0.95 sure; batches are 40 items | The 4B text model's confidence isn't calibrated: it paired floss with cutting-board oil, a jar opener with a dish brush (both "OXO Good Grips") and pant liners with dish soap at 0.7–0.9, and a stricter prompt traded those for new wrong pairs (bananas with apples, and a pair primed by its own example). A deterministic check drops all of those while keeping the right pairs it found; true synonyms with no word in common ("kleenex" / "facial tissues") need ≥ 0.95. 150-item batches overflowed the 8k context and timed out |
 | 65 | `merge_suggest` answers are capped at 2048 tokens; an answer cut off at the cap fails the attempt with no repair turn | With no cap, a 40-item batch that looped (temperature 0, 4B model) ran until the 8K context filled — the full 240 s timeout, three times over (2026-11-09). The cap makes a loop fail in about a minute so the retry gets a fresh chance; repairing a looped answer would feed the loop back in. Failed jobs' output now reaches the weekly `vlm` extract so the loop can be read before choosing a fix (`maxItems` in the schema, or Ollama's repeat penalty) |
 | 66 | Cleanup renders a page of cards per tab (`cleanup.pageSize`, 20) with "Show more", and `pendingReviews` reads in a constant number of queries | Live data after the receipt import had ~490 pending reviews: a query per receipt/job review and a whole-catalog picker on every new-product card made Cleanup take ~35s. Highest impact sorts first, so the first page is what matters; the rest expire to their default anyway |
+| 67 | Item reviews are re-scored against the current plan (daily and on cart result), and Cleanup leaves out new products bought once | After the 12-month re-import (2026-11-09) Cleanup held 462 new-product reviews, all scored 1: the 44 in that week's cart never reached This Week, and 276 were one-off buys whose answer changes nothing (their default, keep, applies on expiry). Re-scoring beats scoring at ingest, which can't know next Saturday's plan; hiding beats not creating, because a later purchase or plan brings the review back without a new code path in receipt ingest |

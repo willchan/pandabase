@@ -1556,6 +1556,11 @@
             "maximum": 9007199254740991,
             "minimum": -9007199254740991,
             "type": "integer"
+          },
+          "reprioritized_reviews": {
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
           }
         },
         "required": [
@@ -1566,7 +1571,8 @@
           "purged_idempotency_keys",
           "purged_telemetry",
           "opened_cycle_id",
-          "merge_suggest_jobs"
+          "merge_suggest_jobs",
+          "reprioritized_reviews"
         ],
         "type": "object"
       },

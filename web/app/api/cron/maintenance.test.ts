@@ -131,3 +131,61 @@ describe("cron maintenance", () => {
     });
   });
 });
+
+// Regression (2026-11-09): a 12-month import created 462 `new_product` reviews before any cart
+// plan existed, so all scored 1 / "cleanup" for good — the 44 items in that week's cart never
+// surfaced in This Week. The daily run re-scores item reviews against the current plan.
+describe("review priority follows the cart plan", () => {
+  it("raises item reviews for planned items to this_week and lowers the rest", async () => {
+    const plan = await h.call<{ lines: { item_id: string | null }[] }>(
+      HANDLERS.predictions.GET,
+      "/api/predictions",
+      {},
+    );
+    const planned = plan.body.lines.map((l) => l.item_id).find((x): x is string => x !== null);
+    expect(planned).toBeDefined();
+    const [kombucha] = await h.db
+      .select()
+      .from(reviewItem)
+      .where(eq(reviewItem.kind, "new_product"));
+    const stale = {
+      createdAt: h.now(),
+      updatedAt: h.now(),
+      status: "pending" as const,
+      payload: {},
+      defaultAction: { action: "keep_auto_created" },
+      expiresAt: "2027-01-01T00:00:00.000Z",
+    };
+    // Created by the import before the plan: cleanup / 1, though its item is in the cart.
+    await h.db.insert(reviewItem).values({
+      ...stale,
+      id: "01REVPLANNED",
+      kind: "new_product",
+      itemId: planned!,
+      urgency: "cleanup",
+      impactScore: 1,
+    });
+    // The other way round: marked this_week for an item no longer in the plan.
+    await h.db
+      .update(reviewItem)
+      .set({ urgency: "this_week", impactScore: 10 })
+      .where(eq(reviewItem.id, kombucha!.id));
+    const kombuchaPlanned = plan.body.lines.some((l) => l.item_id === kombucha!.itemId);
+
+    const res = await run();
+    expect(res.status).toBe(200);
+    expect(res.body.reprioritized_reviews).toBeGreaterThanOrEqual(kombuchaPlanned ? 1 : 2);
+    const [raised] = await h.db.select().from(reviewItem).where(eq(reviewItem.id, "01REVPLANNED"));
+    expect(raised).toMatchObject({ urgency: "this_week" });
+    expect(raised!.impactScore).toBeGreaterThanOrEqual(10);
+    if (!kombuchaPlanned) {
+      const [lowered] = await h.db.select().from(reviewItem).where(eq(reviewItem.id, kombucha!.id));
+      expect(lowered).toMatchObject({ urgency: "cleanup", impactScore: 1 });
+    }
+    const tel = await h.db
+      .select()
+      .from(systemTelemetry)
+      .where(eq(systemTelemetry.metricType, "review_reprioritized"));
+    expect(tel).toHaveLength(1);
+  });
+});

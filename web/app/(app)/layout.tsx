@@ -1,8 +1,7 @@
-import { reviewItem } from "@pandabase/db";
-import { count, eq } from "drizzle-orm";
 import { Suspense } from "react";
 import { BottomNav, NavBar } from "@/components/bottom-nav";
 import { currentMember } from "@/lib/auth/current";
+import { cleanupCount } from "@/lib/services/reviews";
 
 export default function AppLayout({ children }: LayoutProps<"/">) {
   return (
@@ -25,9 +24,5 @@ export default function AppLayout({ children }: LayoutProps<"/">) {
 
 async function NavWithCount() {
   const { db } = await currentMember();
-  const [row] = await db
-    .select({ n: count() })
-    .from(reviewItem)
-    .where(eq(reviewItem.status, "pending"));
-  return <BottomNav cleanupCount={row?.n ?? 0} />;
+  return <BottomNav cleanupCount={await cleanupCount(db)} />;
 }

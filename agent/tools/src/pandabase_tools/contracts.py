@@ -147,6 +147,7 @@ class MaintenanceResponse(BaseModel):
     purged_idempotency_keys: Annotated[int, Field(ge=-9007199254740991, le=9007199254740991)]
     purged_telemetry: Annotated[int, Field(ge=-9007199254740991, le=9007199254740991)]
     released_leases: Annotated[int, Field(ge=-9007199254740991, le=9007199254740991)]
+    reprioritized_reviews: Annotated[int, Field(ge=-9007199254740991, le=9007199254740991)]
 
 
 class MergeSuggestItem(BaseModel):

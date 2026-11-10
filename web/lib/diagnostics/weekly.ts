@@ -19,6 +19,7 @@ import { addDays, dateInIsoWeek, isoWeekLabel, localDate, zonedToUtc } from "../
 import { activeCycle } from "../repo/cycles";
 import { asRecord, type Q } from "../repo/db";
 import { planFor } from "../services/cycles";
+import { pendingReviews } from "../services/reviews";
 
 export interface WeeklyReport {
   week: string;
@@ -873,6 +874,12 @@ export async function renderWeekly(
   });
   const slow = routeStats.filter((r) => r.p95 > config.diagnostics.slowRouteMs);
   const answered = metric("review_resolved");
+  // §4.6: item reviews re-scored against the cart plan, and new products Cleanup leaves out.
+  const rescored = metric("review_reprioritized");
+  const raisedReviews = rescored.reduce((a, t) => a + n(t.p.raised), 0);
+  const loweredReviews = rescored.reduce((a, t) => a + n(t.p.lowered), 0);
+  const waiting = await pendingReviews(q);
+  const oneTimeBuys = waiting.filter((r) => r.oneTimeBuy).length;
   const answeredRows = countBy(answered, (t) => s(t.p.kind) ?? "?").map(([kind]) => {
     const mine = answered.filter((t) => (s(t.p.kind) ?? "?") === kind);
     const outcome = (o: string) => mine.filter((t) => t.p.outcome === o).length;
@@ -916,6 +923,8 @@ export async function renderWeekly(
         ["Answered review kind", "Confirmed", "Corrected", "Dismissed", "Median age h"],
         answeredRows,
       ),
+      "",
+      `Reviews re-scored against the cart plan: ${raisedReviews} moved to This Week, ${loweredReviews} back to Cleanup. Waiting now: ${waiting.length - oneTimeBuys} shown in Cleanup, ${oneTimeBuys} one-time buys left out.`,
       "",
       `Clarifying questions asked: ${questions.length}.`,
       "",

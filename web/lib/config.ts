@@ -218,7 +218,13 @@ export const DEFAULT_CONFIG = {
   cleanup: { pageSize: 20 },
 
   /** §4.6 `impact_score` weights. */
-  impact: { inCartPlan: 10, inPleaseCheck: 3, otherwise: 1 },
+  impact: {
+    inCartPlan: 10,
+    inPleaseCheck: 3,
+    otherwise: 1,
+    /** Reviews per UPDATE when re-scoring against the plan (bound-parameter headroom). */
+    updateChunk: 500,
+  },
 
   /** §4.7 Weekly schedule, household-local (ISO weekday: 1 = Monday … 7 = Sunday). */
   cycle: {

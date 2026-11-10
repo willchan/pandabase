@@ -254,6 +254,11 @@ describe("weekly diagnostics", () => {
         metricType: "review_expired",
         payload: { kind: "merge_suggestion", action: "none" },
       },
+      {
+        source: "state_engine",
+        metricType: "review_reprioritized",
+        payload: { trigger: "maintenance", raised: 44, lowered: 2 },
+      },
     ].map((r, i) => ({
       createdAt: "2026-10-21T18:00:00.000Z",
       ...r,
@@ -272,6 +277,9 @@ describe("weekly diagnostics", () => {
     expect(md).toContain("| Accepted (merged as suggested) | 2 |");
     expect(md).toContain("| Dismissed (not the same) | 3 |");
     expect(md).toContain("| Expired unanswered | 1 |");
+    expect(md).toMatch(
+      /Reviews re-scored against the cart plan: 44 moved to This Week, 2 back to Cleanup\. Waiting now: \d+ shown in Cleanup, \d+ one-time buys left out\./,
+    );
     expect(md).toContain("Suggested merges: only 33% of 6 answered were accepted.");
     expect(md).toContain(
       `| Last heartbeat | ${new Date(start + beats.at(-1)! * 60_000).toISOString()} |`,

@@ -5,7 +5,9 @@ import {
   dueExpiries,
   impactScore,
   mayCreateLabel,
+  isOneTimeBuy,
   newReview,
+  reprioritize,
   reviewExpiresAt,
   trustAfterReview,
   urgencyFor,
@@ -93,5 +95,52 @@ describe("trust", () => {
     ["expired", { original: "provisional", writeCorrected: false }],
   ] as const)("provisional event after %s", (outcome, out) => {
     expect(trustAfterReview(outcome)).toEqual(out);
+  });
+});
+
+describe("reprioritize (§4.6, cart plan)", () => {
+  const base = { impactScore: 1, urgency: "cleanup" as const };
+  const plan = { cart: new Set(["eggs"]), pleaseCheck: new Set(["milk", "eggs"]) };
+  it("re-scores item reviews against the plan and returns only changes", () => {
+    const out = reprioritize(
+      [
+        { ...base, id: "np-eggs", kind: "new_product", itemId: "eggs" },
+        { ...base, id: "uv-milk", kind: "unverified_item", itemId: "milk" },
+        { ...base, id: "np-tea", kind: "new_product", itemId: "tea" },
+        {
+          id: "ms-old",
+          kind: "merge_suggestion",
+          itemId: "tea",
+          impactScore: 10,
+          urgency: "this_week",
+        },
+        { ...base, id: "rc", kind: "receipt", itemId: "eggs" },
+        { ...base, id: "fj", kind: "failed_job", itemId: null },
+      ],
+      plan,
+      config,
+    );
+    expect(out).toEqual([
+      { id: "np-eggs", impactScore: 13, urgency: "this_week" },
+      { id: "uv-milk", impactScore: 3, urgency: "this_week" },
+      { id: "ms-old", impactScore: 1, urgency: "cleanup" },
+    ]);
+  });
+  it("leaves item reviews without an item alone", () => {
+    expect(
+      reprioritize([{ ...base, id: "x", kind: "new_product", itemId: null }], plan, config),
+    ).toEqual([]);
+  });
+});
+
+describe("isOneTimeBuy (Cleanup leaves these out)", () => {
+  it.each([
+    ["new_product", "cleanup", "static", true],
+    ["new_product", "cleanup", "velocity", false],
+    ["new_product", "this_week", "static", false],
+    ["new_product", "cleanup", null, false],
+    ["merge_suggestion", "cleanup", "static", false],
+  ] as const)("%s / %s / %s → %s", (kind, urgency, tracking, out) => {
+    expect(isOneTimeBuy({ kind, urgency }, tracking)).toBe(out);
   });
 });
