@@ -67,6 +67,7 @@ def test_cron_example_schedule() -> None:
         "pandabase-diagnostics": "0 23 * * 0",
         "pandabase-job-replies": "*/5 * * * *",
         "pandabase-cart-probe": "0 15 * * 5",  # Friday afternoon, before Saturday's build
+        "pandabase-data-check": "20 8 * * 1",  # Monday morning, after Sunday's diagnostics
     }
     by_name = {j["name"]: j for j in cron["jobs"]}
     # No model turn for these two (live 2026-11-07: the model posted a made-up cart).
@@ -345,6 +346,69 @@ def test_diagnostics_write(config: Path, tmp_path: Path) -> None:
     assert (root / "2026-W42.md").read_text() == md
     assert (root / "2026-W42" / "velocity.jsonl").read_text() == '{"a":1}\n'
     assert (root / "2026-W42" / "ux.jsonl").read_text() == ""
+
+
+def _dq_api(rows: list[dict[str, Any]]) -> FakeApi:
+    jsonl = "\n".join(json.dumps(r) for r in rows)
+    return FakeApi(
+        {
+            "GET /api/diagnostics/weekly": lambda _: {
+                "week": "2026-W45",
+                "markdown": "",
+                "extracts": [{"name": "data_quality.jsonl", "jsonl": jsonl}],
+            }
+        }
+    )
+
+
+def test_diagnostics_check_is_quiet_when_nothing_is_flagged(config: Path) -> None:
+    rows = [
+        {
+            "check": "store_split",
+            "lines": 40,
+            "by_store": {"amazon": 30, "wholefoods": 10},
+            "top_share": 0.75,
+            "flagged": False,
+        }
+    ]
+    assert run(config, ["diagnostics", "check"], _dq_api(rows)) == (0, "NO_REPLY")
+
+
+def test_diagnostics_check_reports_each_flagged_check(config: Path) -> None:
+    # Regression (2026-11): every order was tagged Whole Foods and a footer ad was imported as a
+    # purchase, and nothing said so until the owner printed the pages.
+    rows = [
+        {
+            "check": "store_split",
+            "lines": 247,
+            "by_store": {"wholefoods": 247},
+            "top_share": 1.0,
+            "flagged": True,
+        },
+        {
+            "check": "ad_like_name",
+            "item": "Amazon Business Card",
+            "item_id": "i1",
+            "phrase": "business card",
+            "planned": True,
+        },
+        {
+            "check": "stale_runout_planned",
+            "item": "Pistachios",
+            "runout_at": "2025-12-20",
+            "days_ago": 315,
+            "reason": "runout",
+        },
+    ]
+    code, out = run(config, ["diagnostics", "check"], _dq_api(rows))
+    assert code == 0
+    assert out.startswith("⚠️ Data check for 2026-W45:")
+    assert "100% of 247 receipt lines were tagged wholefoods" in out
+    assert (
+        "1 item(s) look like ads or account lines, 1 of them in this week's plan: "
+        "Amazon Business Card." in out
+    )
+    assert "Pistachios (315 d)" in out
 
 
 def test_diagnostics_rejects_path_traversal(config: Path) -> None:

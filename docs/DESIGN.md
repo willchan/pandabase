@@ -943,6 +943,9 @@ score 2) and planned items long past runout first, then paper exact-alias rate b
 failures, server errors, failed Mac Mini rollbacks and worker silence (no heartbeat, or a gap), then Ollama unreachable, failed or rolled-back deploys, overbuys, estimate error, pending lines, failed jobs, overrides,
 then expired reviews, slow routes over `diagnostics.slowRouteMs` and merge suggestions mostly
 rejected (≥ 5 answered, < 50% accepted)) and keeps the top 3.
+Nobody reads the report by default, so `pandabase-tools diagnostics check` (command job
+`pandabase-data-check`, Monday 08:20, no model turn) reads that week's `data_quality` extract and
+posts one ⚠️ message to the ops channel only when a check is flagged (`NO_REPLY` otherwise).
 
 `/diagnostics` is gitignored. The Claude review playbook lives in [CLAUDE.md](../CLAUDE.md).
 
