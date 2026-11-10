@@ -85,6 +85,7 @@ make prod-copy               # prod → .scratch/prod-copy.db, READ-ONLY token, 
 pnpm --filter web dev:prod-copy   # next dev on the prod copy as a real member (refuses non-file: DBs)
 pnpm --filter web data-quality   # weekly data-quality checks on the prod copy: counts only
                              # prod data / prod-copy shots never go in commits, PRs, fixtures or CI logs
+make prod-copy-clean         # delete the copy when you're done with it (verify skill)
 pnpm contracts:gen           # Zod → contracts/openapi.json → worker/agent Pydantic models (commit them)
 make contracts-check         # regenerate + fail if the generated contracts differ from git
 docker build -t pandabase-worker worker   # worker image (CI job worker-image)

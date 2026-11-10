@@ -1,5 +1,5 @@
 # Thin wrappers over pnpm/uv. Targets marked "stub" are filled in by the milestone named.
-.PHONY: mac-rollout install dev lint typecheck test check py-check db-reset db-seed db-check contracts contracts-check \
+.PHONY: mac-rollout prod-copy-clean install dev lint typecheck test check py-check db-reset db-seed db-check contracts contracts-check \
 	secrets vercel-env up up-local down logs update update-pause update-resume update-status rollback \
 	install-update-timer deploy-test migrations-check install-agent-tools install-agent-skills install-agent-cron \
 	install-chromium install-ollama-env backfill smoke ops-check e2e-system system-lint eval-agent \
@@ -66,6 +66,10 @@ eval-agent:
 # PROD_RO_TURSO_URL / PROD_RO_TURSO_TOKEN, else ~/.config/pandabase/prod-ro.env (docs/TESTING.md).
 prod-copy:
 	pnpm db:prod-copy
+
+# Delete the prod copy (and its SQLite side files) once you're done with it.
+prod-copy-clean:
+	rm -f .scratch/prod-copy.db .scratch/prod-copy.db-journal .scratch/prod-copy.db-wal .scratch/prod-copy.db-shm
 
 # Everything CI runs.
 check: lint typecheck test py-check system-lint db-check contracts-check ops-check

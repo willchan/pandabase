@@ -58,6 +58,9 @@ page load or anything that touches production.
    only**: rows changed, flags raised, lines matched. In the PR, write the counts, not names.
 4. A regression the copy reveals gets a **synthetic** test shaped like it (CLAUDE.md: bug fixes
    start with a regression test).
+5. **Delete the copy when you're done** (`make prod-copy-clean`), before you report, and say you
+   did. It holds real household data, and a finished worktree can sit on disk for weeks. Leave it
+   only while the task still needs it, and say so.
 
 ## Real page shapes (importer and parser changes)
 
