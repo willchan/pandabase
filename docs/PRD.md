@@ -104,6 +104,8 @@ Photo of an empty/finished item in Discord → VLM identifies it → item marked
 it lands in the next cart. Agent replies with what it understood. The agent tells a receipt from a finished
 item by the caption (or the local model's description); when it had to guess, its reply says so
 and one word (`trash` / `receipt`) re-files the photo — nobody has to answer.
+If the app can't be reached, replies wait quietly and post once it's back; only an outage of an
+hour or more gets one ⚠️ line in `#pandabase` (and a ✅ when it's over).
 
 ### 4.4 "Do we have X?"
 

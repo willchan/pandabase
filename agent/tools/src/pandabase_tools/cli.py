@@ -40,6 +40,7 @@ from . import (
 from . import config as config_mod
 from .browser import CdpDriver, Driver, NotSignedIn
 from .lock import ProfileLock, ProfileLocked
+from .outage import OutageTracker
 from .telemetry import Telemetry
 
 EXTRACT_NAME = re.compile(r"^[a-z0-9_]+(?:\.jsonl)?$")
@@ -69,6 +70,7 @@ class Env:
             CdpDriver(cdp_url)
         )
         self.today: Callable[[], date] | None = None
+        self.now: Callable[[], datetime] = lambda: datetime.now(UTC)
 
     @property
     def loaded(self) -> config_mod.Loaded:
@@ -452,12 +454,25 @@ def reply_line(n: contracts.JobNotification, web_url: str | None) -> str:
 
 
 def cmd_jobs_replies(env: Env) -> str:
-    """Plain text for an OpenClaw command automation: the replies to post, or `NO_REPLY`."""
-    res = env.api.call("GET", "/api/jobs/notifications")
+    """Plain text for an OpenClaw command automation: the replies to post, or `NO_REPLY`.
+
+    Its stdout goes straight to Discord, so an API failure is never printed as JSON: it's
+    `NO_REPLY` (the next run retries; unacknowledged jobs stay queued) until the outage has
+    lasted `jobs.outage_alert_minutes`, then one ⚠️ line, and one ✅ line when it's back."""
+    outage = OutageTracker(
+        env.loaded.state_dir() / "jobs-replies-outage.json", env.cfg.jobs.outage_alert_minutes
+    )
+    try:
+        res = env.api.call("GET", "/api/jobs/notifications")
+    except api_mod.ApiError as err:
+        alert, minutes = outage.failed(err, env.now(), "photo replies")
+        print(f"jobs replies: API failed for {minutes} min: {err}", file=sys.stderr)
+        return alert or "NO_REPLY"
+    back, lasted = outage.recovered(env.now())
+    if lasted is not None:
+        env.tel.emit("api_outage", command="jobs replies", minutes=lasted, alerted=bool(back))
     assert isinstance(res, contracts.JobNotificationsResponse)
     notes = res.notifications[: env.args.limit]
-    if not notes:
-        return "NO_REPLY"
     guild = env.cfg.discord.guild_id
     lines: list[str] = []
     for n in notes:
@@ -466,12 +481,24 @@ def cmd_jobs_replies(env: Env) -> str:
         if len(notes) > 1 and job.discord_channel_id and job.discord_message_id:
             link = f"https://discord.com/channels/{guild}/{job.discord_channel_id}/{job.discord_message_id}"
             text = f"{text} ({link})"
+        try:
+            env.api.call(
+                "POST",
+                f"/api/jobs/{job.id}/notified",
+                body={},
+                idempotency_key=f"notified:{job.id}",
+            )
+        except api_mod.ApiError as err:
+            # Post what's already acknowledged; this job and the rest stay queued for next run.
+            print(f"jobs replies: notified {job.id} failed: {err}", file=sys.stderr)
+            break
         lines.append(text)
-        env.api.call(
-            "POST", f"/api/jobs/{job.id}/notified", body={}, idempotency_key=f"notified:{job.id}"
-        )
+    if back:
+        lines.insert(0, back)
+    if not lines:
+        return "NO_REPLY"
     only = notes[0].job
-    if len(notes) == 1 and only.discord_message_id:
+    if len(lines) == 1 and not back and only.discord_message_id:
         return f"[[reply_to:{only.discord_message_id}]] {lines[0]}"
     return "\n".join(lines)
 

@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import json
 import shutil
-from datetime import date
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+import httpx
 import pytest
 from conftest import REPO, FakeApi, FakeDriver, FakeShop
 from test_cart_injector import VIEW, line, product
@@ -488,6 +489,98 @@ def test_jobs_replies(config: Path) -> None:
     assert lines[1].startswith("⚠️ Couldn't read that photo: model timeout.")
     notes.clear()
     assert run(config, ["jobs", "replies"], api)[1] == "NO_REPLY"
+
+
+def test_jobs_replies_network_timeout_is_not_posted_as_json(config: Path) -> None:
+    """Regression (live 2026-11-10, 2:36 AM): the 5-minute `jobs replies` automation couldn't
+    reach the API (`[Errno 60] Operation timed out`) and OpenClaw posted the CLI's raw
+    `{"error": "network error: …", "status": 0}` to #pandabase. An outage is silent until it has
+    lasted `jobs.outage_alert_minutes`, then one readable ⚠️ line, then ✅ once it's back."""
+    down = True
+    notes: list[dict[str, Any]] = []
+
+    def notifications(_: Any) -> Any:
+        if down:
+            raise httpx.ConnectTimeout("[Errno 60] Operation timed out")
+        return {"notifications": notes}
+
+    api = FakeApi(
+        {
+            "GET /api/jobs/notifications": notifications,
+            "POST /api/jobs/J1/notified": lambda _: {
+                "job": _job("J1", "completed", "paper_receipt", "555")
+            },
+            "POST /api/telemetry": lambda b: {"accepted": len(b["events"])},
+        }
+    )
+    t0 = datetime(2026, 11, 10, 10, 36, tzinfo=UTC)
+
+    def at(minutes: int) -> tuple[int, Any]:
+        argv = ["--config", str(config), "jobs", "replies"]
+        env = cli.Env(cli.build_parser().parse_args(argv))
+        env.set_api(api.client())
+        env.now = lambda: t0 + timedelta(minutes=minutes)
+        return cli.run(argv, env)
+
+    assert at(0) == (0, "NO_REPLY")
+    assert at(55) == (0, "NO_REPLY")
+    code, out = at(60)
+    assert code == 0 and out.startswith("⚠️ PandaBase has been unreachable for 60 min")
+    assert "no response (network)" in out and "{" not in out
+    assert at(65) == (0, "NO_REPLY")  # one alert per outage
+    down = False
+    notes.append(
+        {
+            "job": _job("J1", "completed", "paper_receipt", "555"),
+            "receipt_id": "R1",
+            "review_ids": [],
+            "summary": "Trader Joe's receipt: 12 lines, 10 matched.",
+        }
+    )
+    code, out = at(70)
+    assert out.split("\n") == [
+        "✅ PandaBase is reachable again.",
+        "🧾 Trader Joe's receipt: 12 lines, 10 matched.",
+    ]
+    outage = [e for b in api.bodies("POST /api/telemetry") for e in b["events"]]
+    assert [(e["metric_type"], e["payload"]) for e in outage] == [
+        ("api_outage", {"command": "jobs replies", "minutes": 70, "alerted": True})
+    ]
+    notes.clear()
+    assert at(75) == (0, "NO_REPLY")
+    # A short blip never posts anything, and recovery from it is silent too.
+    down = True
+    assert at(80) == (0, "NO_REPLY")
+    down = False
+    assert at(85) == (0, "NO_REPLY")
+
+
+def test_jobs_replies_posts_only_acknowledged_jobs(config: Path) -> None:
+    """A failed `notified` ack mid-batch posts the replies already acked; the rest stay queued
+    (before: the whole run printed error JSON and the acked replies were lost)."""
+    notes: list[dict[str, Any]] = [
+        {
+            "job": _job(j, "completed", "paper_receipt", m),
+            "receipt_id": None,
+            "review_ids": [],
+            "summary": f"Receipt {j}.",
+        }
+        for j, m in (("J1", "555"), ("J2", "556"))
+    ]
+    api = FakeApi(
+        {
+            "GET /api/jobs/notifications": lambda _: {"notifications": notes},
+            "POST /api/jobs/J1/notified": lambda _: {
+                "job": _job("J1", "completed", "paper_receipt", "555")
+            },
+            "POST /api/jobs/J2/notified": lambda _: httpx.Response(
+                503, json={"error": "unavailable"}
+            ),
+        }
+    )
+    code, out = run(config, ["jobs", "replies"], api)
+    assert code == 0 and out.startswith("[[reply_to:555]] 🧾 Receipt J1.")
+    assert "J2" not in out
 
 
 def test_telemetry_emit_is_flushed(config: Path) -> None:

@@ -117,6 +117,11 @@ class ReceiptsConfig(BaseModel):
     order_details_url: str = "https://www.amazon.com/your-orders/order-details?orderID={order_id}"
 
 
+class JobsConfig(BaseModel):
+    # `jobs replies` stays silent through an API outage this long before one ⚠️ post.
+    outage_alert_minutes: int = Field(default=60, ge=0)
+
+
 class ToolsConfig(BaseModel):
     api_base_url: str
     web_url: str | None = None
@@ -128,6 +133,7 @@ class ToolsConfig(BaseModel):
     diagnostics_dir: str = "/diagnostics"
     cart: CartConfig = Field(default_factory=CartConfig)
     receipts: ReceiptsConfig = Field(default_factory=ReceiptsConfig)
+    jobs: JobsConfig = Field(default_factory=JobsConfig)
 
     def member(self, name_or_discord_id: str) -> Member:
         for m in self.members:
