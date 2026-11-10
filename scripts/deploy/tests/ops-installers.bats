@@ -44,6 +44,14 @@ JSON
 # hands to every app's tools (Bamboo read PandaBase's AGENT_API_TOKEN from it). They now go to
 # PandaBase's own agent.env (dir 700, file 600); OpenClaw's file loses them, prefixed or not, and
 # keeps other apps' lines and the shared OLLAMA_API_KEY.
+# Regression: with two agents configured, `openclaw skills check` without --agent failed and
+# stopped `make mac-rollout` before install-agent-cron ran.
+@test "install-agent-skills checks the skills for --agent main" {
+  run /bin/bash "$ROOT_DIR/scripts/ops/install-agent-skills.sh"
+  [ "$status" -eq 0 ]
+  grep -F "openclaw skills check" "$STUB/calls" | grep -qF -- "--agent main"
+}
+
 @test "install-agent-skills writes PandaBase's own env file and clears its keys from OpenClaw's" {
   printf 'AGENT_API_TOKEN=old-unprefixed\nPANDABASE_AGENT_API_TOKEN=old\nPANDABASE_API_URL=http://old\nBAMBOO_API_URL=https://bamboo.test\n' >"$OPENCLAW_ENV"
   run /bin/bash "$ROOT_DIR/scripts/ops/install-agent-skills.sh"
