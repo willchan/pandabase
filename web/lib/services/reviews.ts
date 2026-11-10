@@ -25,7 +25,7 @@ import {
   resolveReceiptReview,
   type LineDecision,
 } from "../domain/receipts";
-import { mayCreateLabel, type ReviewKind } from "../domain/review";
+import { isOneTimeBuy, mayCreateLabel, type ReviewKind } from "../domain/review";
 import { daysBetween } from "../domain/time";
 import { badRequest, conflict, notFound } from "../http";
 import { getItem, toCandidate } from "../repo/catalog";
@@ -117,6 +117,8 @@ export interface ReviewSummary {
   /** Merge suggestions: the item to fold into. */
   mergeInto: { id: string; name: string } | null;
   job: { type: string; error: string | null; attempts: number } | null;
+  /** A new product bought once, off this week's cart: Cleanup leaves it out (§4.6). */
+  oneTimeBuy: boolean;
 }
 
 /**
@@ -137,7 +139,7 @@ export async function pendingReviews(q: Q): Promise<ReviewSummary[]> {
       .from(reviewItem)
       .where(pending)
       .orderBy(desc(reviewItem.impactScore), asc(reviewItem.createdAt), asc(reviewItem.id)),
-    q.select({ id: item.id, name: item.canonicalName }).from(item),
+    q.select({ id: item.id, name: item.canonicalName, trackingType: item.trackingType }).from(item),
     q
       .select()
       .from(receipt)
@@ -157,6 +159,7 @@ export async function pendingReviews(q: Q): Promise<ReviewSummary[]> {
       .where(inArray(auditJob.id, ofKind("failed_job", reviewItem.jobId))),
   ]);
   const names = new Map(itemRows.map((i) => [i.id, i.name]));
+  const tracking = new Map(itemRows.map((i) => [i.id, i.trackingType]));
   const receipts = new Map(receiptRows.map((x) => [x.id, x]));
   const jobs = new Map(jobRows.map((j) => [j.id, j]));
   const openLines = new Map<string, number>();
@@ -195,6 +198,7 @@ export async function pendingReviews(q: Q): Promise<ReviewSummary[]> {
       receipt: rec,
       mergeInto: intoId ? { id: intoId, name: names.get(intoId) ?? intoId } : null,
       job,
+      oneTimeBuy: isOneTimeBuy(r, r.itemId ? (tracking.get(r.itemId) ?? null) : null),
     });
   }
   return out.sort(
@@ -203,6 +207,21 @@ export async function pendingReviews(q: Q): Promise<ReviewSummary[]> {
       (a.expiresAt ?? "9999").localeCompare(b.expiresAt ?? "9999") ||
       a.createdAt.localeCompare(b.createdAt),
   );
+}
+
+/** Pending reviews Cleanup lists (the nav badge): all but one-time buys (`isOneTimeBuy`, §4.6). */
+export async function cleanupCount(q: Q): Promise<number> {
+  const [row] = await q
+    .select({ n: sql<number>`count(*)` })
+    .from(reviewItem)
+    .leftJoin(item, eq(item.id, reviewItem.itemId))
+    .where(
+      and(
+        eq(reviewItem.status, "pending"),
+        sql`not (${reviewItem.kind} = 'new_product' and ${reviewItem.urgency} = 'cleanup' and coalesce(${item.trackingType}, '') = 'static')`,
+      ),
+    );
+  return Number(row?.n ?? 0);
 }
 
 const receiptLines = (q: Q, receiptId: string) =>

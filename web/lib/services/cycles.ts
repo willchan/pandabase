@@ -10,7 +10,7 @@ import {
   reviewItem,
   type Db,
 } from "@pandabase/db";
-import { asc, count, eq, inArray } from "drizzle-orm";
+import { and, asc, count, eq, inArray } from "drizzle-orm";
 import type { z } from "zod";
 import type {
   CartResponse,
@@ -36,6 +36,7 @@ import {
   type CartPlan,
   type CycleOverride,
 } from "../domain/predictions";
+import { ITEM_REVIEW_KINDS, reprioritize } from "../domain/review";
 import {
   candidatesFor,
   learnFromOverride,
@@ -351,6 +352,63 @@ function pleaseCheck(s: PlanState, ctx: ReadCtx) {
   return pleaseCheckList(candidates, ctx.config);
 }
 
+/**
+ * §4.6: re-score pending item reviews (new product, unverified, merge suggestion) against plan `s`
+ * — by default the active cycle's — so the ones touching this week's cart surface in This Week.
+ * Run daily and when a cart is recorded; an import creates its reviews before any plan exists.
+ * Returns how many reviews changed.
+ */
+export async function reprioritizeReviews(
+  q: Q,
+  ctx: ReadCtx,
+  trigger: "maintenance" | "cart_result",
+  s?: PlanState,
+): Promise<number> {
+  const state = s ?? (await planFor(q, await activeCycle(q), ctx));
+  const cart = new Set(
+    state.plan.lines.map((l) => l.itemId).filter((x): x is string => x !== null),
+  );
+  const please = new Set(pleaseCheck(state, ctx).map((c) => c.e.item.id));
+  const pending = await q
+    .select({
+      id: reviewItem.id,
+      kind: reviewItem.kind,
+      itemId: reviewItem.itemId,
+      impactScore: reviewItem.impactScore,
+      urgency: reviewItem.urgency,
+    })
+    .from(reviewItem)
+    .where(and(eq(reviewItem.status, "pending"), inArray(reviewItem.kind, [...ITEM_REVIEW_KINDS])));
+  const changes = reprioritize(pending, { cart, pleaseCheck: please }, ctx.config);
+  // One UPDATE per (score, urgency), in chunks: a backfill can leave hundreds of reviews.
+  const groups = new Map<
+    string,
+    { impactScore: number; urgency: "this_week" | "cleanup"; ids: string[] }
+  >();
+  for (const c of changes) {
+    const key = `${c.impactScore}:${c.urgency}`;
+    const g = groups.get(key) ?? { impactScore: c.impactScore, urgency: c.urgency, ids: [] };
+    g.ids.push(c.id);
+    groups.set(key, g);
+  }
+  for (const g of groups.values())
+    for (let i = 0; i < g.ids.length; i += ctx.config.impact.updateChunk)
+      await q
+        .update(reviewItem)
+        .set({ impactScore: g.impactScore, urgency: g.urgency, updatedAt: ctx.now })
+        .where(inArray(reviewItem.id, g.ids.slice(i, i + ctx.config.impact.updateChunk)));
+  if (changes.length > 0) {
+    const raised = changes.filter((c) => c.urgency === "this_week").length;
+    await emitTelemetry(
+      q,
+      "state_engine",
+      [{ metric: "review_reprioritized", trigger, raised, lowered: changes.length - raised }],
+      ctx.now,
+    );
+  }
+  return changes.length;
+}
+
 export async function checkin(q: Q, ctx: ReadCtx): Promise<z.input<typeof CheckinResponse>> {
   const cycle = await activeCycle(q);
   const s = await planFor(q, cycle, ctx);
@@ -578,6 +636,7 @@ export async function recordCartResult(
       ctx.now,
     );
     if (firstBuild) await logSwitches(tx, s, cycleId, input, ctx);
+    await reprioritizeReviews(tx, ctx, "cart_result", s);
     return { cycle: toCycle(await getCycle(tx, cycleId)) };
   });
 }

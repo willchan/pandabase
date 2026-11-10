@@ -44,7 +44,7 @@ async function CleanupPageContent(props: PageProps<"/cleanup">) {
   const { db, ctx } = await currentMember();
   const tz = ctx.config.householdTz;
   const params = await props.searchParams;
-  const [reviews, items] = await Promise.all([
+  const [allReviews, items] = await Promise.all([
     pendingReviews(db),
     db
       .select({ id: item.id, name: item.canonicalName })
@@ -52,6 +52,9 @@ async function CleanupPageContent(props: PageProps<"/cleanup">) {
       .where(isNull(item.mergedIntoItemId))
       .orderBy(asc(item.canonicalName)),
   ]);
+  // One-time buys stay pending and expire to "keep" (§4.6); asking about them changes nothing.
+  const reviews = allReviews.filter((r) => !r.oneTimeBuy);
+  const oneTimeBuys = allReviews.length - reviews.length;
   const byTab = TABS.map((t) => ({
     ...t,
     reviews: reviews.filter((r) => (t.kinds as readonly string[]).includes(r.kind)),
@@ -93,6 +96,14 @@ async function CleanupPageContent(props: PageProps<"/cleanup">) {
         </TabsList>
         {byTab.map((t) => (
           <TabsContent key={t.id} value={t.id} className="flex flex-col gap-3">
+            {t.id === "merges" && oneTimeBuys > 0 ? (
+              <p className="text-xs text-muted-foreground" data-testid="one-time-buys">
+                {oneTimeBuys === 1
+                  ? "1 new product bought only once isn't listed. It stays its own item"
+                  : `${oneTimeBuys} new products bought only once aren't listed. Each stays its own item`}{" "}
+                and shows up here if it&apos;s bought again or added to a cart.
+              </p>
+            ) : null}
             {t.reviews.length === 0 ? (
               <p className="rounded-lg border border-dashed px-4 py-6 text-center text-sm text-muted-foreground">
                 Nothing here.

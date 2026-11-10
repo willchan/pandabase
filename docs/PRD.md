@@ -126,7 +126,7 @@ estimate with an honest confidence hint: "~2 milk (bought Oct 12, unverified) �
 | Page | Purpose |
 |------|---------|
 | **This Week** | Current cycle, planned cart with reasons, running list, overrides. (Urgent HITL.) |
-| **Cleanup** | Tabs: receipts (photo beside the lines, one dropdown per line, one confirm), merges (suggested merges and new products), unverified items, jobs (failed jobs and unsure Trash Cam photos) — sorted by impact on this week's cart, with expiry shown; 20 per tab, then "Show more". (Long-term HITL.) |
+| **Cleanup** | Tabs: receipts (photo beside the lines, one dropdown per line, one confirm), merges (suggested merges and new products), unverified items, jobs (failed jobs and unsure Trash Cam photos) — sorted by impact on this week's cart (re-checked daily, so a review about something in this week's cart moves up to This Week), with expiry shown; 20 per tab, then "Show more". New products bought only once are left out (counted in a note): they stay as their own item, and come back if bought again or added to a cart. (Long-term HITL.) |
 | **Pantry** | Estimated inventory by location; item detail with products, thresholds, EMA history, event log. |
 | **Insights** | Visual view of the diagnostics metrics. |
 | **Settings** | Away periods, members ↔ Discord IDs, cart account, default thresholds. A person on the allowlist becomes a member the first time they sign in. |
