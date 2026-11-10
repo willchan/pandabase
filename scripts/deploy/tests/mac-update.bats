@@ -64,6 +64,54 @@ setup() {
   grep -qx "outcome=success" "$ROOT_DIR/.deploy/last-deploy"
 }
 
+# The agent installers used to be re-run by hand after each merge that needed them (2026-11).
+agent_install_stub() {
+  export PANDABASE_AGENT_INSTALL="$STUB/agent-install"
+  cat >"$PANDABASE_AGENT_INSTALL" <<'SH'
+#!/usr/bin/env bash
+printf 'agent-install %s\n' "$*" >>"$STUB/calls"
+[ ! -f "$STUB/agent-install-fails" ]
+SH
+  chmod +x "$PANDABASE_AGENT_INSTALL"
+}
+
+@test "re-runs the agent installers after a healthy update that changed their inputs" {
+  agent_install_stub
+  history "$A" "$B"
+  publish "$B"
+  printf '%s\n' web/lib/config.ts agent/cron.example.json >"$STUB/changed"
+  update
+  [ "$status" -eq 0 ]
+  called "agent-install --installers-only"
+  [[ "$output" == *"agent installers: agent/cron.example.json changed"* ]]
+  ! called "curl"
+}
+
+@test "leaves the agent installers alone when the update didn't touch them" {
+  agent_install_stub
+  history "$A" "$B"
+  publish "$B"
+  printf '%s\n' web/lib/config.ts agent/skills/grocery-cycle/SKILL.md >"$STUB/changed"
+  update
+  [ "$status" -eq 0 ]
+  ! called "agent-install"
+}
+
+@test "a failed installer run keeps the update and posts to Discord once" {
+  agent_install_stub
+  touch "$STUB/agent-install-fails"
+  printf 'DEPLOY_DISCORD_WEBHOOK_URL=https://discord.test/api/webhooks/1/secret\n' >>"$ROOT_DIR/.env"
+  history "$A" "$B"
+  publish "$B"
+  printf '%s\n' scripts/ops/install-agent-cron.sh >"$STUB/changed"
+  update
+  [ "$status" -eq 0 ]
+  [ "$(head_sha)" = "$B" ]
+  [ "$(grep -c '^curl' "$STUB/calls")" -eq 1 ]
+  grep "^curl" "$STUB/calls" | grep -q "make mac-rollout"
+  ! called "git reset"
+}
+
 @test "rolls back on a failed health check, posts to Discord once, and skips that sha later" {
   history "$A" "$B"
   publish "$B"

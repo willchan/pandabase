@@ -1049,7 +1049,12 @@ over 200k `<option>`s and took ~35s under `next dev` (2s after both changes).
      → `PANDABASE_WORKER_TAG=<sha>` in `.env` → `docker compose pull worker && up -d`;
   4. health check, retried every 10 s for 120 s: worker container running, `GET
      /api/health/worker` shows a heartbeat with `sha` = target sent within the last minute of the
-     switch, and `GET /api/grocery/cycle/current` succeeds with the agent token;
+     switch, and `GET /api/grocery/cycle/current` succeeds with the agent token. Healthy, and the
+     diff touched the agent's jobs, configs or installers (`agent/cron.example.json`,
+     `agent/*.example.*`, `scripts/ops/install-agent-*.sh`, `lib.sh`, `mac-rollout.sh`): re-run
+     them with `scripts/ops/mac-rollout.sh --installers-only` (gateway restart only if its env
+     changed). If that fails the update stands (the worker is healthy) and #pandabase gets one post
+     naming `make mac-rollout`;
   5. on failure (or if a switch step fails): add the sha to `bad-shas`, `git reset --keep` to the
      previous sha, restore its tag without pulling (a moving tag like `main` would fetch the new
      image), `up -d`, health-check again (heartbeat sha only when the old tag is a sha), post once

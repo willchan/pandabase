@@ -19,7 +19,8 @@ Read only the sections your task needs.
 ## Rules
 
 - **Driving a PR?** Follow `.claude/skills/steward/SKILL.md`: check mergeability before CI on every
-  wake and after each push — GitHub runs no PR CI while a PR conflicts with `main`.
+  wake and after each push — GitHub runs no PR CI while a PR conflicts with `main`. After opening a
+  PR, turn on its Auto-fix (the app's PR monitor) so CI failures and conflicts wake you.
 - **The docs are living.** Any PR that changes user-visible behavior updates `docs/PRD.md`; any PR
   that changes architecture, schema, API contracts, algorithms or agent behavior updates
   `docs/DESIGN.md` (including §10 *Key decisions* when a decision changes). Deviations from a
@@ -118,7 +119,7 @@ make install-update-timer    # launchd: make update every 15 min (GHCR image is 
 make install-agent-tools     # agent/tools venv, pandabase-tools on PATH, configs from examples
 make install-agent-skills    # skills.load.extraDirs += agent/skills; ~/.config/pandabase/agent.env
 make install-agent-cron      # OpenClaw automations (list, then edit or add)
-make mac-rollout             # after a merge: green main + the three agent installers + gateway restart if needed
+make mac-rollout             # by hand: green main + the agent installers (make update runs them itself when needed)
 make install-chromium        # per-member Chrome LaunchAgents (CHROMIUM_BIN; loopback-only CDP)
 make install-ollama-env      # OLLAMA_NUM_PARALLEL=1, OLLAMA_MAX_LOADED_MODELS=1, OLLAMA_NO_CLOUD=1 at login
 make backfill [MEMBER=m]     # 12-month receipt backfill, resumable
@@ -133,7 +134,8 @@ pages.
 - **Two accounts.** Claude sessions run as the admin user; PandaBase, OpenClaw and its tokens
   belong to the agent account. Run there with `ssh agent '<cmd>'` from `~/Code/pandabase`, and keep
   configs and tokens in that account's home, never the admin's.
-- **After a PR merges,** run `make mac-rollout` there rather than the installers one by one.
+- **After a PR merges,** the 15-minute updater pulls it and re-runs the agent installers when the
+  diff needs it; a failure posts to #pandabase. `make mac-rollout` there does it by hand.
 - **Live data, read-only:** `scripts/ops/agent-run.sh api get /api/predictions` (also
   `/api/items/lookup`, `/api/diagnostics/weekly?week=YYYY-Www`); for anything broader,
   `make prod-copy`.
