@@ -103,7 +103,7 @@ agent_installers() {
   if [ -z "$changed" ]; then
     return 0
   fi
-  log "agent installers: $(printf '%s' "$changed" | tr '\n' ' ')changed"
+  log "agent installers: changed $(printf '%s\n' "$changed" | paste -sd ' ' -)"
   if run "${PANDABASE_AGENT_INSTALL:-$ROOT/scripts/ops/mac-rollout.sh}" --installers-only; then
     log "agent installers done"
   else

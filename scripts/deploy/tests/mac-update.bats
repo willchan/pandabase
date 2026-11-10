@@ -83,7 +83,7 @@ SH
   update
   [ "$status" -eq 0 ]
   called "agent-install --installers-only"
-  [[ "$output" == *"agent installers: agent/cron.example.json changed"* ]]
+  [[ "$output" == *"agent installers: changed agent/cron.example.json"* ]]
   ! called "curl"
 }
 
