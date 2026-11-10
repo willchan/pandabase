@@ -24,7 +24,7 @@
     "reset": "tsx src/reset.ts",
     "rebuild-state": "tsx src/rebuild-state.ts",
     "migrations-status": "tsx src/migrations-status.ts",
-    "prod-copy": "tsx src/prod-copy.ts"
+    "prod-copy": "NODE_USE_ENV_PROXY=1 tsx src/prod-copy.ts"
   },
   "devDependencies": {
     "@types/node": "^24.19.2",

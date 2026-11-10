@@ -332,8 +332,10 @@ logs or uploaded artifacts**; in chat, report counts only.
   `PROD_RO_TURSO_URL=libsql://…` and `PROD_RO_TOKEN_FROM_PROXY=1`. A host with a network secret
   is reachable whatever the network level, so no allowlist entry is needed. With the flag set,
   `make prod-copy` sends no token of its own and talks HTTPS (`libsql://` → `https://`), since the
-  proxy adds secrets to HTTP(S) requests. The real host stays in the environment settings, never
-  in the repo.
+  proxy adds secrets to HTTP(S) requests. Node's built-in `fetch` ignores `HTTPS_PROXY` on its
+  own (a bare `fetch failed`), so the `prod-copy` script runs with `NODE_USE_ENV_PROXY=1` (Node
+  ≥ 22.21; without a proxy set it connects directly). The real host stays in the environment
+  settings, never in the repo.
 - `.claude/launch.json` → **`dev-prod-copy`** (`pnpm --filter web dev:prod-copy`): `next dev` on
   the copy, signed in through the dev bypass as one real member (the first created, or
   `PROD_COPY_MEMBER`). It refuses to start unless `TURSO_DATABASE_URL` (default: the copy) is an
