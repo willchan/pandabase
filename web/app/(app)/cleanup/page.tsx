@@ -17,6 +17,7 @@ import { NativeSelect } from "@/components/ui/native-select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { currentMember } from "@/lib/auth/current";
 import { monthDay, shortDate, vendorName } from "@/lib/format";
+import { showCount } from "@/lib/paging";
 import { pendingReviews, type ReviewSummary } from "@/lib/services/reviews";
 import { answerTrashCamAction, confirmItemAction, dismissAction, mergeAction } from "./actions";
 
@@ -57,6 +58,10 @@ async function CleanupPageContent(props: PageProps<"/cleanup">) {
   }));
   const first = byTab.find((t) => t.reviews.length > 0)?.id ?? "receipts";
   const requested = typeof params.tab === "string" ? params.tab : null;
+  const active = byTab.some((t) => t.id === requested) ? requested! : first;
+  // Only a page of cards per tab: every new-product card carries a picker of every item.
+  const pageSize = ctx.config.cleanup.pageSize;
+  const shown = (tab: string) => (tab === active ? showCount(params.show, pageSize) : pageSize);
 
   return (
     <>
@@ -73,7 +78,7 @@ async function CleanupPageContent(props: PageProps<"/cleanup">) {
           <AlertDescription>Receipt confirmed — thanks, matching learns from it.</AlertDescription>
         </Alert>
       ) : null}
-      <Tabs defaultValue={byTab.some((t) => t.id === requested) ? requested! : first}>
+      <Tabs defaultValue={active}>
         <TabsList>
           {byTab.map((t) => (
             <TabsTrigger key={t.id} value={t.id}>
@@ -93,9 +98,20 @@ async function CleanupPageContent(props: PageProps<"/cleanup">) {
                 Nothing here.
               </p>
             ) : (
-              t.reviews.map((r) => (
-                <ReviewCard key={r.id} review={r} items={items} now={ctx.now} tz={tz} />
-              ))
+              <>
+                {t.reviews.slice(0, shown(t.id)).map((r) => (
+                  <ReviewCard key={r.id} review={r} items={items} now={ctx.now} tz={tz} />
+                ))}
+                {t.reviews.length > shown(t.id) ? (
+                  <Link
+                    href={`/cleanup?tab=${t.id}&show=${shown(t.id) + pageSize}`}
+                    scroll={false}
+                    className="rounded-lg border border-dashed px-4 py-3 text-center text-sm text-primary"
+                  >
+                    {moreLabel(t.reviews.length - shown(t.id), pageSize)}
+                  </Link>
+                ) : null}
+              </>
             )}
           </TabsContent>
         ))}
@@ -106,6 +122,10 @@ async function CleanupPageContent(props: PageProps<"/cleanup">) {
       </p>
     </>
   );
+}
+
+function moreLabel(left: number, pageSize: number) {
+  return left <= pageSize ? `Show ${left} more` : `Show ${pageSize} more · ${left} left`;
 }
 
 function Meta({ review, tz }: { review: ReviewSummary; tz: string }) {

@@ -132,7 +132,9 @@ try {
       const height = await page.evaluate(() => document.documentElement.scrollHeight);
       await page.setViewportSize({ width: 390, height: Math.max(844, height) });
       await page.waitForTimeout(150);
-      await page.screenshot({ path: file });
+      // `caret: "initial"`: the default "hide" sets an inline `caret-color` on every input, and on a
+      // page still hydrating that is reported as a React hydration mismatch on `style`.
+      await page.screenshot({ path: file, caret: "initial" });
       await page.setViewportSize({ width: 390, height: 844 });
       files.push(file);
     }
