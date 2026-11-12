@@ -418,12 +418,13 @@ without changing anything.
    - name: your first name
    - discord: your Discord user id ([how](#finding-a-discord-user-id);
      optional now)
-   - profile: a short lowercase name for your Mac Mini browser profile,
-     e.g. `will` (optional now)
+   - profile: `pandabase` if your Amazon account fills the cart (PandaBase
+     drives that one browser profile on the Mac mini); leave it empty
+     otherwise (optional now)
    - sweep: `daily`
    - cart: ticked if your Amazon account fills the cart
-4. **Add your partner:** the same with member `2`, their name, id and
-   profile, sweep `weekly`, cart unticked.
+4. **Add your partner:** the same with member `2`, their name and id, no
+   profile, sweep `off`, cart unticked.
 
 Only one member is the cart account; ticking *cart* on someone moves it
 to them. Fill in missing Discord ids or profiles later by running

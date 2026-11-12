@@ -39,13 +39,6 @@
       "message": "Sweep receipts for member will."
     },
     {
-      "name": "pandabase-receipts-partner",
-      "cron": "0 21 * * 0",
-      "skill": "digital-receipt-scraper",
-      "member": "partner",
-      "message": "Sweep receipts for member partner."
-    },
-    {
       "name": "pandabase-diagnostics",
       "cron": "0 23 * * 0",
       "skill": "telemetry-aggregator",

@@ -17,7 +17,7 @@ import re
 from pathlib import Path
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, Field, StringConstraints
+from pydantic import BaseModel, Field, StringConstraints, model_validator
 
 CONFIG_ENV = "PANDABASE_CONFIG"
 TOKEN_ENV = "PANDABASE_AGENT_API_TOKEN"
@@ -66,9 +66,18 @@ class DiscordConfig(BaseModel):
 class Member(BaseModel):
     name: str
     discord_id: str
-    profile: str
+    # The PandaBase browser profile (a key of profiles.json) that holds this member's Amazon
+    # session; None for a member PandaBase doesn't drive a browser for. One per household today
+    # (`pandabase`, the cart member's): members' own Chrome profiles for their OpenClaw agents
+    # live outside PandaBase (DESIGN §6).
+    profile: str | None = None
     cart_member: bool = False
     receipt_sweep: Literal["daily", "weekly", "off"] = "weekly"
+
+    def profile_name(self) -> str:
+        if self.profile is None:
+            raise KeyError(f"member {self.name!r} has no PandaBase browser profile")
+        return self.profile
 
 
 class CartConfig(BaseModel):
@@ -135,6 +144,21 @@ class ToolsConfig(BaseModel):
     receipts: ReceiptsConfig = Field(default_factory=ReceiptsConfig)
     jobs: JobsConfig = Field(default_factory=JobsConfig)
 
+    @model_validator(mode="after")
+    def _one_member_per_profile(self) -> ToolsConfig:
+        # Two members on one profile would sweep one Amazon account's orders as both of theirs.
+        seen: dict[str, str] = {}
+        for m in self.members:
+            if m.profile is None:
+                continue
+            if m.profile in seen:
+                raise ValueError(
+                    f"members {seen[m.profile]!r} and {m.name!r} share profile {m.profile!r}; "
+                    "each profile holds one member's Amazon session"
+                )
+            seen[m.profile] = m.name
+        return self
+
     def member(self, name_or_discord_id: str) -> Member:
         for m in self.members:
             if name_or_discord_id in (m.name, m.discord_id):
@@ -166,10 +190,11 @@ class Loaded(BaseModel):
     config_path: str
 
     def profile(self, member: Member) -> Profile:
+        name = member.profile_name()
         try:
-            return self.profiles[member.profile]
+            return self.profiles[name]
         except KeyError:
-            raise KeyError(f"profile {member.profile!r} missing from profiles file") from None
+            raise KeyError(f"profile {name!r} missing from profiles file") from None
 
     def state_dir(self) -> Path:
         path = Path(self.config.state_dir).expanduser()

@@ -1,18 +1,31 @@
-// OPTIONAL — README "Photo privacy", option A (recommended). The owner decides; nothing applies
-// this automatically.
+// OPTIONAL — README "Photo privacy", option A. Only for a gateway whose agent on PandaBase's
+// channels uses a cloud reply model; the `pandabase` agent on a local model (option C) doesn't need
+// it. The owner decides; nothing applies this automatically.
 //
-// A dedicated `pandabase` agent answers #pandabase (and its cycle threads) with a model that
-// OpenClaw treats as text-only, so a photo whose local description failed is never attached to
-// a cloud request: OpenClaw injects images only into turns whose model is marked image-capable.
-// The PandaBase skills never need pixels (the local Ollama description is enough).
+// The agent bound to #pandabase (and its cycle threads) gets a model that OpenClaw treats as
+// text-only, so a photo whose local description failed is never attached to a cloud request:
+// OpenClaw injects images only into turns whose model is marked image-capable. The PandaBase
+// skills never need pixels (the local Ollama description is enough).
 //
 // The text-only model is your usual cloud model registered a second time under its own provider
-// id with `input: ["text"]`, so your other agents keep vision. Shown for Anthropic; for another
-// vendor use its `api` adapter and base URL (OpenClaw docs: gateway/config-tools/custom-providers).
+// id with `input: ["text"]`, so other agents on the gateway keep vision. Shown for Anthropic; for
+// another vendor use its `api` adapter and base URL (OpenClaw docs: gateway/config-tools/custom-providers).
 //
-// Apply like openclaw.pandabase.example.json5 (copy to agent/openclaw.privacy.json5, fill the
-// <…>, `openclaw config patch --file … --dry-run`, then for real). Then re-run the automations
-// as this agent:  OPENCLAW_AGENT=pandabase make install-agent-cron
+// Apply the provider below like openclaw.pandabase.example.json5 (copy to
+// agent/openclaw.privacy.json5, fill the <…>, `openclaw config patch --file … --dry-run`, then for
+// real). Then point the agent bound to #pandabase at it by index, not by patch: `agents.list` and
+// `bindings` are arrays shared with the gateway's other agents, and a patch would replace them.
+//
+//   openclaw config get agents.list --json        # find the agent bound to #pandabase
+//   openclaw config set "agents.list[<i>].model" '"pandabase-text/<MODEL_ID>"' --strict-json
+//
+// If no agent is bound to #pandabase yet, add one to `agents.list` by hand (keep the others), e.g.
+//   { id: "pandabase", workspace: "~/.openclaw/workspace-pandabase",
+//     model: "pandabase-text/<MODEL_ID>", tools: { deny: ["group:web", "browser"] } }
+// and a binding for the channel to `bindings` (keep the other agents' channel and DM bindings):
+//   { agentId: "pandabase", match: { channel: "discord", guildId: "<GUILD_ID>",
+//     peer: { kind: "channel", id: "<PANDABASE_CHANNEL_ID>" } } }
+// then set OPENCLAW_AGENT=pandabase in .env and re-run `make install-agent-cron`.
 {
   models: {
     providers: {
@@ -24,34 +37,4 @@
       },
     },
   },
-  agents: {
-    entries: {
-      pandabase: {
-        name: "PandaBase",
-        workspace: "~/.openclaw/workspace-pandabase",
-        model: "pandabase-text/<MODEL_ID>",
-        skills: [
-          "grocery-cycle",
-          "discord-intake",
-          "digital-receipt-scraper",
-          "item-lookup",
-          "telemetry-aggregator",
-        ],
-      },
-    },
-  },
-  // A peer binding wins over channel-wide ones. If `pandabase` is your gateway's second agent,
-  // also bind your existing agent for everything else (sole-agent fallback stops applying), e.g.
-  //   { agentId: "<YOUR_MAIN_AGENT_ID>", match: { channel: "discord", accountId: "*" } }
-  // and one such entry per other channel you use. Arrays replace: merge with existing bindings.
-  bindings: [
-    {
-      agentId: "pandabase",
-      match: {
-        channel: "discord",
-        guildId: "<GUILD_ID>",
-        peer: { kind: "channel", id: "<PANDABASE_CHANNEL_ID>" },
-      },
-    },
-  ],
 }

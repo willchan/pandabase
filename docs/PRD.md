@@ -21,9 +21,12 @@ split in two:
 One household, two members (Will and his wife), each with:
 
 - a Google account (web UI sign-in, allowlisted),
-- a Discord account (talks to the agent),
-- a login in a shared Amazon Household (separate Amazon logins, each driven through its own
-  Chromium profile by the agent).
+- a Discord account (talks to the `pandabase` agent in the shared channels; a DM reaches
+  whichever agent the gateway routes that member to, and any agent with the PandaBase skill sees
+  the same data),
+- a login in a shared Amazon Household (separate Amazon logins). PandaBase drives one of them:
+  Will's (the cart account), in its own browser profile named `pandabase`. Members' personal
+  browser profiles belong to their own agents, outside PandaBase.
 
 Will does almost all of the grocery shopping. Whole Foods **pickup** is the most common
 fulfillment, then in-store Whole Foods (linked via phone number), then delivery.
@@ -78,7 +81,8 @@ A Discord **thread per cycle** in `#pandabase`, acting as a running grocery list
 
 ### 4.2 Receipts → inventory
 
-- **Digital (Amazon / Whole Foods):** daily sweep of Will's order history, weekly for his wife's.
+- **Digital (Amazon / Whole Foods):** daily sweep of Will's order history (the `pandabase`
+  profile). His wife's orders aren't swept: PandaBase has no browser profile for her account.
   Delivery, pickup and phone-linked in-store purchases. An order is ingested once
   delivered/picked up (or, for an old order whose page no longer says, a week after it was
   placed); orders returned in full are skipped. Re-ingesting is harmless. If Amazon shows a bot

@@ -16,14 +16,15 @@
                                  │ HTTPS (bearer)    │ HTTPS (bearer)
                                  │ AGENT token       │ WORKER token
   ┌──────────────── Mac Mini (M6, 32GB) — outbound connections only ──────────────┐
-  │  OpenClaw (existing, native)          docker-compose                          │
+  │  OpenClaw gateway (existing, native)  docker-compose                          │
+  │   `pandabase` agent (other agents may share the gateway and the skill)        │
   │   ├─ PandaBase skill pack  ◀─────┐     └─ worker (Python)                     │
   │   │   /agent/skills/*/SKILL.md   │          ├─ polls /api/jobs/claim          │
   │   ├─ /agent/tools/*.py           │          ├─ FFmpeg, image prep             │
-  │   │   (CDP → Chromium profiles)  │          └─ Ollama client ──┐              │
+  │   │   (CDP → `pandabase` profile)│          └─ Ollama client ──┐              │
   │   ├─ cron (Fri/Sat/daily/Sun)    │                             ▼              │
   │   └─ Discord channel ◀──────────────▶ Discord      Ollama (native, Metal)    │
-  │  Chromium profiles: will, wife (logged in to Amazon)                          │
+  │  Chrome profile `pandabase` (the cart member's Amazon session)                │
   │  /diagnostics (gitignored; weekly reports + JSONL)                            │
   └───────────────────────────────────────────────────────────────────────────────┘
                      Media: Cloudflare R2 (presigned PUT/GET; no media through Vercel)
@@ -59,7 +60,10 @@ evening Claude Code sessions. Therefore:
 - Requests use `num_ctx` 8192 to keep the KV cache small. `merge_suggest` answers are capped at
   2048 tokens (`num_predict`, worker `MAX_OUTPUT_TOKENS`; #65). The worker only claims job types whose
   model is pulled (`GET /api/tags`), since every claim costs the job an attempt.
-- Only one Chromium profile is driven at a time (tools take a file lock).
+- PandaBase drives one browser profile, `pandabase` (the cart member's Amazon session); the tools
+  take a per-profile file lock, so only one command drives it at a time. Members without a
+  `profile` get no receipt sweep. Members' personal Chrome profiles belong to their own OpenClaw
+  agents, outside PandaBase.
 - Host Ollama settings `OLLAMA_NUM_PARALLEL=1` and `OLLAMA_MAX_LOADED_MODELS=1` (re-applied at
   login by a LaunchAgent, §8 *Mac Mini operations*); the README has the full memory budget.
 
@@ -843,13 +847,15 @@ JSON on stdout; exit 0 ok, 1 error, 2 usage, 3 profile locked, 4 refused URL):
 
 Config: `agent/pandabase.config.example.json` — API base URL, web URL, household TZ, channel IDs
 (`cycle_channel`, `intake_channel`, `ops_channel` — all `#pandabase` in v1), members ↔ Discord
-IDs ↔ profile name (+ `cart_member`, `receipt_sweep`), tool tunables (`cart.*`, `receipts.*`, `jobs.*`),
+IDs ↔ profile name (optional: only the cart member has one, `pandabase`; two members can't share
+one) (+ `cart_member`, `receipt_sweep`), tool tunables (`cart.*`, `receipts.*`, `jobs.*`),
 state and diagnostics dirs. `agent/profiles.example.json` maps profiles to CDP URLs
 (`http://127.0.0.1:<port>`) and user-data dirs (an old `openclaw_browser_profile` key is accepted and
-ignored: tier 2 moved into the tools). The agent's OpenClaw config should deny
-`["group:web", "browser"]` (`tools.deny`, in `agent/openclaw.pandabase.example.json5`): a local
-reply model with raw web/browser tools next to a signed-in Amazon session is the injection path
-§10 #52 closes. `agent/cron.example.json`
+ignored: tier 2 moved into the tools). The `pandabase` agent's `agents.list` entry should deny
+`["group:web", "browser"]` (`tools.deny`; `agent/openclaw.pandabase.example.json5` shows how): a
+local reply model with raw web/browser tools next to a signed-in Amazon session is the injection
+path §10 #52 closes. The deny is per agent, not gateway-wide: other agents on the gateway may have
+web tools and a browser with their own Chrome profile, never one attached to PandaBase's CDP port. `agent/cron.example.json`
 documents the OpenClaw automations. Steps that need no judgment are *command* payloads announced to
 a channel, with no model turn: the Friday nudge (`pandabase-tools cycle nudge` records it and prints
 the check-in), the Saturday 10:00 build (`cart build --reply`: tier 1, then a summary of what was
@@ -1137,21 +1143,27 @@ Setup is the README checklist; every step is a `make` target over an idempotent 
   `make install-agent-cron` (list, then `edit` by name or `add`; receipt sweeps generated per
   member from `receipt_sweep`; the job-replies command payload runs `scripts/ops/agent-run.sh`,
   which reads the token from `.env` so it isn't stored in OpenClaw's automation DB). Gateway
-  config (Discord channel policy, Ollama media model, `tools.deny` for web/browser) is a reviewed
-  `openclaw config patch` from `agent/openclaw.pandabase.example.json5`.
-- **launchd:** one browser LaunchAgent per profile (`ops/launchd/com.pandabase.chromium.plist.template`;
+  config (Discord channel policy, Ollama media model) is a reviewed `openclaw config patch` from
+  `agent/openclaw.pandabase.example.json5`, which describes the **`pandabase` agent**; its
+  `tools.deny` for web/browser is set on that agent's `agents.list` entry by index (the list and
+  `bindings` are arrays other agents on the gateway share, so no patch touches them). The gateway
+  can host other agents on the same bot, routed by channel and DM sender; they may have the
+  PandaBase skill and token, and keep their own tools. `OPENCLAW_AGENT` (env, else `.env`, else
+  `main`) names the `pandabase` agent for `install-agent-cron` and `skills check`.
+- **launchd:** one browser LaunchAgent per profile, today just `pandabase` (`ops/launchd/com.pandabase.chromium.plist.template`;
   Google Chrome by default via `CHROMIUM_BIN`, any Chromium build works; loopback-only DevTools
   port, `KeepAlive`, window named `PandaBase · <profile>`), and `com.pandabase.ollama-env`
   re-applying `OLLAMA_NUM_PARALLEL=1` / `OLLAMA_MAX_LOADED_MODELS=1` / `OLLAMA_NO_CLOUD=1` at
-  login (§10 #53).
+  login (§10 #53). `install-chromium` warns about (but doesn't stop) a `com.pandabase.chromium.*`
+  agent whose profile left `profiles.json`, e.g. after the `will` → `pandabase` rename.
 - **Container network (Colima):** the VM's `provision:` adds an iptables `DOCKER-USER` rule so
   containers reach the host gateway only on tcp/11434 (Ollama); every other host port, including
   the browsers' CDP ports and the OpenClaw gateway, is rejected (docs/SETUP-MAC.md).
 - **First run:** members are created on first sign-in (§3.1). `pnpm db:add-member` (or the
-  Bootstrap workflow) still upserts a member by email, e.g. to set the Chromium profile, which
+  Bootstrap workflow) still upserts a member by email, e.g. to set the browser profile, which
   Settings doesn't edit, keeping exactly one cart account.
 - **`make backfill`** repeats `receipts sweep --backfill` per member until `complete` (waits on a
-  busy profile lock), then calls `POST /api/catalog/merge-suggestions/run` once, like the skill. **`make update`** is the M9 updater
+  busy profile lock; members with no profile are skipped), then calls `POST /api/catalog/merge-suggestions/run` once, like the skill. **`make update`** is the M9 updater
   (*Continuous deployment* above); M8's manual `scripts/ops/update.sh` is gone.
 - **`make smoke`** (`scripts/smoke/run.sh`): env, agent-token round trip, worker running, models
   pulled, Ollama host settings, the worker image's VLM path on a synthetic receipt
@@ -1236,8 +1248,8 @@ docker-compose.yml (+ docker-compose.build.yml), Makefile, CLAUDE.md, README.md,
 | 49 | Vercel Preview has its own API tokens, cron secret, `AUTH_SECRET`, allowlist and R2 bucket (scoped token); only the Google client, R2 account id and time zone are shared | Previews run unreviewed PR code, so a preview secret must be worthless on production and previews must not reach the household's photos; the Google secret alone can't sign anyone in (redirect URIs + `AUTH_SECRET`) |
 | 50 | PR previews are tested end to end (tier A′) by re-running tier A's steps in a remote mode against the real deployment, triggered by Vercel's `repository_dispatch` (reported as a commit status), on a preview DB that each run resets — guarded by two independent "preview" signals; reported, not required yet | Tier A can't see Vercel, Turso or R2; reusing its steps keeps one test of the week; the dispatch waits for the real build without polling, and runs `main`'s workflow definition; requiring it waits until it has proven stable |
 | 51 | Production gets a read-only smoke after every web deploy that reports (job, Discord, telemetry) but never rolls back | A smoke that can write could damage the household's data; rollback has side effects (Vercel stops auto-promoting, old env vars) that a human should choose; the Mac Mini already rolls back its own worker |
-| 52 | Tier 2 runs only through `pandabase-tools cart search` / `cart add` on the guarded CDP driver; the agent's OpenClaw denies `group:web` and `browser` | A local model with a raw browser on the signed-in Amazon profile could be steered by product-page text to Buy Now / checkout (OpenClaw's browser has no URL denylist; audit `models.small_params`). Search returns size-limited, labelled-untrusted JSON; add is by ASIN through tier 1's guarded path with Buy Now controls deny-listed and the ASIN verified in the cart's active rows |
-| 53 | Mac mini defaults: Google Chrome for the per-member browsers, Colima allowed for Docker, the containers may reach the host only on Ollama's port, and Ollama runs with `OLLAMA_NO_CLOUD=1` | Homebrew disabled its `chromium` cask (2026-09-01) and any Chromium build speaks CDP; the worker needs only Ollama, while CDP on the host is full control of signed-in Amazon sessions; with a local reply model (photo privacy option C) no PandaBase or agent request should be able to reach a cloud model |
+| 52 | Tier 2 runs only through `pandabase-tools cart search` / `cart add` on the guarded CDP driver; the `pandabase` agent's `agents.list` entry denies `group:web` and `browser` (per agent since 2026-11: other agents on the gateway keep theirs, with their own Chrome profiles, never PandaBase's CDP port) | A local model with a raw browser on the signed-in Amazon profile could be steered by product-page text to Buy Now / checkout (OpenClaw's browser has no URL denylist; audit `models.small_params`). Search returns size-limited, labelled-untrusted JSON; add is by ASIN through tier 1's guarded path with Buy Now controls deny-listed and the ASIN verified in the cart's active rows |
+| 53 | Mac mini defaults: Google Chrome for PandaBase's browser, Colima allowed for Docker, the containers may reach the host only on Ollama's port, and Ollama runs with `OLLAMA_NO_CLOUD=1` | Homebrew disabled its `chromium` cask (2026-09-01) and any Chromium build speaks CDP; the worker needs only Ollama, while CDP on the host is full control of signed-in Amazon sessions; with a local reply model (photo privacy option C) no PandaBase or agent request should be able to reach a cloud model |
 | 54 | Tier 1 adds each line from its product page (`/dp/{ASIN}`, that ASIN's own add control: the buy box's `submit.add-to-cart` button, else its own single-ASIN `/cart/add-to-cart` form, or for Whole Foods its buy-box widget — never Buy Now, a subscription, a bundle or a sponsored ad), verified by the ASIN appearing in that vendor's cart's active rows (not the cart count); the batch add URL stays as `cart.tier1_method: add_url` | `/gp/aws/cart/add.html` began redirecting to the cart without adding (live smoke, 2026-11-04). One shared, verified path for tiers 1 and 2; the cart check makes re-runs idempotent per ASIN. Live (2026-11-04) `nav-cart-count` jumped 1 → 4 for one item, and Whole Foods pages have no add form of their own. The buy-box form posts to `handle-buy-box` (Buy Now's endpoint, still refused), but its "Add to cart" button posts to `/cart/add-to-cart` through `formaction`, so that one button is used (owner decision, 2026-11-05): refusing the whole buy box left only sponsored forms, and one added a 3-item bundle |
 | 55 | Interactive services do a constant number of database round trips: read in one batch, decide in memory, write in one batch inside `batchTransaction` (§8 *Database round trips*) | Each statement against remote Turso is a network request made while holding the write lock; a sequential statement per receipt line made "Confirm receipt" take seconds on long receipts (Preview E2E step 07b timed out) |
 | 56 | Amazon layout breakage is watched two ways: a build alert (≥ 2 tier-1 lines and ≥ half of them failed for a page reason, once per cycle, to the ops channel) and a Friday 15:00 add-button check on one Amazon and one Whole Foods page that clicks nothing | Amazon changes pages without notice (the add URL died 2026-11-04); one odd line is noise, most of a build is a layout. The check reuses tier 1's own `add_control` rule, so it tests what Saturday will do, and runs a day early with two page loads (live runs had already drawn a `/checkpoint`) |
@@ -1253,3 +1265,4 @@ docker-compose.yml (+ docker-compose.build.yml), Makefile, CLAUDE.md, README.md,
 | 66 | Cleanup renders a page of cards per tab (`cleanup.pageSize`, 20) with "Show more", and `pendingReviews` reads in a constant number of queries | Live data after the receipt import had ~490 pending reviews: a query per receipt/job review and a whole-catalog picker on every new-product card made Cleanup take ~35s. Highest impact sorts first, so the first page is what matters; the rest expire to their default anyway |
 | 67 | Item reviews are re-scored against the current plan (daily and on cart result), and Cleanup leaves out new products bought once | After the 12-month re-import (2026-11-09) Cleanup held 462 new-product reviews, all scored 1: the 44 in that week's cart never reached This Week, and 276 were one-off buys whose answer changes nothing (their default, keep, applies on expiry). Re-scoring beats scoring at ingest, which can't know next Saturday's plan; hiding beats not creating, because a later purchase or plan brings the review back without a new code path in receipt ingest |
 | 68 | A polling command automation stays silent through an API outage (`NO_REPLY`, state-dir marker) and posts one readable ⚠️ only after `jobs.outage_alert_minutes` (60), then ✅ on recovery; a failed `notified` ack posts only the replies already acked | Its stdout goes straight to Discord: a 2:36 AM network timeout was posted to `#pandabase` as raw error JSON (2026-11-10). Unacked jobs stay queued, so the next run loses nothing; `api_outage` telemetry records each outage |
+| 69 | PandaBase drives one browser profile, `pandabase` (the cart member's Amazon session; was `will`), and describes only the **`pandabase` agent** on a gateway that may host others (routed by channel and DM sender). `profile` is optional per member, two members can't share one, and `OPENCLAW_AGENT` names the `pandabase` agent | The gateway gained a member's personal agent with web tools, the browser and its own Chrome profile (2026-11). A profile named after a member was easy to confuse with that one, and members' own profiles now belong to their agents, not PandaBase. A shared profile would sweep one Amazon account's orders as two members'. The web/browser deny moved from gateway-wide `tools` to the `pandabase` agent's entry, so other agents keep their tools |

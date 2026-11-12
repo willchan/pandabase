@@ -20,6 +20,7 @@ CHROMIUM_BIN="${CHROMIUM_BIN:-/Applications/Google Chrome.app/Contents/MacOS/Goo
 domain="gui/$(id -u)"
 
 run mkdir -p "$AGENTS_DIR" "$LOG_DIR"
+wanted=" "
 while IFS=$'\t' read -r profile cdp_url data_dir; do
   port="${cdp_url##*:}"
   port="${port%/}"
@@ -30,6 +31,7 @@ while IFS=$'\t' read -r profile cdp_url data_dir; do
   data_dir="${data_dir:-~/Library/Application Support/PandaBase/chromium-$profile}"
   data_dir="${data_dir/#\~/$HOME}"
   label="com.pandabase.chromium.$profile"
+  wanted+="$label "
   plist="$AGENTS_DIR/$label.plist"
   rendered="$(sed -e "s|@LABEL@|$label|g" -e "s|@CHROMIUM_BIN@|$CHROMIUM_BIN|g" \
     -e "s|@USER_DATA_DIR@|$data_dir|g" -e "s|@PORT@|$port|g" -e "s|@LOG_DIR@|$LOG_DIR|g" -e "s|@PROFILE@|$profile|g" \
@@ -51,5 +53,15 @@ while IFS=$'\t' read -r profile cdp_url data_dir; do
   run launchctl bootstrap "$domain" "$plist"
   info "loaded $label (port $port, $data_dir)"
 done < <(jq -r '.profiles | to_entries[] | [.key, .value.cdp_url, (.value.user_data_dir // "")] | @tsv' "$PROFILES")
+
+# A LaunchAgent for a profile no longer in profiles.json (e.g. after a rename) keeps its Chrome
+# running on the same DevTools port. Say so; don't stop a signed-in browser unasked.
+for plist in "$AGENTS_DIR"/com.pandabase.chromium.*.plist; do
+  [ -e "$plist" ] || continue
+  label="$(basename "$plist" .plist)"
+  case "$wanted" in *" $label "*) continue ;; esac
+  warn "$label isn't in agent/profiles.json; if you renamed that profile, stop and remove it:" \
+    "launchctl bootout $domain/$label && rm '$plist'"
+done
 
 info "Sign in to Amazon once by hand in each window (README step 10); the tools never sign in."

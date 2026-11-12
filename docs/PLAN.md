@@ -851,7 +851,7 @@ model's turns; multi-agent `bindings[]` with `match.peer {kind: "channel", id}`.
   the token from `.env`, so it isn't in OpenClaw's automation DB either (no `--command-env`).
 - **Cron:** receipt sweeps are generated per member from `receipt_sweep` (daily 21:00, weekly
   Sun 21:00) instead of the example's fixed names; the other jobs come from `cron.example.json`.
-  `OPENCLAW_AGENT=<id>` adds `--agent` (for the privacy option A agent).
+  `OPENCLAW_AGENT=<id>` adds `--agent`: the `pandabase` agent (env, else `.env`, else `main`).
 - **Gateway config** (Discord channel policy, Ollama media model, attach-only browser profiles)
   is a reviewed `openclaw config patch` file, `agent/openclaw.pandabase.example.json5`, not a
   script: it touches the family agent's config and arrays in a patch replace existing lists.
@@ -1185,3 +1185,18 @@ branch `claude/system-e2e`). Details, the bugs found and the security review are
   a row (the security-review rule; in practice the first page view comes first). New members need
   their Discord id, sweep and cart account set in Settings; `db:add-member` / Bootstrap stay for
   the Chromium profile.
+- **`pandabase` agent, one `pandabase` profile (2026-11-12):** the Mac's gateway moves from one
+  OpenClaw agent to two on the same Discord bot (a `pandabase` agent for the shared channels, the ops
+  channel and one member's DMs; a member's personal agent with web tools, the browser and its own
+  Chrome profile; both with the PandaBase skill and token). PandaBase's browser profile is renamed
+  `will` → `pandabase` (key, LaunchAgent `com.pandabase.chromium.pandabase`, data dir
+  `…/chromium-pandabase`), and stays the only one: members' own profiles belong to their agents.
+  `Member.profile` is optional (no profile → no receipt sweep, skipped by backfill and smoke), two
+  members can't share one, and `install-chromium` warns about a leftover LaunchAgent.
+  `openclaw.pandabase.example.json5` describes the `pandabase` agent; `tools.deny` moved from the
+  gateway-wide `tools` to that agent's `agents.list` entry, set by index (`agents.list` and
+  `bindings` are shared arrays). `OPENCLAW_AGENT` can live in `.env` so the updater uses it. The
+  wife's weekly receipt sweep stops (PRD §4.2). **Not run on the Mac yet:** the rename steps
+  (SETUP-MAC *Renaming the browser profile*), whether the Amazon session survives the move,
+  `openclaw config set "agents.list[<i>].tools.deny"` on the live gateway, and that OpenClaw
+  applies a per-agent deny as documented (check with `openclaw security audit`).

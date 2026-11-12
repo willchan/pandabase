@@ -114,7 +114,7 @@ def main(argv: list[str]) -> int:
     results: list[dict[str, Any]] = []
     try:
         with (
-            ProfileLock(loaded.state_dir()).held(member.profile, "smoke cart"),
+            ProfileLock(loaded.state_dir()).held(member.profile_name(), "smoke cart"),
             CdpDriver(profile.cdp_url) as driver,
         ):
             for vendor, asin in targets:

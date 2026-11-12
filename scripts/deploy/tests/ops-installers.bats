@@ -95,6 +95,32 @@ JSON
   grep -F "pandabase-receipts-alex" "$STUB/calls" | grep -qF -- "--agent pandabase"
 }
 
+# Two agents on one gateway (`pandabase` + another member's): the `pandabase` agent's id lives in
+# .env so the 15-minute updater, which runs the installers without OPENCLAW_AGENT, uses it too.
+@test "install-agent-cron and skills check take OPENCLAW_AGENT from .env" {
+  printf 'OPENCLAW_AGENT=household\n' >>"$ROOT_DIR/.env"
+  run /bin/bash "$ROOT_DIR/scripts/ops/install-agent-cron.sh"
+  [ "$status" -eq 0 ]
+  grep -F "pandabase-cart-probe" "$STUB/calls" | grep -qF -- "--agent household"
+  run /bin/bash "$ROOT_DIR/scripts/ops/install-agent-skills.sh"
+  [ "$status" -eq 0 ]
+  grep -F "openclaw skills check" "$STUB/calls" | grep -qF -- "--agent household"
+}
+
+# PandaBase drives one browser profile (the cart member's); a member without one gets no sweep job.
+@test "install-agent-cron skips the receipt sweep of a member with no browser profile" {
+  cat >"$ROOT_DIR/agent/pandabase.config.json" <<'JSON'
+{"discord": {"intake_channel": "123", "ops_channel": "456", "cycle_channel": "789"},
+ "members": [{"name": "alex", "profile": "pandabase", "receipt_sweep": "daily", "cart_member": true},
+             {"name": "sam", "receipt_sweep": "weekly"}]}
+JSON
+  run /bin/bash "$ROOT_DIR/scripts/ops/install-agent-cron.sh"
+  [ "$status" -eq 0 ]
+  called "openclaw automations add --name pandabase-receipts-alex"
+  ! called "openclaw automations add --name pandabase-receipts-sam"
+  [[ "$output" == *"sam has no browser profile"* ]]
+}
+
 @test "install-agent-cron announces each command job to its deliver_to channel" {
   run /bin/bash "$ROOT_DIR/scripts/ops/install-agent-cron.sh"
   [ "$status" -eq 0 ]

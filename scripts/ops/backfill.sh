@@ -4,7 +4,8 @@
 # resumes where the last stopped, and orders are deduped by id, so re-running is always safe.
 # A run that reports errors (signed out, Amazon's bot check, an ingest error) stops the backfill:
 # it never retries on its own.
-# Default: every member whose receipt_sweep isn't "off". Their Chromium must be signed in.
+# Default: every member with a browser profile whose receipt_sweep isn't "off". Their Chromium
+# must be signed in.
 # Afterwards it queues merge suggestions once (as the digital-receipt-scraper skill does).
 #
 #   MAX_RUNS=40      give up after this many sweep runs per member
@@ -23,11 +24,11 @@ targets=()
 if [ -n "${MEMBER:-}" ]; then
   targets=("$MEMBER")
 else
-  while IFS=$'\t' read -r name _profile sweep _cart; do
-    [ "$sweep" = off ] || targets+=("$name")
+  while IFS=$'\t' read -r name profile sweep _cart; do
+    [ "$sweep" = off ] || [ "$profile" = - ] || targets+=("$name")
   done < <(members)
 fi
-[ "${#targets[@]}" -gt 0 ] || die "no members to backfill (all have receipt_sweep: off)"
+[ "${#targets[@]}" -gt 0 ] || die "no members to backfill (none has both a browser profile and a receipt_sweep)"
 
 backfill_member() {
   local member="$1" n=0 out code
