@@ -11,7 +11,7 @@ predict what we need, and fill the weekly Whole Foods/Amazon cart (cart only, ne
 ```
  phones ──Google──▶ Vercel: web UI + API + daily cron ──▶ Turso (libSQL)
                         ▲ bearer tokens (outbound only)
- Mac Mini: OpenClaw (household agent) + skills ─ pandabase-tools ─ CDP ─▶ Chrome `pandabase` (signed in)
+ Mac Mini: OpenClaw `pandabase` agent + skills ─ pandabase-tools ─ CDP ─▶ Chrome `pandabase` (signed in)
            worker (Docker) ─▶ Ollama (native, Metal)          media: Cloudflare R2
 ```
 
@@ -322,11 +322,11 @@ your OpenClaw version and pin it (`openclaw plugins install @openclaw/discord@<v
 then connect the bot as OpenClaw's docs describe.
 
 The gateway can host more than one agent on the same bot, routed by channel and DM sender
-(`bindings`). PandaBase's config describes the **household agent**: the one bound to `#pandabase`
+(`bindings`). PandaBase's config describes the **`pandabase` agent**: the one bound to `#pandabase`
 (and the household's other shared channels), on a local model, with no web or browser tools, and
 running the automations. Other agents (say, a member's personal agent for their own DMs) are set
 up outside this repo; they may get the PandaBase skill and token too. Not every Discord message
-reaches the household agent: a DM goes to whichever agent its sender is bound to.
+reaches the `pandabase` agent: a DM goes to whichever agent its sender is bound to.
 
 ```sh
 cp agent/openclaw.pandabase.example.json5 agent/openclaw.pandabase.json5
@@ -334,11 +334,11 @@ cp agent/openclaw.pandabase.example.json5 agent/openclaw.pandabase.json5
 openclaw gateway stop
 openclaw config patch --file agent/openclaw.pandabase.json5 --dry-run   # read the diff
 openclaw config patch --file agent/openclaw.pandabase.json5
-# the household agent's tool policy, by index (agents.list is an array the other agents share)
+# the `pandabase` agent's tool policy, by index (agents.list is an array the other agents share)
 openclaw config get agents.list --json
 openclaw config set "agents.list[<i>].tools.deny" '["group:web","browser"]' --strict-json
 openclaw gateway start
-# .env: OPENCLAW_AGENT=<the household agent's id> (default `main`), so the automations run as it
+# .env: OPENCLAW_AGENT=pandabase, so the automations run as it (unset: `main`, the old single agent)
 
 make install-agent-skills   # skills.load.extraDirs += agent/skills; settings → ~/.config/pandabase/agent.env
 openclaw gateway restart    # if it said so
@@ -346,11 +346,11 @@ make install-agent-cron     # the automations from agent/cron.example.json (idem
 ```
 
 The patch sets the `#pandabase` channel policy and local photo descriptions on Ollama (both
-gateway-wide); the `config set` gives the household agent
+gateway-wide); the `config set` gives the `pandabase` agent
 **`tools.deny: ["group:web", "browser"]`** (recommended; keep it). The deny is per agent, not in
 the gateway-wide `tools` block, so other agents keep their web tools; an older version of this
 file put it there, so move it (`openclaw config unset tools.deny`, then the `config set` above).
-The household agent never browses: the Saturday cart's tier 2 runs through `pandabase-tools cart
+The `pandabase` agent never browses: the Saturday cart's tier 2 runs through `pandabase-tools cart
 search` / `cart add`, which attach to the step-10 browser with the checkout guard on. OpenClaw's
 browser tool has no URL denylist, so a local model with it next to a signed-in Amazon session
 could be talked into Buy Now by a product page (`openclaw security audit` flags this as
@@ -371,18 +371,18 @@ find its index with `openclaw config get models.providers.ollama.models --json` 
 Check:
 
 ```sh
-openclaw skills check --agent <household agent id>   # the five PandaBase skills are eligible
-openclaw automations list # pandabase-* jobs on the household agent, household-TZ schedules
+openclaw skills check --agent pandabase   # the five PandaBase skills are eligible
+openclaw automations list # pandabase-* jobs on the `pandabase` agent, household-TZ schedules
 openclaw infer image describe --file <any photo> --model ollama/qwen3.5:9b --timeout-ms 180000
 # local vision works (the default 30s timeout is too short while the model loads)
 ```
 
 Then post a test message in `#pandabase`, and say "do we have milk?" mentioning the bot in another
-channel the household agent is bound to.
+channel the `pandabase` agent is bound to.
 
 ### 12. Decide on photo privacy
 
-Read [Photo privacy](#photo-privacy) below. If the household agent's reply model is local (our
+Read [Photo privacy](#photo-privacy) below. If the `pandabase` agent's reply model is local (our
 setup), there is nothing to do beyond keeping cloud models out of its fallbacks. With a cloud reply model,
 pick an option; A is recommended.
 
@@ -521,7 +521,7 @@ that model is a cloud model (your `$OPENCLAW_MODEL`), the photo — a receipt, o
 your trash can — goes to that provider. OpenClaw documents this; `tools.media.image.enabled:
 false` does not stop native delivery.
 
-**With a local reply model (our setup), there is no residual risk.** If the household agent runs on
+**With a local reply model (our setup), there is no residual risk.** If the `pandabase` agent runs on
 a model served by this Mac's Ollama, a photo the media model couldn't describe goes to that local
 model instead: it never leaves the Mac. That's option C below, with two conditions:
 

@@ -1,5 +1,5 @@
 // OPTIONAL — README "Photo privacy", option A. Only for a gateway whose agent on PandaBase's
-// channels uses a cloud reply model; the household agent on a local model (option C) doesn't need
+// channels uses a cloud reply model; the `pandabase` agent on a local model (option C) doesn't need
 // it. The owner decides; nothing applies this automatically.
 //
 // The agent bound to #pandabase (and its cycle threads) gets a model that OpenClaw treats as
@@ -20,12 +20,12 @@
 //   openclaw config set "agents.list[<i>].model" '"pandabase-text/<MODEL_ID>"' --strict-json
 //
 // If no agent is bound to #pandabase yet, add one to `agents.list` by hand (keep the others), e.g.
-//   { id: "<AGENT_ID>", workspace: "~/.openclaw/workspace-<AGENT_ID>",
+//   { id: "pandabase", workspace: "~/.openclaw/workspace-pandabase",
 //     model: "pandabase-text/<MODEL_ID>", tools: { deny: ["group:web", "browser"] } }
 // and a binding for the channel to `bindings` (keep the other agents' channel and DM bindings):
-//   { agentId: "<AGENT_ID>", match: { channel: "discord", guildId: "<GUILD_ID>",
+//   { agentId: "pandabase", match: { channel: "discord", guildId: "<GUILD_ID>",
 //     peer: { kind: "channel", id: "<PANDABASE_CHANNEL_ID>" } } }
-// then set OPENCLAW_AGENT=<AGENT_ID> in .env and re-run `make install-agent-cron`.
+// then set OPENCLAW_AGENT=pandabase in .env and re-run `make install-agent-cron`.
 {
   models: {
     providers: {

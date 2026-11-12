@@ -1,7 +1,7 @@
 # Phase 2: the Mac mini
 
 This guide puts PandaBase's Mac side on a Mac mini: the worker, the agent tools and skills, one
-signed-in browser (the cart member's Amazon session), and the household agent's OpenClaw
+signed-in browser (the cart member's Amazon session), and the `pandabase` agent's OpenClaw
 automations. It is the order that worked on a
 fresh Mac mini (Apple silicon, 32GB) in November 2026, with these choices:
 
@@ -127,11 +127,11 @@ Check: `scripts/ops/agent-run.sh config show` prints your members and `"token_se
 ## 5. OpenClaw: Discord, PandaBase config, skills, automations
 
 The gateway may host more than one agent on the same Discord bot, routed by channel and by DM
-sender. PandaBase's config describes the **household agent**: the agent bound to `#pandabase` (and
+sender. PandaBase's config describes the **`pandabase` agent**: the agent bound to `#pandabase` (and
 the household's other shared channels), on the local model, with no web or browser tools, and
 the one the automations run as. Any other agents (e.g. a member's personal agent for their own DMs
 and channels) are set up outside this repo, and may have the PandaBase skill and token too. So not
-every Discord message reaches the household agent, and the household agent isn't the only one
+every Discord message reaches the `pandabase` agent, and the `pandabase` agent isn't the only one
 that can call PandaBase; shared data lives in PandaBase, not in agent memory.
 
 1. **Discord plugin.** If `openclaw plugins list` doesn't show Discord, install it at your
@@ -160,8 +160,8 @@ that can call PandaBase; shared data lives in PandaBase, not in agent memory.
    per-model settings go in by index instead:
 
    ```sh
-   # the household agent: no web or browser tools (Security defaults below)
-   openclaw config get agents.list --json   # find the household agent's index and id
+   # the `pandabase` agent: no web or browser tools (Security defaults below)
+   openclaw config get agents.list --json   # find the `pandabase` agent's index and id
    openclaw config set "agents.list[<i>].tools.deny" '["group:web","browser"]' --strict-json
    # the VLM: a small context and short keep-alive
    openclaw config get models.providers.ollama.models --json   # find qwen3.5:9b's index
@@ -170,8 +170,8 @@ that can call PandaBase; shared data lives in PandaBase, not in agent memory.
    openclaw gateway restart
    ```
 
-   Then put the household agent's id in `.env` as `OPENCLAW_AGENT=<id>` (default `main`): the
-   installers and the 15-minute updater add the automations and check the skills as that agent.
+   Name the agent `pandabase` and put `OPENCLAW_AGENT=pandabase` in `.env` (unset, it is `main`):
+   the installers and the 15-minute updater add the automations and check the skills as that agent.
 4. **Skills and automations.**
 
    ```sh
@@ -189,8 +189,8 @@ that can call PandaBase; shared data lives in PandaBase, not in agent memory.
 Check:
 
 ```sh
-openclaw skills check --agent <household agent id>   # the PandaBase skills are eligible
-openclaw automations list    # pandabase-* jobs, all on the household agent
+openclaw skills check --agent pandabase   # the PandaBase skills are eligible
+openclaw automations list    # pandabase-* jobs, all on the `pandabase` agent
 openclaw infer image describe --file <any photo> --model ollama/qwen3.5:9b --timeout-ms 180000
 ```
 
@@ -333,7 +333,7 @@ The worker image on GHCR is public, so there's no `docker login`. Optionally set
 
 ## Security defaults
 
-- **No web or browser tools for the household agent.** Its entry in `agents.list` has
+- **No web or browser tools for the `pandabase` agent.** Its entry in `agents.list` has
   `tools.deny: ["group:web", "browser"]` (step 5). It's per agent: other agents on the gateway may
   have web tools and a browser, with their own Chrome profiles. A small local model with a raw
   browser next to a signed-in Amazon session could be steered by page text into Buy Now;
@@ -346,7 +346,7 @@ The worker image on GHCR is public, so there's no `docker login`. Optionally set
   bot answers only them outside the channels configured by name (if another agent's setup has its
   own `"*"` rule, merge the user lists).
 - **Containers reach the host only on Ollama's port** (the Colima rule in step 6).
-- **No cloud models for the household agent.** `OLLAMA_NO_CLOUD=1`, and no cloud fallbacks on
+- **No cloud models for the `pandabase` agent.** `OLLAMA_NO_CLOUD=1`, and no cloud fallbacks on
   its model. Other agents' models are their own setup's choice; a photo sent to one of them
   follows its model ([README *Photo privacy*](../README.md#photo-privacy)).
 - **Private state:** `chmod 700 ~/.openclaw`; `.env` is mode 600 (`make secrets` sets it).

@@ -95,7 +95,7 @@ JSON
   grep -F "pandabase-receipts-alex" "$STUB/calls" | grep -qF -- "--agent pandabase"
 }
 
-# Two agents on one gateway (household + another member's): the household agent's id lives in
+# Two agents on one gateway (`pandabase` + another member's): the `pandabase` agent's id lives in
 # .env so the 15-minute updater, which runs the installers without OPENCLAW_AGENT, uses it too.
 @test "install-agent-cron and skills check take OPENCLAW_AGENT from .env" {
   printf 'OPENCLAW_AGENT=household\n' >>"$ROOT_DIR/.env"

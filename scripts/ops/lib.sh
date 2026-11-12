@@ -89,7 +89,7 @@ env_unset() {
   mv "$tmp" "$file"
 }
 
-# The OpenClaw agent PandaBase's automations and skills check run as: the household agent. The
+# The OpenClaw agent PandaBase's automations and skills check run as: the `pandabase` agent. The
 # gateway can host other agents (they may also have the PandaBase skill), so this names one:
 # OPENCLAW_AGENT from the caller's env, else from .env, else `main`.
 openclaw_agent() {

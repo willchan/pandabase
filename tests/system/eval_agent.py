@@ -235,7 +235,7 @@ def _prompt(s: Scenario, stack: Stack, msg_id: str) -> str:
             f" (Discord user id {s.sender}), message id {msg_id}, channel id 100000000000000010:"
         )
     return (
-        "You are the PandaBase household agent. Use the PandaBase skills and the "
+        "You are the PandaBase agent. Use the PandaBase skills and the "
         "`pandabase-tools` command for every action.\n"
         "This is an automated evaluation: there is no Discord connection, so you can't post, "
         "react or create threads — write what you would post as your final answer instead.\n\n"

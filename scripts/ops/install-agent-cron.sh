@@ -6,7 +6,7 @@
 # Receipt sweeps come from the members in pandabase.config.json (`receipt_sweep`: daily → every
 # day 21:00, weekly → Sunday 21:00, off → none) rather than the example's fixed names.
 #
-#   OPENCLAW_AGENT=<id>        run the jobs as that agent: the household agent, the one bound to
+#   OPENCLAW_AGENT=<id>        run the jobs as that agent: the `pandabase` agent, the one bound to
 #                              #pandabase (env, else .env, else `main`). The gateway hosts other
 #                              agents too, and OpenClaw refuses to *add* a job without --agent
 #                              once there is more than one (live, 2026-11-07).

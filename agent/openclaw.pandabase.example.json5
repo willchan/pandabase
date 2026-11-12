@@ -1,7 +1,7 @@
 // PandaBase's additions to the OpenClaw gateway config (README step 11; PLAN M7/M8 Notes).
 //
 // The gateway can host several agents on one Discord bot, routed by channel and DM sender
-// (`bindings`). This file describes PandaBase's side of it: the **household agent**, the one
+// (`bindings`). This file describes PandaBase's side of it: the **`pandabase` agent**, the one
 // bound to #pandabase (and the household's other shared channels), which runs PandaBase's
 // automations on a local model with no web or browser tools. Other agents on the same gateway
 // (e.g. a member's personal agent with web tools and its own Chrome profile) are set up outside
@@ -20,7 +20,7 @@
 // `agents.list`, `bindings` or `models.providers.ollama.models`: each is an array other agents and
 // onboarding share, and a patch would replace it. Set per-agent and per-model fields by index:
 //
-//   # The household agent's tool policy (DESIGN §10 #52): find its index, then
+//   # The `pandabase` agent's tool policy (DESIGN §10 #52): find its index, then
 //   openclaw config get agents.list --json
 //   openclaw config set "agents.list[<i>].tools.deny" '["group:web","browser"]' --strict-json
 //
@@ -28,10 +28,10 @@
 //   openclaw config set "models.providers.ollama.models[<i>].params" \
 //     '{"num_ctx":8192,"keep_alive":"2m"}' --strict-json
 //
-// The household agent's entry in `agents.list` then looks like this (other fields as your
+// The `pandabase` agent's entry in `agents.list` then looks like this (other fields as your
 // gateway has them; its id goes in .env as OPENCLAW_AGENT so the automations run as it):
 //
-//   { id: "<HOUSEHOLD_AGENT_ID>", model: "ollama/<LOCAL_REPLY_MODEL>",
+//   { id: "pandabase", model: "ollama/<LOCAL_REPLY_MODEL>",
 //     tools: { deny: ["group:web", "browser"] } }
 //
 // Keep `tools.deny` off the gateway-wide `tools` block below: there it would also take the web
@@ -68,7 +68,7 @@
   // Local vision for inbound photos (PRD §3.6, DESIGN §6): OpenClaw describes each photo with the
   // same Ollama VLM the worker uses, and the reply model gets that text instead of the pixels.
   // Residual risk and the mitigation: README "Photo privacy" (agent/openclaw.privacy.example.json5).
-  // Gateway-wide, so it serves every agent's photos. No `deny` here: the household agent's
+  // Gateway-wide, so it serves every agent's photos. No `deny` here: the `pandabase` agent's
   // web/browser deny is per agent (`agents.list[<i>].tools.deny`, header).
   tools: {
     media: {

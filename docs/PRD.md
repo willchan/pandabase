@@ -21,7 +21,7 @@ split in two:
 One household, two members (Will and his wife), each with:
 
 - a Google account (web UI sign-in, allowlisted),
-- a Discord account (talks to the household's agent in the shared channels; a DM reaches
+- a Discord account (talks to the `pandabase` agent in the shared channels; a DM reaches
   whichever agent the gateway routes that member to, and any agent with the PandaBase skill sees
   the same data),
 - a login in a shared Amazon Household (separate Amazon logins). PandaBase drives one of them:
