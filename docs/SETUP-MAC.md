@@ -159,11 +159,11 @@ that can call PandaBase; shared data lives in PandaBase, not in agent memory.
    and `models.providers.ollama.models`. The dry run must not touch any of them.
 4. **The `pandabase` agent.** Give PandaBase an agent of its own rather than the gateway's default
    (`main`): the default is usually the catch-all for every Discord message no binding claims, and
-   a separate agent keeps PandaBase's workspace and memory out of it. (Sessions are still readable
-   across agents unless the gateway narrows `tools.sessions.visibility`; `openclaw security audit`
-   warns `cross_agent_session_access_default`.) On OpenClaw 2026.10.10 agents
-   are an object keyed by id, `agents.entries.<id>` (`agents.list` is rejected as an unknown
-   path); `bindings` is still an array.
+   a separate agent keeps PandaBase's workspace and memory out of it. Sessions are readable across
+   agents by default (`tools.sessions.visibility: "all"`; `openclaw security audit` warns
+   `cross_agent_session_access_default`), so set the gateway's to `"agent"` (Security defaults).
+   On OpenClaw 2026.10.10 agents are an object keyed by id, `agents.entries.<id>` (`agents.list`
+   is rejected as an unknown path); `bindings` is still an array.
 
    ✅ As run on 2026-11-12 (back up `~/.openclaw/openclaw.json` first; no step needed a restart,
    each write printed "Change will apply without restarting the gateway"):
@@ -427,12 +427,20 @@ The worker image on GHCR is public, so there's no `docker login`. Optionally set
   If an older PandaBase patch left the deny in the gateway-wide `tools` block, move it: a
   gateway-wide deny can't be re-allowed per agent, so it has to come off. Do it in this order,
   because the unset hands the browser to every agent without a deny of its own (including the
-  default catch-all):
+  default catch-all). ✅ Run this way on 2026-11-12, all hot-applied:
   1. the `pandabase` agent has its own deny, and `#pandabase` is bound to it (§5 step 4);
-  2. no OpenClaw browser profile attaches to PandaBase's port (`openclaw browser profiles`;
+  2. any other agent that shouldn't browse gets its own deny too (on the Mac: `main`, the
+     catch-all), with `openclaw config set agents.entries.<id>.tools.deny '["group:web","browser"]'
+     --strict-json`;
+  3. no OpenClaw browser profile attaches to PandaBase's port (`openclaw browser profiles`;
      remove old `pandabase-<member>` ones);
-  3. then `openclaw config unset tools.deny`, and `openclaw security audit`: `pandabase` shows
-     `web=[off]`, other agents may not.
+  4. then `openclaw config unset tools.deny`, and `openclaw security audit`: the agents with a
+     deny show `web=[off]`; one with web tools on a small local model stays critical
+     (`models.small_params`) until its owner accepts or changes that.
+- **Each agent sees only its own sessions.** `openclaw config set tools.sessions.visibility agent`
+  (gateway-wide; the default `"all"` lets any agent read and send to the others' sessions, so
+  PandaBase's chats would be readable from a personal agent with web tools). The audit's
+  `cross_agent_session_access_default` warning goes away. Set on the Mac on 2026-11-12.
 - **Only members, everywhere.** The patch's `"*"` channel rule lists the members' user ids, so the
   bot answers only them outside the channels configured by name (if another agent's setup has its
   own `"*"` rule, merge the user lists).

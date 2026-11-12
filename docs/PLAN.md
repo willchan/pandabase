@@ -1215,8 +1215,9 @@ branch `claude/system-e2e`). Details, the bugs found and the security review are
     `make smoke` also restarts the worker and swaps models, so `SMOKE_ONLY="env api cdp"`;
     rewriting the config with `jq` left it 644. **Amazon stayed signed in.**
   - Bootstrap `add-member` set profile `pandabase` (member 1, name unchanged).
-  - **Still open:** the gateway-wide `tools.deny` stays until the old `pandabase-will` OpenClaw
-    browser profile (`127.0.0.1:9222`) is gone; only then does `openclaw security audit` show the
-    per-agent deny on its own (today: 0 critical, `web=[off]` everywhere because of the global
-    deny). The audit also warns that every agent can read the others' sessions
-    (`tools.sessions.visibility: "all"`): a gateway setting, for the runbook.
+  - **Gateway cleanup, the same day** (SETUP-MAC *Security defaults*): the old `pandabase-will`
+    OpenClaw browser profile (`127.0.0.1:9222`) removed; `main` given its own web/browser deny;
+    then the gateway-wide `tools.deny` unset, so only the personal agent has web tools;
+    `tools.sessions.visibility: "agent"`, so agents no longer read each other's sessions. All
+    hot-applied. The audit's one critical is `models.small_params` for that personal agent (27B
+    with web), accepted by its owner; nothing on `pandabase`.
