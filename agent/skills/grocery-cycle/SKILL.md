@@ -125,8 +125,9 @@ pandabase-tools cart pending
 - `status: "needs_agent"` → `cycle_id` is `<C>`; do tier 2 below for each `needs_agent` line.
 
 **Tier 2 (only for `needs_agent` lines, ≤ 15 minutes total).** Use only the two commands below —
-**never the browser tool** (it's disabled for this agent: it would put a product page in front of
-you with Buy Now and checkout one click away). They attach to the cart member's Chromium with the
+**never the browser tool** (the household agent has it disabled; an agent that has one still
+doesn't use it for PandaBase: it would put a product page in front of you with Buy Now and
+checkout one click away). They attach to the cart member's Chromium with the
 checkout guard on, take the profile lock themselves, and never click anything but add-to-cart.
 
 For each `needs_agent` line, in order:

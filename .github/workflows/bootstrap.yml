@@ -35,7 +35,7 @@ on:
         description: "add-member: Discord user id (digits; optional)"
         type: string
       profile:
-        description: "add-member: Chromium profile name, e.g. will (optional)"
+        description: "add-member: browser profile, pandabase for the cart member (optional)"
         type: string
       sweep:
         description: "add-member: Amazon receipt sweep (keep = leave as is)"

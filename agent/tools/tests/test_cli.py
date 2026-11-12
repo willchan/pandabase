@@ -48,10 +48,12 @@ def test_example_configs_load(config: Path) -> None:
     assert {cfg.discord.cycle_channel, cfg.discord.intake_channel, cfg.discord.ops_channel} == {
         "100000000000000010"
     }
-    assert {m.name: loaded.profile(m).cdp_url for m in cfg.members} == {
-        "will": "http://127.0.0.1:9222",
-        "partner": "http://127.0.0.1:9223",
-    }
+    # One PandaBase browser profile, the cart member's; the other member has none (their own
+    # Chrome profiles belong to their OpenClaw agents, outside PandaBase).
+    assert {m.name: m.profile for m in cfg.members} == {"will": "pandabase", "partner": None}
+    assert loaded.profile(cfg.cart_member()).cdp_url == "http://127.0.0.1:9222"
+    with pytest.raises(KeyError, match="no PandaBase browser profile"):
+        loaded.profile(cfg.member("partner"))
 
 
 def test_cron_example_schedule() -> None:
@@ -64,7 +66,6 @@ def test_cron_example_schedule() -> None:
         "pandabase-saturday-search": "30 10 * * 6",  # tier 2, after the build
         "pandabase-monday-open": "0 9 * * 1",
         "pandabase-receipts-will": "0 21 * * *",  # cart member: daily
-        "pandabase-receipts-partner": "0 21 * * 0",  # other member: Sundays
         "pandabase-diagnostics": "0 23 * * 0",
         "pandabase-job-replies": "*/5 * * * *",
         "pandabase-cart-probe": "0 15 * * 5",  # Friday afternoon, before Saturday's build
@@ -317,7 +318,11 @@ def test_cart_build_refuses_a_locked_profile(config: Path) -> None:
     code, out = run(config, ["lock", "acquire", "--member", "will", "--owner", "tier2"], server.api)
     assert code == 0 and out["token"]
     code, out = run(config, ["cart", "build"], server.api, _driver())
-    assert code == 3 and out == {"error": "profile_locked", "profile": "will", "owner": "tier2"}
+    assert code == 3 and out == {
+        "error": "profile_locked",
+        "profile": "pandabase",
+        "owner": "tier2",
+    }
     code, _ = run(config, ["lock", "release", "--member", "will", "--token", "x"], server.api)
 
 
@@ -757,3 +762,24 @@ def test_cycle_nudge_is_silent_when_already_nudged_and_says_so_without_a_cycle(
     api = FakeApi({"GET /api/grocery/cycle/current": lambda _: {"cycle": None}})
     code, out = run(config, ["cycle", "nudge"], api)
     assert code == 0 and out.startswith("⚠️ No grocery list is open this week")
+
+
+def test_two_members_cannot_share_a_profile(config: Path) -> None:
+    # Giving a second member the one `pandabase` profile would sweep the cart member's Amazon
+    # orders as theirs too; the config refuses it.
+    data = json.loads(config.read_text())
+    data["members"][1]["profile"] = "pandabase"
+    config.write_text(json.dumps(data))
+    with pytest.raises(ValueError, match="share profile 'pandabase'"):
+        load(str(config))
+
+
+def test_member_without_profile_has_no_browser(config: Path) -> None:
+    code, out = run(config, ["cdp", "check", "--member", "partner"], FakeApi({}))
+    assert code == 1 and "no PandaBase browser profile" in out["error"]
+    code, out = run(config, ["config", "show"], FakeApi({}))
+    assert code == 0
+    assert {m["name"]: m["cdp_url"] for m in out["members"]} == {
+        "will": "http://127.0.0.1:9222",
+        "partner": None,
+    }

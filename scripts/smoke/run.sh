@@ -147,6 +147,7 @@ check_replies() {
 check_cdp() {
   local name profile port out listen
   while IFS=$'\t' read -r name profile _sweep _cart; do
+    [ "$profile" = - ] && continue # no PandaBase browser for this member
     port="$(jq -r --arg p "$profile" '.profiles[$p].cdp_url // ""' "$(dirname "$PANDABASE_CONFIG")/profiles.json")"
     port="${port##*:}"
     port="${port%/}"

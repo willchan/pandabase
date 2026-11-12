@@ -6,9 +6,10 @@
 # Receipt sweeps come from the members in pandabase.config.json (`receipt_sweep`: daily → every
 # day 21:00, weekly → Sunday 21:00, off → none) rather than the example's fixed names.
 #
-#   OPENCLAW_AGENT=pandabase   run the jobs as that agent (README "Photo privacy", option A).
-#                              Default `main`: once a second app (Bamboo) has its own agent,
-#                              OpenClaw refuses to *add* a job without --agent (live, 2026-11-07).
+#   OPENCLAW_AGENT=<id>        run the jobs as that agent: the household agent, the one bound to
+#                              #pandabase (env, else .env, else `main`). The gateway hosts other
+#                              agents too, and OpenClaw refuses to *add* a job without --agent
+#                              once there is more than one (live, 2026-11-07).
 set -euo pipefail
 # shellcheck source=scripts/ops/lib.sh
 . "$(dirname "$0")/lib.sh"
@@ -21,7 +22,7 @@ TOOLS_LIST="exec,read,write,message"  # no browser: tier 2 is `pandabase-tools c
 tz="$(jq -r '.tz' "$CRON_FILE")"
 # A command job announces to its `deliver_to` channel (a key of the config's `discord`).
 channel_id() { jq -r --arg k "$1" '.discord[$k] // empty' "$PANDABASE_CONFIG"; }
-agent_args=(--agent "${OPENCLAW_AGENT:-main}")
+agent_args=(--agent "$(openclaw_agent)")
 
 if [ "$DRY_RUN" = 1 ]; then
   existing='[]'
@@ -81,7 +82,11 @@ done < <(jq -r '.jobs[] | select(.skill != "digital-receipt-scraper")
      (.timeout_seconds // "-" | tostring)] | @tsv' "$CRON_FILE")
 
 # Receipt sweeps, one per member.
-while IFS=$'\t' read -r member _profile sweep _cart; do
+while IFS=$'\t' read -r member profile sweep _cart; do
+  if [ "$profile" = - ] && [ "$sweep" != off ]; then
+    warn "$member has no browser profile: no receipt sweep (set receipt_sweep: off to silence this)"
+    sweep=off
+  fi
   case "$sweep" in
     daily) cron="0 21 * * *" ;;
     weekly) cron="0 21 * * 0" ;;

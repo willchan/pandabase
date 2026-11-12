@@ -12,16 +12,15 @@
     {
       "name": "will",
       "discord_id": "100000000000000101",
-      "profile": "will",
+      "profile": "pandabase",
       "cart_member": true,
       "receipt_sweep": "daily"
     },
     {
       "name": "partner",
       "discord_id": "100000000000000102",
-      "profile": "partner",
       "cart_member": false,
-      "receipt_sweep": "weekly"
+      "receipt_sweep": "off"
     }
   ],
   "profiles_file": "profiles.json",

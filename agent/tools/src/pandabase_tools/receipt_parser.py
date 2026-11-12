@@ -451,9 +451,11 @@ class Sweeper:
                 self._collect(run, result)
             self._process(run, result, max_orders)
         except Challenged:
-            result.errors.append({"error": "amazon_challenge", "profile": self.member.profile})
+            result.errors.append(
+                {"error": "amazon_challenge", "profile": self.member.profile_name()}
+            )
         except NotSignedIn:
-            result.errors.append({"error": "not_signed_in", "profile": self.member.profile})
+            result.errors.append({"error": "not_signed_in", "profile": self.member.profile_name()})
         except guard.UnsafeUrl as err:
             result.errors.append({"error": f"refused_{err.reason}", "url": err.url})
         finally:

@@ -408,8 +408,9 @@ session without the environment's `AUTH_SECRET` — a leak means rotating it, no
 6. **CDP on loopback is full control of a signed-in Amazon session** for any local process on the
    Mac Mini (single-user machine; Chrome checks the `Host` header and WebSocket origins against
    DNS rebinding).
-7. **Tier 2 relies on the agent's OpenClaw config denying `browser` and `group:web`** (README
-   step 11): OpenClaw's browser tool has no URL denylist (M7 Notes), so with it enabled a
+7. **Tier 2 relies on the household agent's `agents.list` entry denying `browser` and
+   `group:web`** (README step 11; per agent, so other agents on the gateway may keep a browser,
+   with their own Chrome profile and never PandaBase's CDP port): OpenClaw's browser tool has no URL denylist (M7 Notes), so with it enabled a
    prompt-injected model could still reach checkout. Tier 2 itself uses only `cart search` /
    `cart add`, which enforce the guard and the Buy Now control deny-list in code (DESIGN §10 #52);
    checkout still needs a human's "Place your order". Search-result text reaches the model (size-

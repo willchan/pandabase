@@ -166,7 +166,7 @@ def cmd_cart_build(env: Env) -> Any:
     state = cart_injector.BuildState(env.loaded.state_dir(), cycle_id)
     profile = env.loaded.profile(member)
     try:
-        with env.lock().held(member.profile, "cart build"):
+        with env.lock().held(member.profile_name(), "cart build"):
             res = cart_injector.build(
                 env.api,
                 lambda: env.driver_factory(profile.cdp_url),
@@ -238,7 +238,7 @@ def cmd_cart_search(env: Env) -> Any:
     member = _member(env, a.member)
     profile = env.loaded.profile(member)
     with (
-        env.lock().held(member.profile, "cart search"),
+        env.lock().held(member.profile_name(), "cart search"),
         env.driver_factory(profile.cdp_url) as driver,
     ):
         try:
@@ -253,7 +253,7 @@ def cmd_cart_add(env: Env) -> Any:
     member = _member(env, a.member)
     profile = env.loaded.profile(member)
     with (
-        env.lock().held(member.profile, "cart add"),
+        env.lock().held(member.profile_name(), "cart add"),
         env.driver_factory(profile.cdp_url) as driver,
     ):
         return cart_tier2.add(driver, a.asin, a.qty, a.store, env.cfg.cart, env.tel)
@@ -269,7 +269,7 @@ def cmd_cart_probe(env: Env) -> Any:
     cfg = env.cfg.cart
     try:
         with (
-            env.lock().held(member.profile, "cart probe"),
+            env.lock().held(member.profile_name(), "cart probe"),
             env.driver_factory(profile.cdp_url) as driver,
         ):
             asins = {str(store): asin for store, asin in cfg.probe_asins.items()}
@@ -296,7 +296,10 @@ def cmd_receipts_sweep(env: Env) -> Any:
     tz = env.cfg.household_tz
     today = env.household_today()
     owner = f"receipts {'backfill' if a.backfill else 'sweep'}"
-    with env.lock().held(member.profile, owner), env.driver_factory(profile.cdp_url) as driver:
+    with (
+        env.lock().held(member.profile_name(), owner),
+        env.driver_factory(profile.cdp_url) as driver,
+    ):
         sweeper = receipt_parser.Sweeper(
             env.api,
             driver,
@@ -516,11 +519,11 @@ def cmd_lock(env: Env) -> Any:
     member = _member(env, a.member)
     lock = env.lock()
     if a.lock_cmd == "acquire":
-        lease = lock.acquire(member.profile, a.owner, a.ttl, hold_pid=False)
+        lease = lock.acquire(member.profile_name(), a.owner, a.ttl, hold_pid=False)
         return {"profile": lease.profile, "token": lease.token, "expires_at": lease.expires_at}
     if a.lock_cmd == "release":
-        return {"released": lock.release(member.profile, a.token)}
-    return {"profile": member.profile, "lease": lock.status(member.profile)}
+        return {"released": lock.release(member.profile_name(), a.token)}
+    return {"profile": member.profile_name(), "lease": lock.status(member.profile_name())}
 
 
 def cmd_cdp_check(env: Env) -> Any:
@@ -528,11 +531,16 @@ def cmd_cdp_check(env: Env) -> Any:
     member = _member(env, env.args.member)
     profile = env.loaded.profile(member)
     with (
-        env.lock().held(member.profile, "cdp check"),
+        env.lock().held(member.profile_name(), "cdp check"),
         env.driver_factory(profile.cdp_url) as driver,
     ):
         snap = driver.open("https://www.amazon.com/gp/cart/view.html")
-    return {"member": member.name, "profile": member.profile, "url": snap.url, "attached": True}
+    return {
+        "member": member.name,
+        "profile": member.profile_name(),
+        "url": snap.url,
+        "attached": True,
+    }
 
 
 def cmd_config_show(env: Env) -> Any:
@@ -544,7 +552,8 @@ def cmd_config_show(env: Env) -> Any:
         "today": env.household_today().isoformat(),
         "channels": cfg.discord.model_dump(),
         "members": [
-            m.model_dump() | {"cdp_url": env.loaded.profile(m).cdp_url} for m in cfg.members
+            m.model_dump() | {"cdp_url": env.loaded.profile(m).cdp_url if m.profile else None}
+            for m in cfg.members
         ],
         "token_set": bool(config_mod.setting(config_mod.TOKEN_ENV)),
     }

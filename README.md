@@ -11,7 +11,7 @@ predict what we need, and fill the weekly Whole Foods/Amazon cart (cart only, ne
 ```
  phones ──Google──▶ Vercel: web UI + API + daily cron ──▶ Turso (libSQL)
                         ▲ bearer tokens (outbound only)
- Mac Mini: OpenClaw + skills ─ pandabase-tools ─ CDP ─▶ Chromium (one per member, signed in)
+ Mac Mini: OpenClaw (household agent) + skills ─ pandabase-tools ─ CDP ─▶ Chrome `pandabase` (signed in)
            worker (Docker) ─▶ Ollama (native, Metal)          media: Cloudflare R2
 ```
 
@@ -50,7 +50,7 @@ pnpm install && make install
 
 Check: `node -v` → v24, `pnpm -v` → 12, `uv --version`, `turso --version`, `vercel --version`.
 
-Homebrew's `chromium` cask was disabled on 2026-09-01, so the per-member browsers are **Google
+Homebrew's `chromium` cask was disabled on 2026-09-01, so PandaBase's browser is **Google
 Chrome** by default (`CHROMIUM_BIN` in `.env`; any Chromium build works). Docker Desktop is
 optional: [Colima](https://github.com/abiosoft/colima) (`brew install colima docker
 docker-compose`) runs the worker just as well; [SETUP-MAC.md](docs/SETUP-MAC.md) has the details.
@@ -168,7 +168,7 @@ Check: `https://<domain>/sign-in` loads (signing in comes after step 7).
 
 *Phase 1 done? Skip: the **Bootstrap** workflow (Actions → Bootstrap → Run workflow) migrated
 both databases (members are created on first sign-in). Its `add-member` also works later from a
-browser, e.g. to set a Chromium profile: the member's position in the `ALLOWED_EMAILS` secret.*
+browser, e.g. to set the browser profile: the member's position in the `ALLOWED_EMAILS` secret.*
 
 ```sh
 # production (needs the step-2 values in your shell; they're not in .env)
@@ -177,11 +177,12 @@ TURSO_DATABASE_URL=libsql://pandabase-… TURSO_AUTH_TOKEN=… pnpm db:migrate:p
 TURSO_DATABASE_URL=libsql://pandabase-preview-… TURSO_AUTH_TOKEN=… pnpm db:migrate:prod
 
 # optional: members are created on first sign-in (then edited in Settings); add-member sets fields
-# up front, incl. the Chromium profile Settings doesn't edit; exactly one cart account
+# up front, incl. the browser profile Settings doesn't edit; exactly one cart account. PandaBase
+# drives one browser profile, `pandabase` (the cart member's Amazon session); others have none
 TURSO_DATABASE_URL=… TURSO_AUTH_TOKEN=… pnpm db:add-member --email will@example.com --name Will \
-  --discord <discord user id> --profile will --sweep daily --cart
+  --discord <discord user id> --profile pandabase --sweep daily --cart
 TURSO_DATABASE_URL=… TURSO_AUTH_TOKEN=… pnpm db:add-member --email partner@example.com \
-  --name Partner --discord <discord user id> --profile partner --sweep weekly
+  --name Partner --discord <discord user id> --sweep off
 ```
 
 `db:add-member` creates or updates by email, so re-running is safe. Discord user ids: Discord →
@@ -230,7 +231,7 @@ three settings the server actually got.
 | `qwen3.5:4b` (text, `OLLAMA_TEXT_MODEL`) | ~3.5–4GB while loaded | merge suggestions only; with `OLLAMA_MAX_LOADED_MODELS=1` it replaces the VLM rather than sitting beside it |
 | OpenClaw gateway (Node) | ~0.5–1GB | |
 | OpenClaw's reply model, `$OPENCLAW_MODEL` | 0 if cloud; its size if local | if it runs on this Ollama, set `OLLAMA_MAX_LOADED_MODELS=2` in `ops/launchd/com.pandabase.ollama-env.plist` and budget its size here |
-| Chromium × 2 (one per member) | ~0.5–1.5GB each | only one is driven at a time (profile lock) |
+| PandaBase's Chrome (`pandabase` profile) | ~0.5–1.5GB | other agents' Chrome profiles are their setup's budget |
 | Evening Claude Code sessions | ~1–2GB | |
 | **Worst case** | **~18–20GB + `$OPENCLAW_MODEL`** | leaves headroom for the OS cache |
 
@@ -263,7 +264,7 @@ missing; both gitignored). Edit `agent/pandabase.config.json`:
 | `api_base_url`, `web_url` | your production URL |
 | `discord.guild_id` | server id (right-click the server → *Copy Server ID*) |
 | `discord.cycle_channel`, `intake_channel`, `ops_channel` | `#pandabase`'s channel id (all three) |
-| `members[]` | `name`, `discord_id`, `profile` (= key in `profiles.json`), `cart_member` (exactly one `true`), `receipt_sweep` (`daily`/`weekly`/`off`) — match step 7 |
+| `members[]` | `name`, `discord_id`, `profile` (= key in `profiles.json`: `pandabase` for the cart member, omitted for everyone else), `cart_member` (exactly one `true`), `receipt_sweep` (`daily`/`weekly`/`off`; a member without a profile gets no sweep) — match step 7 |
 | `diagnostics_dir` | already the repo's `diagnostics/` (gitignored) |
 | `cart.wholefoods_tier1` | leave `false` until step 13 says otherwise |
 | `cart.probe_asins` | `{"amazon": "<ASIN>", "wholefoods": "<ASIN>"}`: one everyday, rarely-out-of-stock product per store for the Friday add-button check (`cart probe`); its page is opened weekly, nothing is clicked |
@@ -283,21 +284,31 @@ instead.
 
 Check: `scripts/ops/agent-run.sh config show` prints your members and `"token_set": true`.
 
-### 10. Chromium profiles (one per member)
+### 10. PandaBase's browser profile
 
 ```sh
 make install-chromium
 ```
 
-One LaunchAgent per profile in `agent/profiles.json` starts that member's browser (Google Chrome
-unless `CHROMIUM_BIN` says otherwise; window title "PandaBase · <profile>") at login with
-its own user-data dir and a DevTools port bound to `127.0.0.1` only (9222, 9223, …). CDP means
-full control of a signed-in browser: never expose those ports. If macOS blocks Chromium the first
-time, open it once from Finder (right-click → Open) and re-run.
+PandaBase drives one browser profile, **`pandabase`**: the cart member's Amazon session. A
+LaunchAgent per profile in `agent/profiles.json` starts it (Google Chrome unless `CHROMIUM_BIN`
+says otherwise; window title "PandaBase · pandabase") at login with its own user-data dir
+(`~/Library/Application Support/PandaBase/chromium-pandabase`) and a DevTools port bound to
+`127.0.0.1` only (9222). CDP means full control of a signed-in browser: never expose that port. If
+macOS blocks Chrome the first time, open it once from Finder (right-click → Open) and re-run.
 
-Manual: in **each** Chromium window, sign in to that member's Amazon account (tick *Keep me
-signed in*) and visit Whole Foods on Amazon once to set the store. The tools never sign in; if a
-session expires, the smoke check and the agent will say so, and you sign in again by hand.
+Members' own Chrome profiles (say, for a personal OpenClaw agent with the browser tool) aren't
+PandaBase's: they live outside this repo under their own names, and must never use PandaBase's
+user-data dir or DevTools port. The tools still accept more than one profile (one key per member
+in `profiles.json`, each with its own port and dir; two members can't share one), should another
+member's Amazon orders ever need sweeping.
+
+Manual: in the `pandabase` window, sign in to the cart member's Amazon account (tick *Keep me
+signed in*), visit Whole Foods on Amazon once to set the store, and optionally name the Chrome
+profile "PandaBase" (profile menu → *Customize profile*). The tools never sign in; if the session
+expires, the smoke check and the agent will say so, and you sign in again by hand. Coming from a
+profile named after a member (`will`)? See
+[SETUP-MAC *Renaming the browser profile*](docs/SETUP-MAC.md#renaming-the-browser-profile-to-pandabase).
 
 ### 11. OpenClaw (Discord, skills, automations)
 
@@ -310,29 +321,44 @@ OpenClaw's Discord channel is a plugin: if `openclaw plugins list` doesn't show 
 your OpenClaw version and pin it (`openclaw plugins install @openclaw/discord@<version> --pin`),
 then connect the bot as OpenClaw's docs describe.
 
+The gateway can host more than one agent on the same bot, routed by channel and DM sender
+(`bindings`). PandaBase's config describes the **household agent**: the one bound to `#pandabase`
+(and the household's other shared channels), on a local model, with no web or browser tools, and
+running the automations. Other agents (say, a member's personal agent for their own DMs) are set
+up outside this repo; they may get the PandaBase skill and token too. Not every Discord message
+reaches the household agent: a DM goes to whichever agent its sender is bound to.
+
 ```sh
 cp agent/openclaw.pandabase.example.json5 agent/openclaw.pandabase.json5
 # edit: guild id, #pandabase id, both members' Discord ids
 openclaw gateway stop
 openclaw config patch --file agent/openclaw.pandabase.json5 --dry-run   # read the diff
 openclaw config patch --file agent/openclaw.pandabase.json5
+# the household agent's tool policy, by index (agents.list is an array the other agents share)
+openclaw config get agents.list --json
+openclaw config set "agents.list[<i>].tools.deny" '["group:web","browser"]' --strict-json
 openclaw gateway start
+# .env: OPENCLAW_AGENT=<the household agent's id> (default `main`), so the automations run as it
 
 make install-agent-skills   # skills.load.extraDirs += agent/skills; settings → ~/.config/pandabase/agent.env
 openclaw gateway restart    # if it said so
 make install-agent-cron     # the automations from agent/cron.example.json (idempotent)
 ```
 
-The patch sets the `#pandabase` channel policy, local photo descriptions on Ollama, and
-**`tools.deny: ["group:web", "browser"]`** (recommended; keep it). The agent never browses: the
-Saturday cart's tier 2 runs through `pandabase-tools cart search` / `cart add`, which attach to the
-step-10 Chromium with the checkout guard on. OpenClaw's browser tool has no URL denylist, so a
-local model with it next to a signed-in Amazon session could be talked into Buy Now by a product
-page (`openclaw security audit` flags this as `models.small_params`). If you configured
-`pandabase-<member>` browser profiles from an older version of this file, you can remove them.
-The patch names `qwen3.5:9b`: if you change `OLLAMA_VLM_MODEL`, change it there too. Arrays in a
-patch replace: if you already had `tools.media.models`, `tools.deny` or Ollama models configured,
-merge those lists by hand.
+The patch sets the `#pandabase` channel policy and local photo descriptions on Ollama (both
+gateway-wide); the `config set` gives the household agent
+**`tools.deny: ["group:web", "browser"]`** (recommended; keep it). The deny is per agent, not in
+the gateway-wide `tools` block, so other agents keep their web tools; an older version of this
+file put it there, so move it (`openclaw config unset tools.deny`, then the `config set` above).
+The household agent never browses: the Saturday cart's tier 2 runs through `pandabase-tools cart
+search` / `cart add`, which attach to the step-10 browser with the checkout guard on. OpenClaw's
+browser tool has no URL denylist, so a local model with it next to a signed-in Amazon session
+could be talked into Buy Now by a product page (`openclaw security audit` flags this as
+`models.small_params`). An agent that does have the browser uses its own Chrome profile: remove
+any OpenClaw browser profile that attaches to PandaBase's DevTools port (older versions of this
+file had `pandabase-<member>` ones). The patch names `qwen3.5:9b`: if you change
+`OLLAMA_VLM_MODEL`, change it there too. Arrays in a patch replace: if you already had
+`tools.media.models` or Ollama models configured, merge those lists by hand.
 
 Exec policy: OpenClaw's default host exec mode works as is. If you run `tools.exec.mode:
 "allowlist"`, allowlist `pandabase-tools` (the only command the skills run).
@@ -345,19 +371,19 @@ find its index with `openclaw config get models.providers.ollama.models --json` 
 Check:
 
 ```sh
-openclaw skills check     # the five PandaBase skills are eligible (no missing bin/env)
-openclaw automations list # pandabase-* jobs, household-TZ schedules
+openclaw skills check --agent <household agent id>   # the five PandaBase skills are eligible
+openclaw automations list # pandabase-* jobs on the household agent, household-TZ schedules
 openclaw infer image describe --file <any photo> --model ollama/qwen3.5:9b --timeout-ms 180000
 # local vision works (the default 30s timeout is too short while the model loads)
 ```
 
-Then say "do we have milk?" mentioning the bot in any channel, and post a test message in
-`#pandabase`.
+Then post a test message in `#pandabase`, and say "do we have milk?" mentioning the bot in another
+channel the household agent is bound to.
 
 ### 12. Decide on photo privacy
 
-Read [Photo privacy](#photo-privacy) below. If OpenClaw's reply model is local (our setup),
-there is nothing to do beyond keeping cloud models out of its fallbacks. With a cloud reply model,
+Read [Photo privacy](#photo-privacy) below. If the household agent's reply model is local (our
+setup), there is nothing to do beyond keeping cloud models out of its fallbacks. With a cloud reply model,
 pick an option; A is recommended.
 
 ### 13. Smoke test
@@ -369,7 +395,7 @@ make smoke
 Checks, each ✓/✗ with a reason: `.env` + config, agent-token API round trip, worker container
 up, both models pulled, Ollama host settings, the worker's VLM on a synthetic receipt (in the
 container, < 60s; a cold first load may need a re-run), job replies print `NO_REPLY` (skipped
-while real replies are pending, so it never eats them), CDP attach to each member's Chromium on
+while real replies are pending, so it never eats them), CDP attach to the `pandabase` browser on
 a loopback port, and a clean worker stop/restart. Re-run any time; it changes nothing by
 default.
 
@@ -392,10 +418,10 @@ slower but fine). If it can't delete a test item, it says which one to remove by
 ### 14. Backfill 12 months of receipts
 
 ```sh
-make backfill               # every member with receipt_sweep ≠ off; or MEMBER=will
+make backfill               # every member with a profile and receipt_sweep ≠ off; or MEMBER=will
 ```
 
-Walks each member's Amazon order history back 12 months (3s per page), ingesting delivered,
+Walks the `pandabase` profile's Amazon order history back 12 months (3s per page), ingesting delivered,
 picked-up and in-store orders. It's resumable and deduped by order id: if it stops (Chromium
 signed out, network), fix the cause and run it again. Orders whose items it can't read are
 listed; ask the agent in `#pandabase`: "backfill receipts for will" to extract them. At the end it
@@ -484,7 +510,9 @@ telemetry (weekly report, *Deploys*). It needs a clean checkout on `main`.
 PandaBase is local-first for vision ([PRD §3.6](docs/PRD.md), [DESIGN §10 #10, #34](docs/DESIGN.md#10-key-decisions--rationale)):
 the worker only talks to the local Ollama, and the step-11 config makes OpenClaw describe each
 inbound Discord photo with the same local model (`tools.media.models` → `ollama/qwen3.5:9b`), so
-the skills work from that text and the agent's reply model never needs the pixels.
+the skills work from that text and the agent's reply model never needs the pixels. This is per
+agent: a photo sent to another agent on the gateway (e.g. in a DM bound to a member's own agent)
+follows that agent's model.
 
 **Residual risk.** OpenClaw's media understanding is best-effort: if the local description fails
 (Ollama down or busy past the 180s timeout, a photo over the size limit, the second of several
@@ -493,7 +521,7 @@ that model is a cloud model (your `$OPENCLAW_MODEL`), the photo — a receipt, o
 your trash can — goes to that provider. OpenClaw documents this; `tools.media.image.enabled:
 false` does not stop native delivery.
 
-**With a local reply model (our setup), there is no residual risk.** If OpenClaw's agent runs on
+**With a local reply model (our setup), there is no residual risk.** If the household agent runs on
 a model served by this Mac's Ollama, a photo the media model couldn't describe goes to that local
 model instead: it never leaves the Mac. That's option C below, with two conditions:
 
@@ -513,25 +541,26 @@ The options below matter only if the reply model is a cloud model.
 
 Options (the owner chooses; record the choice in PLAN M8 Notes):
 
-- **A. Text-only reply model for PandaBase (recommended).** A dedicated `pandabase` agent bound to
-  `#pandabase` uses your usual cloud model registered under its own provider id with `input:
-  ["text"]`. OpenClaw only attaches images to turns whose model is image-capable, so a failed
-  local description leaves the agent with no image rather than a cloud upload; the skill then
-  classifies the photo by its caption (or files it as a receipt) and the worker still reads it
-  locally. Your other agents keep vision.
+- **A. Text-only reply model for PandaBase (recommended).** The agent bound to `#pandabase` uses
+  your usual cloud model registered under its own provider id with `input: ["text"]`. OpenClaw
+  only attaches images to turns whose model is image-capable, so a failed local description
+  leaves the agent with no image rather than a cloud upload; the skill then classifies the photo
+  by its caption (or files it as a receipt) and the worker still reads it locally. Other agents
+  on the gateway keep vision. `agents.list` and `bindings` are arrays the other agents share, so
+  the model is set by index, not by patch (the file's comments cover adding an agent instead).
   ```sh
   cp agent/openclaw.privacy.example.json5 agent/openclaw.privacy.json5   # fill in the <…>
   openclaw gateway stop
-  openclaw config patch --file agent/openclaw.privacy.json5 --dry-run
+  openclaw config patch --file agent/openclaw.privacy.json5 --dry-run   # the text-only provider
   openclaw config patch --file agent/openclaw.privacy.json5
+  openclaw config set "agents.list[<i>].model" '"pandabase-text/<MODEL_ID>"' --strict-json
   openclaw gateway start
-  OPENCLAW_AGENT=pandabase make install-agent-cron   # run the automations as that agent
+  make install-agent-cron   # as OPENCLAW_AGENT in .env: the agent bound to #pandabase
   ```
   Verify: post a receipt photo in `#pandabase` and one in a cycle thread. Each should get the
   usual "queued" reply (the skill still receives the attachment's file path; OpenClaw keeps
   attachments for text-only models as file refs — not verified on a live gateway yet), and
-  `openclaw sessions list` should show both sessions on the `pandabase` agent. If your gateway had one agent, also bind it for everything else
-  (see the comment in the file), or other channels stop routing.
+  `openclaw sessions list` should show both sessions on that agent.
 - **B. Mark your model text-only everywhere.** One metadata row,
   `models.providers.<provider>.models: [{id: "<model>", input: ["text"]}]`. Simplest, but every
   agent on the gateway loses vision.
@@ -586,7 +615,7 @@ Mini's worker rolls back on its own (step 15).
   consent screen + redirect URIs (steps 2–4, 6).
 - macOS settings: auto-login, no sleep, restart after power failure, Docker Desktop and Ollama at
   login (step 8); opening Chromium once past Gatekeeper (step 10).
-- Signing in to Amazon in each member's Chromium, and again whenever a session expires (step 10).
+- Signing in to Amazon in the `pandabase` browser, and again whenever the session expires (step 10).
 - Discord: Message Content Intent and the bot's channel permissions; copying ids (steps 7, 11).
 - Filling in `agent/pandabase.config.json` and the OpenClaw patch file (steps 9, 11).
 - The photo-privacy choice (step 12) and turning on `cart.wholefoods_tier1` after the cart check.

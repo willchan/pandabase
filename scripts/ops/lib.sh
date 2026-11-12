@@ -89,13 +89,23 @@ env_unset() {
   mv "$tmp" "$file"
 }
 
+# The OpenClaw agent PandaBase's automations and skills check run as: the household agent. The
+# gateway can host other agents (they may also have the PandaBase skill), so this names one:
+# OPENCLAW_AGENT from the caller's env, else from .env, else `main`.
+openclaw_agent() {
+  local agent="${OPENCLAW_AGENT:-}"
+  [ -n "$agent" ] || agent="$(env_get OPENCLAW_AGENT)"
+  printf '%s\n' "${agent:-main}"
+}
+
 tools() {
   [ -x "$TOOLS_BIN" ] || die "agent tools not installed — run: make install-agent-tools"
   "$TOOLS_BIN" "$@"
 }
 
 # The members in pandabase.config.json, one per line: name<TAB>profile<TAB>receipt_sweep<TAB>cart.
+# profile is "-" for a member PandaBase drives no browser for (only the cart member has one today).
 members() {
-  jq -r '.members[] | [.name, .profile, (.receipt_sweep // "weekly"), (.cart_member // false)] | @tsv' \
+  jq -r '.members[] | [.name, (.profile // "-"), (.receipt_sweep // "weekly"), (.cart_member // false)] | @tsv' \
     "$PANDABASE_CONFIG"
 }

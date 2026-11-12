@@ -104,6 +104,7 @@ if [ "$changed" = 1 ]; then
 fi
 
 # 3. Report. With more than one agent configured, `skills check` refuses to run without an owner
-# (November 2026), so name one, as install-agent-cron does.
-run openclaw skills check --agent "${OPENCLAW_AGENT:-main}"
+# (November 2026), so name one, as install-agent-cron does: the household agent (OPENCLAW_AGENT).
+# skills.load.extraDirs is gateway-wide, so other agents on the gateway see the skills too.
+run openclaw skills check --agent "$(openclaw_agent)"
 info "New sessions pick the skills up; existing ones keep their snapshot (start a new session)."

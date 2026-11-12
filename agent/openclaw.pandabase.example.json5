@@ -1,4 +1,13 @@
 // PandaBase's additions to the OpenClaw gateway config (README step 11; PLAN M7/M8 Notes).
+//
+// The gateway can host several agents on one Discord bot, routed by channel and DM sender
+// (`bindings`). This file describes PandaBase's side of it: the **household agent**, the one
+// bound to #pandabase (and the household's other shared channels), which runs PandaBase's
+// automations on a local model with no web or browser tools. Other agents on the same gateway
+// (e.g. a member's personal agent with web tools and its own Chrome profile) are set up outside
+// this repo; they may also have the PandaBase skill and token, but they never drive PandaBase's
+// browser. Shared data lives in PandaBase, not in any agent's memory.
+//
 // Copy to agent/openclaw.pandabase.json5 (gitignored), replace every <…>, then apply:
 //
 //   openclaw gateway stop
@@ -7,21 +16,38 @@
 //   openclaw gateway start
 //
 // Arrays are replaced, not merged: if your config already has `tools.media.models` (e.g. an audio
-// transcriber), add these entries to your list by hand. This file deliberately leaves
-// `models.providers.ollama.models` alone: onboarding lists every pulled model there, and a patch
-// array would replace that list (deleting your reply model). To tune the VLM, set its params by
-// index instead (README step 11):
+// transcriber), add these entries to your list by hand. That is also why this patch doesn't touch
+// `agents.list`, `bindings` or `models.providers.ollama.models`: each is an array other agents and
+// onboarding share, and a patch would replace it. Set per-agent and per-model fields by index:
+//
+//   # The household agent's tool policy (DESIGN §10 #52): find its index, then
+//   openclaw config get agents.list --json
+//   openclaw config set "agents.list[<i>].tools.deny" '["group:web","browser"]' --strict-json
+//
+//   # The VLM's params (README step 11):
 //   openclaw config set "models.providers.ollama.models[<i>].params" \
 //     '{"num_ctx":8192,"keep_alive":"2m"}' --strict-json
+//
+// The household agent's entry in `agents.list` then looks like this (other fields as your
+// gateway has them; its id goes in .env as OPENCLAW_AGENT so the automations run as it):
+//
+//   { id: "<HOUSEHOLD_AGENT_ID>", model: "ollama/<LOCAL_REPLY_MODEL>",
+//     tools: { deny: ["group:web", "browser"] } }
+//
+// Keep `tools.deny` off the gateway-wide `tools` block below: there it would also take the web
+// tools and browser from every other agent on the gateway.
 {
   channels: {
     discord: {
-      // Needed to read unmentioned messages in #pandabase and in the cycle threads.
+      // Needed to read unmentioned messages in #pandabase and in the cycle threads. This Discord
+      // policy is gateway-wide: other agents' channels and DMs are configured (and bound) outside
+      // this file, and objects merge, so their entries are kept.
       intents: { messageContent: true },
       guilds: {
         "<GUILD_ID>": {
           // A channel map is an allowlist: keep "*" so the bot still answers members when
-          // mentioned elsewhere ("do we have eggs?"), but only members.
+          // mentioned elsewhere ("do we have eggs?"), but only members. Which agent answers is
+          // the gateway's `bindings`' call (by channel and DM sender), not this map's.
           channels: {
             "<PANDABASE_CHANNEL_ID>": {
               enabled: true,
@@ -30,6 +56,8 @@
               requireMentionInBotThreads: false,
               users: ["<MEMBER_1_DISCORD_ID>", "<MEMBER_2_DISCORD_ID>"],
             },
+            // `users` is an array: if the gateway already has a "*" rule for other agents'
+            // channels, merge the lists by hand rather than let this replace it.
             "*": { requireMention: true, users: ["<MEMBER_1_DISCORD_ID>", "<MEMBER_2_DISCORD_ID>"] },
           },
         },
@@ -40,12 +68,9 @@
   // Local vision for inbound photos (PRD §3.6, DESIGN §6): OpenClaw describes each photo with the
   // same Ollama VLM the worker uses, and the reply model gets that text instead of the pixels.
   // Residual risk and the mitigation: README "Photo privacy" (agent/openclaw.privacy.example.json5).
+  // Gateway-wide, so it serves every agent's photos. No `deny` here: the household agent's
+  // web/browser deny is per agent (`agents.list[<i>].tools.deny`, header).
   tools: {
-    // No raw web or browser tools for this agent (DESIGN §10 #52). Tier 2 of the Saturday cart
-    // runs through `pandabase-tools cart search` / `cart add`, which guard against checkout in
-    // code; OpenClaw's browser tool has no URL denylist. If your config already has a
-    // `tools.deny` list, merge these two entries into it by hand (arrays replace).
-    deny: ["group:web", "browser"],
     media: {
       models: [
         { provider: "ollama", model: "qwen3.5:9b", capabilities: ["image"], timeoutSeconds: 180 },
