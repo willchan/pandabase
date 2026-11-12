@@ -334,10 +334,12 @@ cp agent/openclaw.pandabase.example.json5 agent/openclaw.pandabase.json5
 openclaw gateway stop
 openclaw config patch --file agent/openclaw.pandabase.json5 --dry-run   # read the diff
 openclaw config patch --file agent/openclaw.pandabase.json5
-# the `pandabase` agent's tool policy, by index (agents.list is an array the other agents share)
-openclaw config get agents.list --json
-openclaw config set "agents.list[<i>].tools.deny" '["group:web","browser"]' --strict-json
 openclaw gateway start
+# the `pandabase` agent: its own workspace; then one `config set --batch-file` for PandaBase's
+# skills only, no web or browser tools, and the #pandabase binding (docs/SETUP-MAC.md §5 step 4)
+openclaw agents add pandabase --workspace ~/.openclaw/workspace-pandabase \
+  --model ollama/qwen3.5:27b --non-interactive
+rm ~/.openclaw/workspace-pandabase/BOOTSTRAP.md   # no onboarding chat in a shared channel
 # .env: OPENCLAW_AGENT=pandabase, so the automations run as it (unset: `main`, the old single agent)
 
 make install-agent-skills   # skills.load.extraDirs += agent/skills; settings → ~/.config/pandabase/agent.env
@@ -349,7 +351,10 @@ The patch sets the `#pandabase` channel policy and local photo descriptions on O
 gateway-wide); the `config set` gives the `pandabase` agent
 **`tools.deny: ["group:web", "browser"]`** (recommended; keep it). The deny is per agent, not in
 the gateway-wide `tools` block, so other agents keep their web tools; an older version of this
-file put it there, so move it (`openclaw config unset tools.deny`, then the `config set` above).
+file put it there. Move it only after the `pandabase` agent has its own deny and `#pandabase` is
+bound to it, and after removing any OpenClaw browser profile on PandaBase's port (below): then
+`openclaw config unset tools.deny` (docs/SETUP-MAC.md *Security defaults* has the order). Agents
+live in `agents.entries.<id>` on OpenClaw 2026.10.10 (`agents.list` is rejected).
 The `pandabase` agent never browses: the Saturday cart's tier 2 runs through `pandabase-tools cart
 search` / `cart add`, which attach to the step-10 browser with the checkout guard on. OpenClaw's
 browser tool has no URL denylist, so a local model with it next to a signed-in Amazon session
@@ -546,21 +551,21 @@ Options (the owner chooses; record the choice in PLAN M8 Notes):
   only attaches images to turns whose model is image-capable, so a failed local description
   leaves the agent with no image rather than a cloud upload; the skill then classifies the photo
   by its caption (or files it as a receipt) and the worker still reads it locally. Other agents
-  on the gateway keep vision. `agents.list` and `bindings` are arrays the other agents share, so
-  the model is set by index, not by patch (the file's comments cover adding an agent instead).
+  on the gateway keep vision. The model is set on the agent's own entry with `config set`, not
+  by patch (`bindings` is an array the other agents share, and a patch would replace it).
   ```sh
   cp agent/openclaw.privacy.example.json5 agent/openclaw.privacy.json5   # fill in the <…>
   openclaw gateway stop
   openclaw config patch --file agent/openclaw.privacy.json5 --dry-run   # the text-only provider
   openclaw config patch --file agent/openclaw.privacy.json5
-  openclaw config set "agents.list[<i>].model" '"pandabase-text/<MODEL_ID>"' --strict-json
+  openclaw config set agents.entries.pandabase.model '"pandabase-text/<MODEL_ID>"' --strict-json
   openclaw gateway start
   make install-agent-cron   # as OPENCLAW_AGENT in .env: the agent bound to #pandabase
   ```
   Verify: post a receipt photo in `#pandabase` and one in a cycle thread. Each should get the
   usual "queued" reply (the skill still receives the attachment's file path; OpenClaw keeps
   attachments for text-only models as file refs — not verified on a live gateway yet), and
-  `openclaw sessions list` should show both sessions on that agent.
+  `openclaw sessions list --agent pandabase` should show both sessions.
 - **B. Mark your model text-only everywhere.** One metadata row,
   `models.providers.<provider>.models: [{id: "<model>", input: ["text"]}]`. Simplest, but every
   agent on the gateway loses vision.

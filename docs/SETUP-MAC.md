@@ -155,30 +155,81 @@ that can call PandaBase; shared data lives in PandaBase, not in agent memory.
    ```
 
    The patch is gateway-wide (the `#pandabase` channel policy, local photo descriptions) and
-   leaves the arrays other agents and onboarding share alone: `agents.list`, `bindings` and
-   `models.providers.ollama.models`. The dry run must not touch any of them. Per-agent and
-   per-model settings go in by index instead:
+   leaves alone what other agents and onboarding share: the agents (`agents.entries`), `bindings`
+   and `models.providers.ollama.models`. The dry run must not touch any of them.
+4. **The `pandabase` agent.** Give PandaBase an agent of its own rather than the gateway's default
+   (`main`): the default is usually the catch-all for every Discord message no binding claims, and
+   a separate agent keeps PandaBase's workspace and memory out of it. (Sessions are still readable
+   across agents unless the gateway narrows `tools.sessions.visibility`; `openclaw security audit`
+   warns `cross_agent_session_access_default`.) On OpenClaw 2026.10.10 agents
+   are an object keyed by id, `agents.entries.<id>` (`agents.list` is rejected as an unknown
+   path); `bindings` is still an array.
+
+   ✅ As run on 2026-11-12 (back up `~/.openclaw/openclaw.json` first; no step needed a restart,
+   each write printed "Change will apply without restarting the gateway"):
 
    ```sh
-   # the `pandabase` agent: no web or browser tools (Security defaults below)
-   openclaw config get agents.list --json   # find the `pandabase` agent's index and id
-   openclaw config set "agents.list[<i>].tools.deny" '["group:web","browser"]' --strict-json
-   # the VLM: a small context and short keep-alive
+   openclaw agents list && openclaw config get bindings --json   # what's there now
+   openclaw agents add pandabase --workspace ~/.openclaw/workspace-pandabase \
+     --model ollama/qwen3.5:27b --non-interactive
+   rm ~/.openclaw/workspace-pandabase/BOOTSTRAP.md   # else the first chat starts onboarding
+   ```
+
+   `agents add` writes the entry and template workspace files (AGENTS, IDENTITY, SOUL, USER.md).
+   Then the skills allowlist, the deny and the binding in one batch file (mode 600, it holds the
+   channel id); `agents add` must come first, since the dry run checks the agent exists:
+
+   ```json
+   [
+     {"path": "agents.entries.pandabase.skills", "value": ["digital-receipt-scraper",
+       "discord-intake", "grocery-cycle", "item-lookup", "telemetry-aggregator"]},
+     {"path": "agents.entries.pandabase.tools.deny", "value": ["group:web", "browser"]},
+     {"path": "bindings", "value": [
+       "…every existing binding, unchanged, except the catch-all…",
+       {"agentId": "pandabase", "match": {"channel": "discord", "accountId": "default",
+         "peer": {"kind": "channel", "id": "<PANDABASE_CHANNEL_ID>"}}},
+       {"agentId": "main", "match": {"channel": "discord", "accountId": "*"}}
+     ]}
+   ]
+   ```
+
+   ```sh
+   openclaw config set --batch-file <file> --dry-run
+   openclaw config set --batch-file <file>
+   ```
+
+   `bindings` is replaced whole, so build its value from `config get bindings` (with no other
+   bindings it is just the `pandabase` rule and the catch-all). `openclaw agents bind` takes only
+   `channel[:accountId]` and can't express a channel peer. A peer match beats a channel/account
+   match, so order doesn't decide it; keeping the catch-all last is for readability. Cycle threads
+   need no binding of their own: a thread reaches its parent channel's agent.
+
+   If the gateway's default agent had the PandaBase skills, take them off its `skills` list once
+   the automations have moved (step 5): set `agents.entries.main.skills` to its list minus the
+   five. An agent with no `skills` list sees every skill, so give it a full list instead.
+
+   The VLM gets a small context and short keep-alive, by index:
+
+   ```sh
    openclaw config get models.providers.ollama.models --json   # find qwen3.5:9b's index
    openclaw config set "models.providers.ollama.models[<i>].params" \
      '{"num_ctx":8192,"keep_alive":"2m"}' --strict-json
    openclaw gateway restart
    ```
 
-   Name the agent `pandabase` and put `OPENCLAW_AGENT=pandabase` in `.env` (unset, it is `main`):
-   the installers and the 15-minute updater add the automations and check the skills as that agent.
-4. **Skills and automations.**
+   Put `OPENCLAW_AGENT=pandabase` in `.env` (unset, it is `main`): the installers and the
+   15-minute updater add the automations and check the skills as that agent.
+5. **Skills and automations.**
 
    ```sh
    make install-agent-skills   # adds agent/skills (gateway-wide); settings → ~/.config/pandabase/agent.env
    openclaw gateway restart    # only if it says so
    make install-agent-cron     # as OPENCLAW_AGENT
    ```
+
+   Moving existing automations to another agent is the same command: with the new
+   `OPENCLAW_AGENT`, `install-agent-cron` edits each job by name (`automations edit --agent`), so
+   the jobs keep their ids and run history (✅ 2026-11-12, all nine moved from `main`).
 
    After later merges this happens by itself: when an update (`make update`, every 15 min) brings
    changes to the jobs, agent configs or installers, it re-runs them, restarting the gateway only
@@ -189,12 +240,14 @@ that can call PandaBase; shared data lives in PandaBase, not in agent memory.
 Check:
 
 ```sh
-openclaw skills check --agent pandabase   # the PandaBase skills are eligible
+openclaw skills check --agent pandabase   # "Ready and visible to model": the five PandaBase skills
 openclaw automations list    # pandabase-* jobs, all on the `pandabase` agent
 openclaw infer image describe --file <any photo> --model ollama/qwen3.5:9b --timeout-ms 180000
 ```
 
 The image check needs the longer timeout: the default 30s runs out while Ollama swaps models.
+Then post a message in `#pandabase` and one in a cycle thread: `openclaw sessions list --agent
+pandabase` should show both (without `--agent` it lists only the default agent's sessions).
 
 ## 6. Colima at login, and its firewall rule
 
@@ -275,42 +328,72 @@ receipt sweep.
 ### Renaming the browser profile to `pandabase`
 
 For a Mac set up when the profile was named after a member (`will`: LaunchAgent
-`com.pandabase.chromium.will`, data dir `…/PandaBase/chromium-will`). **Unverified: not yet run on
-the Mac.** These steps stop and restart PandaBase's Chrome, so do them by hand, outside the Friday
-evening and Saturday morning windows, with no PandaBase job running.
+`com.pandabase.chromium.will`, data dir `…/PandaBase/chromium-will`). ✅ Run on the Mac on
+2026-11-12, as below; Amazon stayed signed in. These steps stop and restart PandaBase's Chrome, so
+do them by hand, outside the Friday evening and Saturday morning windows, with no PandaBase job
+running. Back up each config file before you edit it (`cp -p f f.bak.$(date +%Y%m%d-%H%M%S)`;
+`*.bak*` is gitignored).
 
-1. Nothing holds the profile: `scripts/ops/agent-run.sh lock status --member will` shows no lease.
+1. Nothing holds the profile: `scripts/ops/agent-run.sh lock status --member will` shows
+   `"lease": null`.
 2. Stop the old Chrome and remove its LaunchAgent (this quits that Chrome window):
 
    ```sh
    launchctl bootout "gui/$(id -u)/com.pandabase.chromium.will"
    rm ~/Library/LaunchAgents/com.pandabase.chromium.will.plist
-   pgrep -fl 'PandaBase/chromium-will' || echo stopped   # must print "stopped" before step 3
+   # must print 0 before step 3 (`pgrep -f` would also match this command line over ssh)
+   ps -U "$(id -u)" -o command= | grep -c '[u]ser-data-dir=.*PandaBase/chromium-will'
    ```
+
+   The data dir keeps Chrome's `SingletonLock` pointing at the old pid; that's stale, and Chrome
+   takes it over on the next start.
 3. Move the data dir (same volume, so it's a rename):
 
    ```sh
    mv ~/"Library/Application Support/PandaBase/chromium-will" \
       ~/"Library/Application Support/PandaBase/chromium-pandabase"
    ```
-4. Edit the gitignored configs: in `agent/profiles.json` rename the key `will` to `pandabase` and
-   its `user_data_dir` to `~/Library/Application Support/PandaBase/chromium-pandabase`; in
+4. Edit the gitignored configs: in `agent/profiles.json` rename the key `will` to `pandabase`, its
+   `user_data_dir` to `~/Library/Application Support/PandaBase/chromium-pandabase`, and drop
+   `openclaw_browser_profile` if it's there (ignored since tier 2 moved into the tools); in
    `agent/pandabase.config.json` set the cart member's `"profile": "pandabase"` and remove
-   `profile` from every other member (or give them `receipt_sweep: "off"`).
-5. Start the new one and check it: `make install-chromium` (it warns about any other
-   `com.pandabase.chromium.*` agent still loaded), then `make smoke` (`cdp-…` should attach and
-   show the cart page signed in), then `make install-agent-cron`.
+   `profile` from every other member (or give them `receipt_sweep: "off"`). The config holds
+   Discord ids: if you rewrite it with `jq … > tmp && mv tmp …`, `chmod 600` it again.
+5. Start the new one and check it:
+
+   ```sh
+   make install-chromium                 # loads com.pandabase.chromium.pandabase, no warning
+   SMOKE_ONLY="env api cdp" make smoke   # one Amazon load: the cart page, read-only
+   ```
+
+   A full `make smoke` also runs the VLM (evicting the reply model) and stops and restarts the
+   worker; this change needs neither. `cdp-<member>` only proves the attach: it closes its tab and
+   reports the final URL (a redirect to `/ap/signin` means signed out). To check the session
+   without another page load, list the amazon.com cookie *names* over DevTools
+   (`Storage.getCookies` on `http://127.0.0.1:9222/json/version`'s WebSocket): `at-main`,
+   `sess-at-main`, `x-main`, `sst-main` and `session-token` present, and renewed by the cart load,
+   means signed in. Never print their values.
+
+   The receipt sweep's automation is named after the member (`pandabase-receipts-<member>`), not the
+   profile, so the rename leaves the automations as they are.
 6. Record it in the database: Actions → Bootstrap → `add-member` with your member number and
    profile `pandabase` (or `pnpm db:add-member --email … --profile pandabase`). The State Engine
-   only stores this column; the tools read the profile from the config files.
+   only stores this column; the tools read the profile from the config files. `name` is required
+   and overwrites the display name, so give the current one; blank Discord id, sweep `keep` and an
+   unticked cart change nothing. A previous run's log shows its member number and name (the email
+   is masked).
 7. Optional: in that Chrome, profile menu → *Customize profile* → name it "PandaBase".
+8. Once nothing uses it, remove any OpenClaw browser profile that attached to the old one
+   (`openclaw browser profiles`: e.g. `pandabase-will` on `127.0.0.1:9222`). Do it **before** any
+   agent on the gateway gets the browser tool back (Security defaults).
 
-Does it sign Amazon out? It shouldn't: the cookies move with the data dir, and Chrome on macOS
+Does it sign Amazon out? It didn't: the cookies move with the data dir, and Chrome on macOS
 encrypts them with the "Chrome Safe Storage" Keychain item, which belongs to the app and the
 macOS account, not to the folder, so the same Chrome in the same account can still read them.
 Amazon may still ask for the password again on its own schedule, as it does anyway. If step 5
-shows signed out, sign in by hand as in step 8 above. To avoid the move altogether, keep the old
-folder: rename only the key, and leave `user_data_dir` pointing at `…/chromium-will`.
+shows signed out, sign in by hand as at the top of this section. To avoid the move altogether,
+keep the old folder: rename only the key, and leave `user_data_dir` pointing at
+`…/chromium-will`.
 
 Code from before this change also works with the renamed configs, and new code works with the old
 ones, so the order against the 15-minute updater doesn't matter.
@@ -333,15 +416,23 @@ The worker image on GHCR is public, so there's no `docker login`. Optionally set
 
 ## Security defaults
 
-- **No web or browser tools for the `pandabase` agent.** Its entry in `agents.list` has
-  `tools.deny: ["group:web", "browser"]` (step 5). It's per agent: other agents on the gateway may
-  have web tools and a browser, with their own Chrome profiles. A small local model with a raw
+- **No web or browser tools for the `pandabase` agent.** Its entry, `agents.entries.pandabase`, has
+  `tools.deny: ["group:web", "browser"]` (§5 step 4). It's per agent: other agents on the gateway
+  may have web tools and a browser, with their own Chrome profiles. A small local model with a raw
   browser next to a signed-in Amazon session could be steered by page text into Buy Now;
   `openclaw security audit` reports this combination as critical (`models.small_params`). The cart
-  tools guard against checkout in code instead. If an older PandaBase patch left the deny in the
-  gateway-wide `tools` block, move it: `openclaw config unset tools.deny`, then step 5's
-  `config set`. An agent with the browser must never be given an OpenClaw browser profile that
-  attaches to PandaBase's DevTools port.
+  tools guard against checkout in code instead. An agent with the browser must never be given an
+  OpenClaw browser profile that attaches to PandaBase's DevTools port.
+
+  If an older PandaBase patch left the deny in the gateway-wide `tools` block, move it: a
+  gateway-wide deny can't be re-allowed per agent, so it has to come off. Do it in this order,
+  because the unset hands the browser to every agent without a deny of its own (including the
+  default catch-all):
+  1. the `pandabase` agent has its own deny, and `#pandabase` is bound to it (§5 step 4);
+  2. no OpenClaw browser profile attaches to PandaBase's port (`openclaw browser profiles`;
+     remove old `pandabase-<member>` ones);
+  3. then `openclaw config unset tools.deny`, and `openclaw security audit`: `pandabase` shows
+     `web=[off]`, other agents may not.
 - **Only members, everywhere.** The patch's `"*"` channel rule lists the members' user ids, so the
   bot answers only them outside the channels configured by name (if another agent's setup has its
   own `"*"` rule, merge the user lists).

@@ -13,19 +13,15 @@
 //
 // Apply the provider below like openclaw.pandabase.example.json5 (copy to
 // agent/openclaw.privacy.json5, fill the <…>, `openclaw config patch --file … --dry-run`, then for
-// real). Then point the agent bound to #pandabase at it by index, not by patch: `agents.list` and
-// `bindings` are arrays shared with the gateway's other agents, and a patch would replace them.
+// real). Then point the agent bound to #pandabase at it on its own entry (OpenClaw 2026.10.10:
+// `agents.entries.<id>`; `agents.list` is rejected), not by patch:
 //
-//   openclaw config get agents.list --json        # find the agent bound to #pandabase
-//   openclaw config set "agents.list[<i>].model" '"pandabase-text/<MODEL_ID>"' --strict-json
+//   openclaw config get bindings --json   # which agent #pandabase is bound to
+//   openclaw config set agents.entries.pandabase.model '"pandabase-text/<MODEL_ID>"' --strict-json
 //
-// If no agent is bound to #pandabase yet, add one to `agents.list` by hand (keep the others), e.g.
-//   { id: "pandabase", workspace: "~/.openclaw/workspace-pandabase",
-//     model: "pandabase-text/<MODEL_ID>", tools: { deny: ["group:web", "browser"] } }
-// and a binding for the channel to `bindings` (keep the other agents' channel and DM bindings):
-//   { agentId: "pandabase", match: { channel: "discord", guildId: "<GUILD_ID>",
-//     peer: { kind: "channel", id: "<PANDABASE_CHANNEL_ID>" } } }
-// then set OPENCLAW_AGENT=pandabase in .env and re-run `make install-agent-cron`.
+// If no agent is bound to #pandabase yet, create the `pandabase` agent and its binding first
+// (docs/SETUP-MAC.md §5 step 4), then set OPENCLAW_AGENT=pandabase in .env and re-run
+// `make install-agent-cron`.
 {
   models: {
     providers: {

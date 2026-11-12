@@ -1194,9 +1194,29 @@ branch `claude/system-e2e`). Details, the bugs found and the security review are
   `Member.profile` is optional (no profile → no receipt sweep, skipped by backfill and smoke), two
   members can't share one, and `install-chromium` warns about a leftover LaunchAgent.
   `openclaw.pandabase.example.json5` describes the `pandabase` agent; `tools.deny` moved from the
-  gateway-wide `tools` to that agent's `agents.list` entry, set by index (`agents.list` and
-  `bindings` are shared arrays). `OPENCLAW_AGENT` can live in `.env` so the updater uses it. The
-  wife's weekly receipt sweep stops (PRD §4.2). **Not run on the Mac yet:** the rename steps
-  (SETUP-MAC *Renaming the browser profile*), whether the Amazon session survives the move,
-  `openclaw config set "agents.list[<i>].tools.deny"` on the live gateway, and that OpenClaw
-  applies a per-agent deny as documented (check with `openclaw security audit`).
+  gateway-wide `tools` to that agent's own entry. `OPENCLAW_AGENT` can live in `.env` so the
+  updater uses it. The wife's weekly receipt sweep stops (PRD §4.2).
+  **Rollout on the Mac (2026-11-12), and what differed from the plan above:**
+  - OpenClaw 2026.10.10 has no `agents.list`: agents are an object, `agents.entries.<id>`, so the
+    deny is `config set agents.entries.pandabase.tools.deny` (docs fixed). No agent was called
+    `pandabase`: PandaBase had run on the default `main`, the gateway's Discord catch-all. The
+    gateway runbook (outside this repo) created a dedicated `pandabase` agent (own workspace, the
+    five PandaBase skills only, the deny) with `agents add` and one `config set --batch-file`
+    (the whole `bindings` list rewritten: `agents bind` can't express a channel peer), all
+    hot-applied without a restart; cycle threads follow the channel. `main` lost the PandaBase
+    skills, so PandaBase's memory stays out of the household's default agent.
+  - `OPENCLAW_AGENT=pandabase` + `make install-agent-cron` moved all nine `pandabase-*` jobs in
+    place (`automations edit --agent`: same ids, run history kept); the next `job-replies` run
+    behaved as before. A test message in `#pandabase` got its reply from `pandabase`
+    (`openclaw sessions list --agent pandabase`; without `--agent` it lists only `main`).
+  - The rename ran as SETUP-MAC describes, with fixes now in the doc: `pgrep -f` matched its own
+    `ssh` command line (check with `ps` instead); `cdp check` closes its tab, so sign-in is shown
+    by the amazon.com auth cookies' names (all present, renewed by the cart load); a full
+    `make smoke` also restarts the worker and swaps models, so `SMOKE_ONLY="env api cdp"`;
+    rewriting the config with `jq` left it 644. **Amazon stayed signed in.**
+  - Bootstrap `add-member` set profile `pandabase` (member 1, name unchanged).
+  - **Still open:** the gateway-wide `tools.deny` stays until the old `pandabase-will` OpenClaw
+    browser profile (`127.0.0.1:9222`) is gone; only then does `openclaw security audit` show the
+    per-agent deny on its own (today: 0 critical, `web=[off]` everywhere because of the global
+    deny). The audit also warns that every agent can read the others' sessions
+    (`tools.sessions.visibility: "all"`): a gateway setting, for the runbook.
