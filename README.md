@@ -335,13 +335,11 @@ openclaw gateway stop
 openclaw config patch --file agent/openclaw.pandabase.json5 --dry-run   # read the diff
 openclaw config patch --file agent/openclaw.pandabase.json5
 openclaw gateway start
-# the `pandabase` agent: its own workspace, PandaBase's skills only, no web or browser tools, and a
-# binding for #pandabase ahead of any catch-all (docs/SETUP-MAC.md §5 step 4 has the binding)
-openclaw agents add pandabase --non-interactive \
-  --workspace ~/.openclaw/workspace-pandabase --model ollama/qwen3.5:27b
-openclaw config set agents.entries.pandabase.skills \
-  '["digital-receipt-scraper","discord-intake","grocery-cycle","item-lookup","telemetry-aggregator"]' --strict-json
-openclaw config set agents.entries.pandabase.tools.deny '["group:web","browser"]' --strict-json
+# the `pandabase` agent: its own workspace; then one `config set --batch-file` for PandaBase's
+# skills only, no web or browser tools, and the #pandabase binding (docs/SETUP-MAC.md §5 step 4)
+openclaw agents add pandabase --workspace ~/.openclaw/workspace-pandabase \
+  --model ollama/qwen3.5:27b --non-interactive
+rm ~/.openclaw/workspace-pandabase/BOOTSTRAP.md   # no onboarding chat in a shared channel
 # .env: OPENCLAW_AGENT=pandabase, so the automations run as it (unset: `main`, the old single agent)
 
 make install-agent-skills   # skills.load.extraDirs += agent/skills; settings → ~/.config/pandabase/agent.env

@@ -22,12 +22,12 @@
 // index (OpenClaw 2026.10.10 keeps agents in `agents.entries.<id>`; `agents.list` is rejected):
 //
 //   # The `pandabase` agent (docs/SETUP-MAC.md §5 step 4; DESIGN §10 #52):
-//   openclaw agents add pandabase --non-interactive \
-//     --workspace ~/.openclaw/workspace-pandabase --model ollama/<LOCAL_REPLY_MODEL>
-//   openclaw config set agents.entries.pandabase.skills \
-//     '["digital-receipt-scraper","discord-intake","grocery-cycle","item-lookup","telemetry-aggregator"]' --strict-json
-//   openclaw config set agents.entries.pandabase.tools.deny '["group:web","browser"]' --strict-json
-//   # plus a `bindings` entry for #pandabase ahead of any catch-all (SETUP-MAC §5 step 4)
+//   openclaw agents add pandabase --workspace ~/.openclaw/workspace-pandabase \
+//     --model ollama/<LOCAL_REPLY_MODEL> --non-interactive
+//   # then one `openclaw config set --batch-file` (dry run first) with
+//   # agents.entries.pandabase.skills (the five PandaBase skills),
+//   # agents.entries.pandabase.tools.deny ["group:web","browser"], and the whole `bindings`
+//   # list with a #pandabase peer rule added (SETUP-MAC §5 step 4 has the file)
 //
 //   # The VLM's params (README step 11):
 //   openclaw config set "models.providers.ollama.models[<i>].params" \

@@ -1201,9 +1201,10 @@ branch `claude/system-e2e`). Details, the bugs found and the security review are
     deny is `config set agents.entries.pandabase.tools.deny` (docs fixed). No agent was called
     `pandabase`: PandaBase had run on the default `main`, the gateway's Discord catch-all. The
     gateway runbook (outside this repo) created a dedicated `pandabase` agent (own workspace, the
-    five PandaBase skills only, the deny) and bound `#pandabase` to it ahead of the catch-all;
-    cycle threads follow the channel. `main` lost the PandaBase skills, so PandaBase's sessions
-    and memory stay out of the household's default agent.
+    five PandaBase skills only, the deny) with `agents add` and one `config set --batch-file`
+    (the whole `bindings` list rewritten: `agents bind` can't express a channel peer), all
+    hot-applied without a restart; cycle threads follow the channel. `main` lost the PandaBase
+    skills, so PandaBase's memory stays out of the household's default agent.
   - `OPENCLAW_AGENT=pandabase` + `make install-agent-cron` moved all nine `pandabase-*` jobs in
     place (`automations edit --agent`: same ids, run history kept); the next `job-replies` run
     behaved as before. A test message in `#pandabase` got its reply from `pandabase`

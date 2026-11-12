@@ -159,33 +159,54 @@ that can call PandaBase; shared data lives in PandaBase, not in agent memory.
    and `models.providers.ollama.models`. The dry run must not touch any of them.
 4. **The `pandabase` agent.** Give PandaBase an agent of its own rather than the gateway's default
    (`main`): the default is usually the catch-all for every Discord message no binding claims, and
-   a separate agent keeps PandaBase's sessions and memory out of it. On OpenClaw 2026.10.10 agents
+   a separate agent keeps PandaBase's workspace and memory out of it. (Sessions are still readable
+   across agents unless the gateway narrows `tools.sessions.visibility`; `openclaw security audit`
+   warns `cross_agent_session_access_default`.) On OpenClaw 2026.10.10 agents
    are an object keyed by id, `agents.entries.<id>` (`agents.list` is rejected as an unknown
    path); `bindings` is still an array.
 
+   ✅ As run on 2026-11-12 (back up `~/.openclaw/openclaw.json` first; no step needed a restart,
+   each write printed "Change will apply without restarting the gateway"):
+
    ```sh
    openclaw agents list && openclaw config get bindings --json   # what's there now
-   openclaw agents add pandabase --non-interactive \
-     --workspace ~/.openclaw/workspace-pandabase --model ollama/qwen3.5:27b
-   # only PandaBase's skills, and no web or browser tools (Security defaults below)
-   openclaw config set agents.entries.pandabase.skills \
-     '["digital-receipt-scraper","discord-intake","grocery-cycle","item-lookup","telemetry-aggregator"]' --strict-json
-   openclaw config set agents.entries.pandabase.tools.deny '["group:web","browser"]' --strict-json
+   openclaw agents add pandabase --workspace ~/.openclaw/workspace-pandabase \
+     --model ollama/qwen3.5:27b --non-interactive
+   rm ~/.openclaw/workspace-pandabase/BOOTSTRAP.md   # else the first chat starts onboarding
    ```
 
-   Then bind `#pandabase` to it, **ahead of** any catch-all binding (one with no `peer`, e.g.
-   `{agentId: "main", match: {channel: "discord", accountId: "*"}}`), keeping the other agents'
-   entries:
+   `agents add` writes the entry and template workspace files (AGENTS, IDENTITY, SOUL, USER.md).
+   Then the skills allowlist, the deny and the binding in one batch file (mode 600, it holds the
+   channel id); `agents add` must come first, since the dry run checks the agent exists:
 
-   ```json5
-   { agentId: "pandabase", match: { channel: "discord", accountId: "default",
-       peer: { kind: "channel", id: "<PANDABASE_CHANNEL_ID>" } } }
+   ```json
+   [
+     {"path": "agents.entries.pandabase.skills", "value": ["digital-receipt-scraper",
+       "discord-intake", "grocery-cycle", "item-lookup", "telemetry-aggregator"]},
+     {"path": "agents.entries.pandabase.tools.deny", "value": ["group:web", "browser"]},
+     {"path": "bindings", "value": [
+       "…every existing binding, unchanged, except the catch-all…",
+       {"agentId": "pandabase", "match": {"channel": "discord", "accountId": "default",
+         "peer": {"kind": "channel", "id": "<PANDABASE_CHANNEL_ID>"}}},
+       {"agentId": "main", "match": {"channel": "discord", "accountId": "*"}}
+     ]}
+   ]
    ```
 
-   Cycle threads need no binding of their own: a thread reaches its parent channel's agent.
-   If the gateway's default agent had the PandaBase skills before, take them off its `skills`
-   list once the automations have moved (step 5), so only `pandabase` (and any member's agent you
-   chose) has them.
+   ```sh
+   openclaw config set --batch-file <file> --dry-run
+   openclaw config set --batch-file <file>
+   ```
+
+   `bindings` is replaced whole, so build its value from `config get bindings` (with no other
+   bindings it is just the `pandabase` rule and the catch-all). `openclaw agents bind` takes only
+   `channel[:accountId]` and can't express a channel peer. A peer match beats a channel/account
+   match, so order doesn't decide it; keeping the catch-all last is for readability. Cycle threads
+   need no binding of their own: a thread reaches its parent channel's agent.
+
+   If the gateway's default agent had the PandaBase skills, take them off its `skills` list once
+   the automations have moved (step 5): set `agents.entries.main.skills` to its list minus the
+   five. An agent with no `skills` list sees every skill, so give it a full list instead.
 
    The VLM gets a small context and short keep-alive, by index:
 
@@ -403,9 +424,10 @@ The worker image on GHCR is public, so there's no `docker login`. Optionally set
   tools guard against checkout in code instead. An agent with the browser must never be given an
   OpenClaw browser profile that attaches to PandaBase's DevTools port.
 
-  If an older PandaBase patch left the deny in the gateway-wide `tools` block, move it, in this
-  order, because the unset hands the browser to every agent without a deny of its own (including
-  the default catch-all):
+  If an older PandaBase patch left the deny in the gateway-wide `tools` block, move it: a
+  gateway-wide deny can't be re-allowed per agent, so it has to come off. Do it in this order,
+  because the unset hands the browser to every agent without a deny of its own (including the
+  default catch-all):
   1. the `pandabase` agent has its own deny, and `#pandabase` is bound to it (§5 step 4);
   2. no OpenClaw browser profile attaches to PandaBase's port (`openclaw browser profiles`;
      remove old `pandabase-<member>` ones);
