@@ -851,8 +851,8 @@ IDs ↔ profile name (optional: only the cart member has one, `pandabase`; two m
 one) (+ `cart_member`, `receipt_sweep`), tool tunables (`cart.*`, `receipts.*`, `jobs.*`),
 state and diagnostics dirs. `agent/profiles.example.json` maps profiles to CDP URLs
 (`http://127.0.0.1:<port>`) and user-data dirs (an old `openclaw_browser_profile` key is accepted and
-ignored: tier 2 moved into the tools). The `pandabase` agent's `agents.list` entry should deny
-`["group:web", "browser"]` (`tools.deny`; `agent/openclaw.pandabase.example.json5` shows how): a
+ignored: tier 2 moved into the tools). The `pandabase` agent's entry
+(`agents.entries.pandabase`) should deny `["group:web", "browser"]` (`tools.deny`; `agent/openclaw.pandabase.example.json5` shows how): a
 local reply model with raw web/browser tools next to a signed-in Amazon session is the injection
 path §10 #52 closes. The deny is per agent, not gateway-wide: other agents on the gateway may have
 web tools and a browser with their own Chrome profile, never one attached to PandaBase's CDP port. `agent/cron.example.json`
@@ -1145,8 +1145,10 @@ Setup is the README checklist; every step is a `make` target over an idempotent 
   which reads the token from `.env` so it isn't stored in OpenClaw's automation DB). Gateway
   config (Discord channel policy, Ollama media model) is a reviewed `openclaw config patch` from
   `agent/openclaw.pandabase.example.json5`, which describes the **`pandabase` agent**; its
-  `tools.deny` for web/browser is set on that agent's `agents.list` entry by index (the list and
-  `bindings` are arrays other agents on the gateway share, so no patch touches them). The gateway
+  `tools.deny` for web/browser and its `skills` allowlist (the five PandaBase skills) are set on
+  that agent's own entry, `agents.entries.pandabase`, with `config set` (OpenClaw 2026.10.10; no
+  patch touches the agents or `bindings`, an array other agents share). `#pandabase` is bound to
+  it explicitly, ahead of the gateway's catch-all; its threads follow the channel. The gateway
   can host other agents on the same bot, routed by channel and DM sender; they may have the
   PandaBase skill and token, and keep their own tools. `OPENCLAW_AGENT` (env, else `.env`, else
   `main`) names the `pandabase` agent for `install-agent-cron` and `skills check`.

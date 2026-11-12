@@ -17,22 +17,23 @@
 //
 // Arrays are replaced, not merged: if your config already has `tools.media.models` (e.g. an audio
 // transcriber), add these entries to your list by hand. That is also why this patch doesn't touch
-// `agents.list`, `bindings` or `models.providers.ollama.models`: each is an array other agents and
-// onboarding share, and a patch would replace it. Set per-agent and per-model fields by index:
+// `bindings` or `models.providers.ollama.models` (arrays other agents and onboarding share), nor
+// the agents themselves. Set per-agent fields on the agent's own entry, and per-model ones by
+// index (OpenClaw 2026.10.10 keeps agents in `agents.entries.<id>`; `agents.list` is rejected):
 //
-//   # The `pandabase` agent's tool policy (DESIGN §10 #52): find its index, then
-//   openclaw config get agents.list --json
-//   openclaw config set "agents.list[<i>].tools.deny" '["group:web","browser"]' --strict-json
+//   # The `pandabase` agent (docs/SETUP-MAC.md §5 step 4; DESIGN §10 #52):
+//   openclaw agents add pandabase --non-interactive \
+//     --workspace ~/.openclaw/workspace-pandabase --model ollama/<LOCAL_REPLY_MODEL>
+//   openclaw config set agents.entries.pandabase.skills \
+//     '["digital-receipt-scraper","discord-intake","grocery-cycle","item-lookup","telemetry-aggregator"]' --strict-json
+//   openclaw config set agents.entries.pandabase.tools.deny '["group:web","browser"]' --strict-json
+//   # plus a `bindings` entry for #pandabase ahead of any catch-all (SETUP-MAC §5 step 4)
 //
 //   # The VLM's params (README step 11):
 //   openclaw config set "models.providers.ollama.models[<i>].params" \
 //     '{"num_ctx":8192,"keep_alive":"2m"}' --strict-json
 //
-// The `pandabase` agent's entry in `agents.list` then looks like this (other fields as your
-// gateway has them; its id goes in .env as OPENCLAW_AGENT so the automations run as it):
-//
-//   { id: "pandabase", model: "ollama/<LOCAL_REPLY_MODEL>",
-//     tools: { deny: ["group:web", "browser"] } }
+// Its id goes in .env as OPENCLAW_AGENT so the automations run as it.
 //
 // Keep `tools.deny` off the gateway-wide `tools` block below: there it would also take the web
 // tools and browser from every other agent on the gateway.
@@ -69,7 +70,7 @@
   // same Ollama VLM the worker uses, and the reply model gets that text instead of the pixels.
   // Residual risk and the mitigation: README "Photo privacy" (agent/openclaw.privacy.example.json5).
   // Gateway-wide, so it serves every agent's photos. No `deny` here: the `pandabase` agent's
-  // web/browser deny is per agent (`agents.list[<i>].tools.deny`, header).
+  // web/browser deny is per agent (`agents.entries.pandabase.tools.deny`, header).
   tools: {
     media: {
       models: [

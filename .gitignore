@@ -43,6 +43,8 @@ __pycache__/
 # Agent pack: local config (Discord ids, CDP ports) — copy from the *.example.json files
 /agent/pandabase.config.json
 /agent/profiles.json
+# Backups taken before editing a config on the Mac (cp -p f f.bak.<timestamp>; may hold ids)
+*.bak*
 
 # playwright (web e2e)
 .next-e2e/

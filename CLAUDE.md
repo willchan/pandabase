@@ -136,7 +136,10 @@ pages.
 
 - **Two accounts.** Claude sessions run as the admin user; PandaBase, OpenClaw and its tokens
   belong to the agent account. Run there with `ssh agent '<cmd>'` from `~/Code/pandabase`, and keep
-  configs and tokens in that account's home, never the admin's.
+  configs and tokens in that account's home, never the admin's. That ssh shell doesn't read the
+  login profile, so `openclaw` isn't on its PATH: `ssh agent 'zsh -lc "openclaw …"'`, or start the
+  command with `export PATH="$HOME/.local/bin:/opt/homebrew/bin:$PATH";`. With several agents on
+  the gateway, pass `--agent pandabase` (e.g. `openclaw sessions list`, `skills check`).
 - **After a PR merges,** the 15-minute updater pulls it and re-runs the agent installers when the
   diff needs it; a failure posts to #pandabase. `make mac-rollout` there does it by hand.
 - **Live data, read-only:** `scripts/ops/agent-run.sh api get /api/predictions` (also
