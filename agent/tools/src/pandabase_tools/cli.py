@@ -325,13 +325,20 @@ def cmd_receipts_ingest(env: Env) -> Any:
     req = contracts.ReceiptIngestRequest.model_validate(body)
     oid = req.external_order_id
     key = f"receipt:{member.discord_id}:{oid}" if oid else None
+    try:  # read first: once the ingest closes the cycle, `cycle/current` no longer returns it
+        cycle = env.api.current_cycle()
+    except api_mod.ApiError:
+        cycle = None
     res = env.api.ingest_receipt(req, key=key)
     if oid:
         sweeper_state = env.loaded.state_dir() / f"receipts-{member.name}.json"
         state = receipt_parser.SweepState.load(sweeper_state)
         state.done[oid] = datetime.now(UTC).isoformat()
         state.save(sweeper_state)
-    return _model_json(res)
+    out = _model_json(res)
+    closed = cycle is not None and res.closed_cycle_id == cycle.id
+    out["closed_cycle_thread_id"] = cycle.discord_thread_id if closed and cycle else None
+    return out
 
 
 def cmd_photo_submit(env: Env) -> Any:

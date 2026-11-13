@@ -24,7 +24,9 @@ writes `/diagnostics/<week>.md` and `/diagnostics/<week>/*.jsonl` (the `diagnost
 config; never committed) and prints `{week, files, summary}` — `summary` is the report's top 3
 findings.
 
-Post once to `channels.ops_channel` (`#pandabase`):
+Post once to `channels.ops_channel` (`#pandabase`): message tool `action: "send"`,
+`target: "<ops_channel id>"`, the number `pandabase-tools config show` prints, not the key name.
+If the post fails, say so when you end the turn; don't report it as posted.
 
 > 📊 **Diagnostics 2026-W42** — `/diagnostics/2026-W42.md`
 > 1. Tier-1 cart injection succeeded for 82% of lines (target ≥ 90%).
