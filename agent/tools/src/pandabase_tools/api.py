@@ -265,6 +265,11 @@ class ApiClient:
         assert isinstance(res, c.CartResultResponse)
         return res
 
+    def current_cycle(self) -> c.Cycle | None:
+        res = self.call("GET", "/api/grocery/cycle/current")
+        assert isinstance(res, c.CycleCurrentResponse)
+        return res.cycle
+
     def receipt_cursor(self, account: str) -> c.ReceiptCursorResponse:
         res = self.call("GET", "/api/receipts/cursor", query={"account": account})
         assert isinstance(res, c.ReceiptCursorResponse)

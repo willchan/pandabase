@@ -16,6 +16,13 @@ metadata:
 Triggers: the nightly automation for the cart member (21:00 daily), the weekly one for the other
 member (Sunday 21:00), or a member asking to "backfill receipts" / "check my orders".
 
+**Posting to Discord.** `pandabase-tools config show` gives the channel ids
+(`channels.ops_channel`, `channels.cycle_channel`). Message tool: `action: "send"`,
+`target: "<channel id>"` (the number from `config show`, not the key name), plus
+`threadId: "<thread id>"` to post in a thread. Never use a PandaBase id (a ULID such as `01M6…`) as a
+target. If a post fails, don't run the sweep again (it reloads Amazon pages): end your turn
+saying which post failed.
+
 **Read-only on Amazon.** The tool only opens order-history and order-details pages in the
 member's already-signed-in Chromium (over CDP). It never signs in, stores credentials, or goes
 near checkout; neither do you. If Amazon is signed out, a human signs in on the Mac Mini.
@@ -49,9 +56,11 @@ complete}`.
 
    If the text is unreadable, skip it — it'll be offered again on the next sweep.
 2. **`ingested[].closed_cycle_id`** set → that order closed the grocery cycle. Post in the
-   cycle's thread: "✅ Order picked up and in the pantry (N items). This week's list is closed."
-   Then open the next cycle (`grocery-cycle` §1).
-3. **`errors`** containing `not_signed_in` → post once to `channels.ops_channel`:
+   cycle's thread (`target` = `channels.cycle_channel`, `threadId` =
+   `ingested[].closed_cycle_thread_id`; if that is null, post in `cycle_channel` itself):
+   "✅ Order picked up and in the pantry (N items). This week's list is closed."
+   Then open the next cycle (`grocery-cycle` §1). `receipts ingest` prints the same two fields.
+3. **`errors`** containing `not_signed_in` → post once to `channels.ops_channel` (its id):
    "⚠️ Amazon is signed out in <member>'s browser on the Mac Mini — please sign in there. I'll
    pick up the receipts on the next run." Before posting, read the channel's recent messages
    (message tool `action: "read"`); if the same warning was posted in the last 7 days, stay

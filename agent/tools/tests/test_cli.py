@@ -783,3 +783,41 @@ def test_member_without_profile_has_no_browser(config: Path) -> None:
         "will": "http://127.0.0.1:9222",
         "partner": None,
     }
+
+
+def test_receipts_ingest_gives_the_closed_cycles_discord_thread(config: Path) -> None:
+    # 2026-11-11 regression (see test_receipt_parser): the closure post needs the thread id,
+    # which `cycle/current` stops returning once the ingest closes the cycle.
+    state: dict[str, Any] = {"cycle": _cycle("ready")}
+
+    def ingest(_body: Any) -> Any:
+        state["cycle"] = None
+        return {
+            "receipt_id": "R1",
+            "duplicate": False,
+            "status": "applied",
+            "totals_check": "n/a",
+            "lines": [],
+            "new_item_ids": [],
+            "review_ids": [],
+            "closed_cycle_id": "C1",
+        }
+
+    api = FakeApi(
+        {
+            "GET /api/grocery/cycle/current": lambda _: {"cycle": state["cycle"]},
+            "POST /api/receipts/ingest": ingest,
+        }
+    )
+    body = {
+        "vendor": "wholefoods",
+        "external_order_id": "112-0000002-0000002",
+        "fulfillment": "pickup",
+        "acquired_at": "2026-10-17T19:00:00Z",
+        "lines": [{"raw_text": "Synthetic Dish Soap, 24 fl oz", "qty": 1}],
+    }
+    code, out = run(
+        config, ["receipts", "ingest", "--member", "will", "--json", json.dumps(body)], api
+    )
+    assert code == 0
+    assert out["closed_cycle_id"] == "C1" and out["closed_cycle_thread_id"] == "T1"

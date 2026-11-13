@@ -404,6 +404,25 @@ class Sweeper:
         self.path = state_dir / f"receipts-{member.name}.json"
         self.state = SweepState.load(self.path)
         self._opened = 0
+        self._threads: dict[str, str | None] | None = None
+
+    def _closed_thread(self, cycle_id: str | None) -> str | None:
+        """The Discord thread of the cycle an ingest closed. Read before the first ingest: once
+        the cycle is closed, `cycle/current` no longer returns it."""
+        if cycle_id is None or self._threads is None:
+            return None
+        return self._threads.get(cycle_id)
+
+    def _remember_cycle(self) -> None:
+        if self._threads is not None:
+            return
+        self._threads = {}
+        try:
+            cycle = self.api.current_cycle()
+        except ApiError:
+            return  # only the closure post needs it; the sweep carries on
+        if cycle is not None:
+            self._threads[cycle.id] = cycle.discord_thread_id
 
     def _open(self, url: str) -> Snapshot:
         if self._opened:
@@ -550,6 +569,7 @@ class Sweeper:
                 if oid not in run["fallback"]:
                     run["fallback"].append(oid)
                 continue
+            self._remember_cycle()
             try:
                 res = self.api.ingest_receipt(
                     ingest_request(order, self.member, self.tz),
@@ -572,6 +592,7 @@ class Sweeper:
                         "lines": len(order.lines),
                         "status": res.status,
                         "closed_cycle_id": res.closed_cycle_id,
+                        "closed_cycle_thread_id": self._closed_thread(res.closed_cycle_id),
                     }
                 )
 

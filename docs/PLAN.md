@@ -1221,3 +1221,11 @@ branch `claude/system-e2e`). Details, the bugs found and the security review are
     `tools.sessions.visibility: "agent"`, so agents no longer read each other's sessions. All
     hot-applied. The audit's one critical is `models.small_params` for that personal agent (27B
     with web), accepted by its owner; nothing on `pandabase`.
+  - **Discord posts from model automations were failing.** Run history showed the model guessing
+    message-tool targets: the 11-11 receipt sweep closed the cycle and sent "✅ picked up" to
+    `channel:<closed_cycle_id>` (a PandaBase ULID), then re-ran the sweep three times looking for
+    a thread id; the weekly diagnostics passed `channels.ops_channel` literally and never posted,
+    though its summary said "posted". Fix: the sweep and `receipts ingest` read the cycle before
+    ingesting and print `closed_cycle_thread_id` (once the cycle closes, `cycle/current` is
+    null); the skills give the form that worked (`action: "send"`, `target: "<channel id>"`,
+    `threadId`), and say not to re-run a sweep or report a post that failed.

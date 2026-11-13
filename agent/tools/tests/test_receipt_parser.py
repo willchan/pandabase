@@ -483,3 +483,50 @@ def test_backfill_ingests_old_undated_orders_and_skips_returns(tmp_path: Path) -
     assert res.skipped == [{"order_id": "118-0000008-0000008", "reason": "returned"}]
     assert res.pending == ["D01-0000004-0000004"]  # 3 days old: may still be in flight
     assert res.errors == []
+
+
+def test_sweep_gives_the_closed_cycles_discord_thread(tmp_path: Path) -> None:
+    # 2026-11-11: an order closed the cycle, and the agent posted the "✅ picked up" message to
+    # `channel:<closed_cycle_id>` (a PandaBase id, not a Discord one). Discord refused it, and
+    # once the cycle is closed `cycle/current` is null, so nothing else gave the thread id.
+    server = Server("2026-10-01T19:00:00Z")
+    cycle = {
+        "id": "C1",
+        "week_label": "2026-W42",
+        "status": "ready",
+        "discord_thread_id": "T1",
+        "opened_at": "2026-10-12T16:00:00Z",
+        "nudge_sent_at": None,
+        "built_at": None,
+        "closed_at": None,
+        "close_reason": None,
+        "cart_result": None,
+    }
+    closing = "112-0000002-0000002"  # the pickup order closes it
+    base_ingest = server.ingest
+
+    def ingest(body: dict[str, Any] | None) -> Any:
+        out = base_ingest(body)
+        assert body is not None
+        if body["external_order_id"] == closing and not out["duplicate"]:
+            out["closed_cycle_id"] = cycle["id"]
+            server.api.handlers["GET /api/grocery/cycle/current"] = lambda _: {"cycle": None}
+        return out
+
+    server.api.handlers["POST /api/receipts/ingest"] = ingest
+    server.api.handlers["GET /api/grocery/cycle/current"] = lambda _: {"cycle": cycle}
+    res = sweeper(server, FakeDriver(site), tmp_path, lambda _: None).run("sweep")
+    by_id = {x["order_id"]: x for x in res.ingested}
+    assert by_id[closing]["closed_cycle_id"] == "C1"
+    assert by_id[closing]["closed_cycle_thread_id"] == "T1"
+    assert all(x["closed_cycle_thread_id"] is None for k, x in by_id.items() if k != closing)
+    # One read of the cycle per sweep, not one per order.
+    assert len(server.api.bodies("GET /api/grocery/cycle/current")) == 1
+
+
+def test_sweep_without_a_cycle_route_still_ingests(tmp_path: Path) -> None:
+    # The cycle read only feeds the thread id: if it fails, the sweep carries on.
+    server = Server("2026-10-01T19:00:00Z")
+    res = sweeper(server, FakeDriver(site), tmp_path, lambda _: None).run("sweep")
+    assert len(res.ingested) == 3 and not res.errors
+    assert all(x["closed_cycle_thread_id"] is None for x in res.ingested)

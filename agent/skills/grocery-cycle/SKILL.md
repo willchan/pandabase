@@ -42,6 +42,10 @@ call it through `pandabase-tools` (JSON on stdout, exit 0 = ok) and talk in Disc
 (name ↔ discord_id ↔ profile, `cart_member`), `web_url`, `household_tz`. Everything happens in
 `#pandabase`: the cycle thread lives under `cycle_channel`.
 
+Posting: message tool with `target: "<cycle_channel id>"` (the number from `config show`, not
+the key name), plus `threadId: "<the cycle's discord_thread_id>"` in the cycle thread. Never use
+a PandaBase id (a ULID such as `01M6…`) as a Discord target. If a post fails, say so when you end the turn.
+
 ## 1. Make sure a cycle is open (thread per cycle)
 
 Run when: the Monday 09:00 automation fires, right after a cycle closes/skips/goes to another
@@ -52,8 +56,8 @@ pandabase-tools api get /api/grocery/cycle/current
 ```
 
 - `cycle` is non-null **and** has `discord_thread_id` → nothing to do.
-- Otherwise create the thread with the message tool (`action: "thread-create"`, channel
-  `cycle_channel`, thread name `🛒 Groceries — week of <Mon date>`) and this first message:
+- Otherwise create the thread with the message tool (`action: "thread-create"`,
+  `target: "<cycle_channel id>"`, thread name `🛒 Groceries — week of <Mon date>`) and this first message:
 
   > 🛒 **Groceries — week of Oct 26**
   > Reply here anytime: `add birthday candles` · `skip bananas` · `3 milk` · `skip this week` · `shopping at Trader Joe's` · `away until Nov 3`
