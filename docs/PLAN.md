@@ -576,6 +576,12 @@ names, a 4B instruct model handles it with schema-constrained JSON, and staying 
 family means the same prompt style and `think: false` behave the same. (Reusing the 9B VLM
 would also work — set `OLLAMA_TEXT_MODEL=qwen3.5:9b` to keep one model resident.)
 
+*Superseded 2026-11-14 (DESIGN §10 #70):* once the reply model ran on the same Ollama, "too big"
+stopped applying. Every job now runs on `qwen3.8:27b`, the reply agents' model, at their `num_ctx`
+(32768) with no `keep_alive`, so a job never evicts the reply model. Synthetic checks on the Mac:
+same receipt and Trash Cam accuracy as the 9B, 8/8 planted merge duplicates against the 4B's 1/8,
+5–20 s per job warm.
+
 *Versions added:* `httpx` 0.28.1, `pillow` 13.0, `pillow-heif` 1.8.1 (iPhone HEIC uploads).
 Locked with uv 0.13.3 (revision 5). Image installs uv 0.13.3 from PyPI in a build stage (no
 `ghcr.io/astral-sh/uv` copy), runtime = `python:3.14-slim` + ffmpeg, uid 10001.

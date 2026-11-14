@@ -12,7 +12,7 @@ from typing import Any
 import httpx
 from pydantic import BaseModel, ValidationError
 
-from pandabase_worker.config import KEEP_ALIVE, NUM_CTX, OLLAMA_TIMEOUT_SECONDS
+from pandabase_worker.config import NUM_CTX, OLLAMA_TIMEOUT_SECONDS
 
 REPAIR_PROMPT = (
     "Your previous reply could not be used: {error}\n"
@@ -86,9 +86,10 @@ class OllamaClient:
         max_tokens: int | None = None,
     ) -> Inference[T]:
         """Ask `model` for JSON matching `schema`; on invalid output, repair once, then raise
-        `ParseFailure`. Temperature 0, `keep_alive` 2m, thinking off. `max_tokens` caps the
-        answer (`num_predict`); an answer cut off at the cap raises `ParseFailure` at once, with
-        `truncated`: a repair turn would replay the runaway answer into the context."""
+        `ParseFailure`. Temperature 0, thinking off, no `keep_alive` (the host default decides
+        residency). `max_tokens` caps the answer (`num_predict`); an answer cut off at the cap
+        raises `ParseFailure` at once, with `truncated`: a repair turn would replay the runaway
+        answer into the context."""
         user_msg: dict[str, Any] = {"role": "user", "content": user}
         if images:
             user_msg["images"] = [base64.b64encode(i).decode() for i in images]
@@ -135,7 +136,6 @@ class OllamaClient:
             "format": schema,
             "stream": False,
             "think": False,
-            "keep_alive": KEEP_ALIVE,
             "options": options,
         }
         res = self._post_chat(body)

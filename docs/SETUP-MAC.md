@@ -80,13 +80,13 @@ with fresh values; the Mac doesn't need it, so delete it (`rm .env.vercel`) and 
 ```sh
 make install-ollama-env   # OLLAMA_NUM_PARALLEL=1, OLLAMA_MAX_LOADED_MODELS=1, OLLAMA_NO_CLOUD=1
 # quit Ollama from the menu bar and open it again so it reads them
-ollama pull qwen3.5:9b    # the VLM: receipts, Trash Cam, OpenClaw's photo descriptions
-ollama pull qwen3.5:4b    # merge suggestions (optional: README "Single-model option")
+ollama pull qwen3.8:27b   # the one model: replies, photo descriptions and every worker job
 ```
 
-With a ~25GB reply model there's room for one model at a time: keep
-`OLLAMA_MAX_LOADED_MODELS=1` and let Ollama swap (the first reply after a photo waits a few
-seconds while the reply model reloads). `OLLAMA_NO_CLOUD=1` turns off Ollama's cloud models.
+One ~18.6GB model serves OpenClaw and the worker, so nothing swaps (README "Memory budget"): keep
+`OLLAMA_MAX_LOADED_MODELS=1`, and set `OLLAMA_KEEP_ALIVE` at least as long as the reply model's
+`keep_alive`, since the worker's requests send none and get the server default.
+`OLLAMA_NO_CLOUD=1` turns off Ollama's cloud models.
 
 **Also turn on Ollama → Settings → Airplane mode.** The Ollama app passes its own
 `OLLAMA_NO_CLOUD` to the server from that setting, overriding launchd, so with Airplane mode off
@@ -99,10 +99,9 @@ the models.
 
 **On a shared host** (other apps on the same Ollama, a host-level runbook): Ollama's settings
 and which models are pulled belong to the host, not to PandaBase. Skip `make install-ollama-env`
-and check the host sets the three values above. PandaBase's own needs are the VLM
-(`OLLAMA_VLM_MODEL`, ~7–8GB loaded) and the text model (`OLLAMA_TEXT_MODEL`, ~4GB, or the VLM
-under the single-model option), each loaded briefly per job, plus OpenClaw's reply model if it
-runs on this Ollama (README "Memory budget").
+and check the host sets the three values above and `OLLAMA_KEEP_ALIVE`. PandaBase needs the model
+in `OLLAMA_VLM_MODEL` / `OLLAMA_TEXT_MODEL` (default `qwen3.8:27b`, the reply model) pulled, and
+sends it OpenClaw's 32K `num_ctx` and no `keep_alive` (README "Memory budget").
 
 ## 4. Agent tools and config
 
@@ -208,12 +207,12 @@ that can call PandaBase; shared data lives in PandaBase, not in agent memory.
    the automations have moved (step 5): set `agents.entries.main.skills` to its list minus the
    five. An agent with no `skills` list sees every skill, so give it a full list instead.
 
-   The VLM gets a small context and short keep-alive, by index:
+   The model's `num_ctx` must match the worker's 32768 (a different one reloads it), by index:
 
    ```sh
-   openclaw config get models.providers.ollama.models --json   # find qwen3.5:9b's index
+   openclaw config get models.providers.ollama.models --json   # find qwen3.8:27b's index
    openclaw config set "models.providers.ollama.models[<i>].params" \
-     '{"num_ctx":8192,"keep_alive":"2m"}' --strict-json
+     '{"num_ctx":32768}' --strict-json
    openclaw gateway restart
    ```
 
@@ -242,10 +241,10 @@ Check:
 ```sh
 openclaw skills check --agent pandabase   # "Ready and visible to model": the five PandaBase skills
 openclaw automations list    # pandabase-* jobs, all on the `pandabase` agent
-openclaw infer image describe --file <any photo> --model ollama/qwen3.5:9b --timeout-ms 180000
+openclaw infer image describe --file <any photo> --model ollama/qwen3.8:27b --timeout-ms 180000
 ```
 
-The image check needs the longer timeout: the default 30s runs out while Ollama swaps models.
+The image check needs the longer timeout: the default 30s can run out while the model loads.
 Then post a message in `#pandabase` and one in a cycle thread: `openclaw sessions list --agent
 pandabase` should show both (without `--agent` it lists only the default agent's sessions).
 

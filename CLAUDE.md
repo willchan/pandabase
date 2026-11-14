@@ -127,8 +127,8 @@ make install-chromium        # per-member Chrome LaunchAgents (CHROMIUM_BIN; loo
 make install-ollama-env      # OLLAMA_NUM_PARALLEL=1, OLLAMA_MAX_LOADED_MODELS=1, OLLAMA_NO_CLOUD=1 at login
 make backfill [MEMBER=m]     # 12-month receipt backfill, resumable
 make smoke                   # live checks; SMOKE_CART=1 / SMOKE_E2E=1 opt-ins, SMOKE_ONLY="api vlm"
-                             # a full run restarts the worker and loads the VLM (evicts the reply
-                             # model); SMOKE_ONLY="env api cdp" for a quick check
+                             # a full run restarts the worker and runs one VLM call on the shared
+                             # model; SMOKE_ONLY="env api cdp" for a quick check
 ```
 
 ## Working on the live Mac Mini

@@ -47,17 +47,20 @@ component that touches the database. The worker and agent tools are clients of t
 
 ### 1.2 Mac Mini resource budget
 
-32GB shared by: OpenClaw's own model, Chromium (2 profiles, rarely concurrent), the VLM, and
-evening Claude Code sessions. Therefore:
+32GB shared by: OpenClaw's own model, Chromium (2 profiles, rarely concurrent), and evening Claude
+Code sessions. Therefore:
 
 - Worker concurrency = **1**, always.
-- VLM requests use `keep_alive: "2m"` so the model unloads soon after a burst.
-- Default VLM is **`qwen3.5:9b`** (Qwen3.5 9B, natively multimodal; `q4_K_M` ≈ 6.6GB on disk,
-  ~7–8GB resident with the worker's 8K context), chosen from Ollama's catalog in Oct 2026 over
-  `qwen3-vl:8b` (older generation, similar size) and `gemma4:e4b` (stronger general chat, weaker
-  document OCR); configurable via `OLLAMA_VLM_MODEL`. Requests turn thinking off (`think: false`).
-- `merge_suggest` (text only) uses **`qwen3.5:4b`** (≈ 3.4GB, `OLLAMA_TEXT_MODEL`).
-- Requests use `num_ctx` 8192 to keep the KV cache small. `merge_suggest` answers are capped at
+- **One resident model** (#70): every job runs on **`qwen3.8:27b`** (Qwen3.8 27B: vision, tools,
+  thinking; ≈ 18.6GB loaded at a 32K context), the model OpenClaw's agents already keep loaded, so
+  a job never swaps out the reply model. `OLLAMA_VLM_MODEL` (receipts, Trash Cam) and
+  `OLLAMA_TEXT_MODEL` (`merge_suggest`) both default to it and can still be split (#32 has the
+  earlier `qwen3.5:9b` / `qwen3.5:4b` pair).
+- Requests match the reply agents' settings for the shared model: `num_ctx` **32768** (Ollama
+  reloads a model whose `num_ctx` changes) and **no `keep_alive`** (Ollama keeps the last
+  request's value, so the host's `OLLAMA_KEEP_ALIVE` decides residency, not a worker job).
+- Requests turn thinking off (`think: false`): thinking tokens count against `num_predict`, and at
+  `think: "low"` a 40-item batch spent the whole cap thinking. `merge_suggest` answers are capped at
   2048 tokens (`num_predict`, worker `MAX_OUTPUT_TOKENS`; #65). The worker only claims job types whose
   model is pulled (`GET /api/tags`), since every claim costs the job an attempt.
 - PandaBase drives one browser profile, `pandabase` (the cart member's Amazon session); the tools
@@ -1101,8 +1104,8 @@ over 200k `<option>`s and took ~35s under `next dev` (2s after both changes).
 `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET`, `HOUSEHOLD_TZ`,
 `DEV_AUTH_BYPASS`, `R2_ENDPOINT` (optional S3 origin override; only the system test's local R2 stub
 sets it). Worker: `PANDABASE_API_URL`, `WORKER_API_TOKEN`, `OLLAMA_URL`
-(`http://host.docker.internal:11434`), `OLLAMA_VLM_MODEL` (`qwen3.5:9b`), `OLLAMA_TEXT_MODEL`
-(`qwen3.5:4b`), `POLL_INTERVAL_SECONDS` (10), `HOUSEHOLD_TZ`, `PROMPTS_DIR` (set by the image).
+(`http://host.docker.internal:11434`), `OLLAMA_VLM_MODEL` (`qwen3.8:27b`), `OLLAMA_TEXT_MODEL`
+(`qwen3.8:27b`), `POLL_INTERVAL_SECONDS` (10), `HOUSEHOLD_TZ`, `PROMPTS_DIR` (set by the image).
 Agent tools: `PANDABASE_API_URL`, `PANDABASE_AGENT_API_TOKEN` (`.env`'s `AGENT_API_TOKEN`),
 `PANDABASE_CONFIG`, from `~/.config/pandabase/agent.env` (mode 600; `PANDABASE_AGENT_ENV` overrides
 the path); the process env wins. Mac Mini updater (`.env`):
@@ -1230,7 +1233,7 @@ docker-compose.yml (+ docker-compose.build.yml), Makefile, CLAUDE.md, README.md,
 | 29 | Text purchases become manual receipts | One `applyReceipt` path, so velocity, overbuy and product stats learn from "bought milk" too |
 | 30 | CD: one workflow (`workflow_run` after CI on `main`, environment `production`, one concurrency group) migrates Turso, then `vercel deploy --prod`, then publishes the worker image; migrations backward-compatible, enforced for new migrations by a CI check with an explicit `contract-migration` opt-out | Code never ships ahead of its schema; a half-failed deploy can't break production; the check is cheap and the opt-out keeps the later "contract" PR possible |
 | 31 | Mac Mini updates are pulled by a `launchd` timer with health check, rollback and quiet windows | No inbound ports or self-hosted runner on a home machine; never disrupt the Friday nudge or Saturday build |
-| 32 | Worker VLM `qwen3.5:9b` (Q4), text `qwen3.5:4b`, Ollama JSON-schema output + one repair turn | Best OCR-capable vision model that fits ~8GB next to OpenClaw's model; one family keeps prompts portable; schema-constrained output makes repair rare and bounded |
+| 32 | Worker VLM `qwen3.5:9b` (Q4), text `qwen3.5:4b`, Ollama JSON-schema output + one repair turn (models superseded by #70) | Best OCR-capable vision model that fits ~8GB next to OpenClaw's model; one family keeps prompts portable; schema-constrained output makes repair rare and bounded |
 | 33 | One `pandabase-tools` CLI for every skill; generic `api get/post` plus composite browser commands | One binary to allowlist in OpenClaw's exec policy; skills can't drift from the contracts (tests parse every command a skill names) |
 | 34 | Photo classification is deterministic (caption → local VLM description → default receipt), correctable by one reply | Agent's cloud model never sees photos; a wrong guess costs a review item, not a blocked human |
 | 35 | Photo-job replies via an OpenClaw command automation, not an agent poll | No model call every few minutes; `NO_REPLY` keeps it silent |
@@ -1268,3 +1271,4 @@ docker-compose.yml (+ docker-compose.build.yml), Makefile, CLAUDE.md, README.md,
 | 67 | Item reviews are re-scored against the current plan (daily and on cart result), and Cleanup leaves out new products bought once | After the 12-month re-import (2026-11-09) Cleanup held 462 new-product reviews, all scored 1: the 44 in that week's cart never reached This Week, and 276 were one-off buys whose answer changes nothing (their default, keep, applies on expiry). Re-scoring beats scoring at ingest, which can't know next Saturday's plan; hiding beats not creating, because a later purchase or plan brings the review back without a new code path in receipt ingest |
 | 68 | A polling command automation stays silent through an API outage (`NO_REPLY`, state-dir marker) and posts one readable ⚠️ only after `jobs.outage_alert_minutes` (60), then ✅ on recovery; a failed `notified` ack posts only the replies already acked | Its stdout goes straight to Discord: a 2:36 AM network timeout was posted to `#pandabase` as raw error JSON (2026-11-10). Unacked jobs stay queued, so the next run loses nothing; `api_outage` telemetry records each outage |
 | 69 | PandaBase drives one browser profile, `pandabase` (the cart member's Amazon session; was `will`), and describes only the **`pandabase` agent** on a gateway that may host others (routed by channel and DM sender). `profile` is optional per member, two members can't share one, and `OPENCLAW_AGENT` names the `pandabase` agent | The gateway gained a member's personal agent with web tools, the browser and its own Chrome profile (2026-11). A profile named after a member was easy to confuse with that one, and members' own profiles now belong to their agents, not PandaBase. A shared profile would sweep one Amazon account's orders as two members'. The web/browser deny moved from gateway-wide `tools` to the `pandabase` agent's entry, so other agents keep their tools |
+| 70 | Every worker job runs on the reply agents' model, `qwen3.8:27b`, at their `num_ctx` (32768), with no `keep_alive` and `think: false` | With `OLLAMA_MAX_LOADED_MODELS=1` each 9B/4B job evicted the 27B reply model, so the next Discord reply cold-loaded. Synthetic checks on the Mac (2026-11-14): the 27B matched the 9B on receipts and Trash Cam, found 8/8 planted duplicates in a 40-item merge batch against the 4B's 1/8, and took 5–20 s warm (the 9B 4–12 s); at `think: "low"` the merge batch hit the 2048-token cap. A worker `keep_alive` would override the reply model's residency (the last request wins) |

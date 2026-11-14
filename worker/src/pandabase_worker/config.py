@@ -5,19 +5,20 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
-# DESIGN §1.2: the Mac Mini's 32GB are shared, so the model unloads soon after a burst.
-KEEP_ALIVE = "2m"
-# Default VLM: Qwen3.5 9B (natively multimodal), q4_K_M ≈ 6.6GB. See PLAN M6 Notes.
-DEFAULT_VLM_MODEL = "qwen3.5:9b"
-# merge_suggest is short-text work; the 4B sibling (≈ 3.4GB) follows the same JSON prompts.
-DEFAULT_TEXT_MODEL = "qwen3.5:4b"
-# Context window per request: a receipt image + prompt + ~100 lines of JSON fits in 8K tokens,
-# and a small window keeps the KV cache (and so resident memory) small.
-NUM_CTX = 8192
+# DESIGN §1.2: one resident model on the Mac Mini. The worker uses the model OpenClaw's agents
+# already keep loaded (Qwen3.8 27B: vision, ≈ 18GB), so a job never swaps it out. Requests send no
+# `keep_alive`: Ollama keeps the last request's value, so the host's default (the runbook's
+# `OLLAMA_KEEP_ALIVE`) decides residency, not a worker job.
+DEFAULT_VLM_MODEL = "qwen3.8:27b"
+DEFAULT_TEXT_MODEL = "qwen3.8:27b"
+# Context window per request. Must equal OpenClaw's for the shared model: Ollama reloads a model
+# whose `num_ctx` changes. A receipt image + prompt + ~100 lines of JSON needs well under 8K.
+NUM_CTX = 32768
 # Output cap per job type (Ollama `num_predict`; DESIGN §5). With none, an answer stuck in a
 # repetition loop runs until the context fills — ~4 min on the 4B model, the whole timeout. A
 # 40-item merge_suggest answer needs well under 1K tokens. Receipts and trash-cam have no cap yet:
-# a long receipt's JSON can need most of the context.
+# a long receipt's JSON can need most of the context. Thinking tokens count against the cap too
+# (Qwen3.8 at think "low" spent all 2048 on a 40-item batch), so requests keep `think: false`.
 MAX_OUTPUT_TOKENS: Mapping[str, int] = {"merge_suggest": 2048}
 # DESIGN §5: images are normalized to ≤ 2048px on the long side before keyframe upload / VLM.
 MAX_IMAGE_PX = 2048

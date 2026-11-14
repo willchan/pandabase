@@ -28,7 +28,7 @@ def client(fake: FakeOllama) -> OllamaClient:
 def test_fenced_json_is_accepted_without_repair() -> None:
     fake = FakeOllama()
     fake.queue("paper_receipt.fenced")
-    inf = client(fake).generate("qwen3.5:9b", "sys", "user", VlmReceipt)
+    inf = client(fake).generate("qwen3.8:27b", "sys", "user", VlmReceipt)
     assert inf.value.store == "SYNTHETIC FOODS MARKET"
     assert inf.repaired is False
     assert inf.latency_ms == 3000
@@ -38,7 +38,7 @@ def test_fenced_json_is_accepted_without_repair() -> None:
 def test_malformed_json_is_repaired_once() -> None:
     fake = FakeOllama()
     fake.queue("paper_receipt.truncated", "paper_receipt.ok")
-    inf = client(fake).generate("qwen3.5:9b", "sys", "user", VlmReceipt, images=[b"jpeg"])
+    inf = client(fake).generate("qwen3.8:27b", "sys", "user", VlmReceipt, images=[b"jpeg"])
     assert inf.repaired is True
     assert len(inf.raw) == 2
     repair = fake.requests[1]["messages"]
@@ -53,7 +53,7 @@ def test_malformed_json_is_repaired_once() -> None:
 def test_schema_errors_are_named_in_the_repair_prompt() -> None:
     fake = FakeOllama()
     fake.queue("paper_receipt.wrong_shape", "paper_receipt.ok")
-    client(fake).generate("qwen3.5:9b", "sys", "user", VlmReceipt)
+    client(fake).generate("qwen3.8:27b", "sys", "user", VlmReceipt)
     assert "lines: Field required" in fake.requests[1]["messages"][3]["content"]
 
 
@@ -61,8 +61,8 @@ def test_second_bad_reply_raises_parse_failure() -> None:
     fake = FakeOllama()
     fake.queue("prose", "paper_receipt.truncated")
     with pytest.raises(ParseFailure) as exc:
-        client(fake).generate("qwen3.5:9b", "sys", "user", VlmReceipt)
-    assert exc.value.model == "qwen3.5:9b"
+        client(fake).generate("qwen3.8:27b", "sys", "user", VlmReceipt)
+    assert exc.value.model == "qwen3.8:27b"
     assert exc.value.error == "not valid JSON"
     assert len(exc.value.raw) == 2
     assert len(fake.requests) == 2  # exactly one repair
@@ -71,14 +71,14 @@ def test_second_bad_reply_raises_parse_failure() -> None:
 def test_http_errors_raise_ollama_error() -> None:
     fake = FakeOllama()  # nothing queued → 500
     with pytest.raises(OllamaError, match="ollama 500"):
-        client(fake).generate("qwen3.5:9b", "sys", "user", VlmReceipt)
+        client(fake).generate("qwen3.8:27b", "sys", "user", VlmReceipt)
 
     def refuse(req: httpx.Request) -> httpx.Response:
         raise httpx.ConnectError("refused", request=req)
 
     down = OllamaClient(OLLAMA, transport=httpx.MockTransport(refuse))
     with pytest.raises(OllamaError, match="unreachable"):
-        down.generate("qwen3.5:9b", "sys", "user", VlmReceipt)
+        down.generate("qwen3.8:27b", "sys", "user", VlmReceipt)
     assert down.available_models() is None
 
 
@@ -89,7 +89,7 @@ def test_parse_failure_fails_the_job_with_telemetry(rig: Rig) -> None:
     (body,) = job.completes
     assert body["status"] == "failed"
     assert body["error"] == "model output invalid after one repair: not valid JSON"
-    assert body["model"] == "qwen3.5:9b"
+    assert body["model"] == "qwen3.8:27b"
     assert body["prompt_version"] == "paper_receipt.v1"
     assert len(body["raw_model_response"]["responses"]) == 2
     assert job.status == "queued"  # retried on the next claim
@@ -101,7 +101,7 @@ def test_parse_failure_fails_the_job_with_telemetry(rig: Rig) -> None:
         "job_id": job.id,
         "job_type": "paper_receipt",
         "attempt": 1,
-        "model": "qwen3.5:9b",
+        "model": "qwen3.8:27b",
         "prompt_version": "paper_receipt.v1",
         "error": "not valid JSON",
     }
@@ -126,7 +126,7 @@ def test_an_answer_cut_off_at_the_length_cap_fails_without_a_repair() -> None:
     fake = FakeOllama()
     fake.queue("merge_suggest.looping")
     with pytest.raises(ParseFailure) as exc:
-        client(fake).generate("qwen3.5:4b", "sys", "user", LlmMerges, max_tokens=2048)
+        client(fake).generate("qwen3.8:27b", "sys", "user", LlmMerges, max_tokens=2048)
     assert exc.value.truncated is True
     assert exc.value.error == "output cut off at the 2048-token cap (the model was likely looping)"
     assert len(exc.value.raw) == 1
@@ -137,7 +137,7 @@ def test_an_answer_cut_off_at_the_length_cap_fails_without_a_repair() -> None:
 def test_no_output_cap_unless_asked() -> None:
     fake = FakeOllama()
     fake.queue("paper_receipt.ok")
-    client(fake).generate("qwen3.5:9b", "sys", "user", VlmReceipt)
+    client(fake).generate("qwen3.8:27b", "sys", "user", VlmReceipt)
     assert "num_predict" not in fake.requests[0]["options"]
 
 

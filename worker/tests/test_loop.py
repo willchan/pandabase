@@ -5,6 +5,7 @@ import json
 import os
 import signal
 import threading
+from dataclasses import replace
 from datetime import timedelta
 
 import httpx
@@ -33,7 +34,7 @@ def test_paper_receipt_end_to_end(rig: Rig) -> None:
     assert job.status == "completed"
     (body,) = job.completes
     assert body["attempt"] == 1
-    assert body["model"] == "qwen3.5:9b"
+    assert body["model"] == "qwen3.8:27b"
     assert body["prompt_version"] == "paper_receipt.v1"
     assert body["keyframe_r2_keys"] == [f"keyframes/{job.id}/0.jpg"]
     assert body["raw_model_response"] == {
@@ -63,10 +64,13 @@ def test_paper_receipt_end_to_end(rig: Rig) -> None:
         assert kf.format == "JPEG"
         assert max(kf.size) == 2048
 
-    # The VLM got the same keyframe, JSON-schema mode, keep_alive 2m, temperature 0.
+    # The VLM got the same keyframe, JSON-schema mode, temperature 0, OpenClaw's context window
+    # (a different num_ctx reloads the shared model) and no keep_alive (it would override the
+    # reply model's residency: Ollama keeps the last request's value).
     (req,) = rig.ollama.requests
-    assert req["model"] == "qwen3.5:9b"
-    assert req["keep_alive"] == "2m"
+    assert req["model"] == "qwen3.8:27b"
+    assert "keep_alive" not in req
+    assert req["options"]["num_ctx"] == 32768
     assert req["stream"] is False
     assert req["think"] is False
     assert req["options"]["temperature"] == 0
@@ -76,7 +80,7 @@ def test_paper_receipt_end_to_end(rig: Rig) -> None:
     assert len(req["messages"][1]["images"]) == 1
 
     (inf,) = rig.engine.metrics("vlm_inference")
-    assert inf["model"] == "qwen3.5:9b"
+    assert inf["model"] == "qwen3.8:27b"
     assert inf["prompt_version"] == "paper_receipt.v1"
     assert inf["totals_check"] == "pass"
     assert inf["parse_failure"] is False
@@ -110,10 +114,10 @@ def test_trash_cam_and_merge_suggest(rig: Rig) -> None:
         ]
     }
     m = merge.completes[0]
-    assert (m["model"], m["prompt_version"]) == ("qwen3.5:4b", "merge_suggest.v1")
+    assert (m["model"], m["prompt_version"]) == ("qwen3.8:27b", "merge_suggest.v1")
     assert "keyframe_r2_keys" not in m  # no media
     text_req = rig.ollama.requests[1]
-    assert text_req["model"] == "qwen3.5:4b"
+    assert text_req["model"] == "qwen3.8:27b"
     assert "images" not in text_req["messages"][1]
     assert "01ITEMTOWELS" in text_req["messages"][1]["content"]
     infs = rig.engine.metrics("vlm_inference")
@@ -256,10 +260,12 @@ def test_no_claim_while_ollama_is_down_or_model_missing(rig: Rig) -> None:
     assert rig.engine.calls == []  # claiming would have cost the job an attempt
     assert rig.worker.run_once() is False
     assert rig.engine.metrics("worker_ollama_unavailable") == [
-        {"reason": "unreachable", "missing_models": ["qwen3.5:4b", "qwen3.5:9b"]}
+        {"reason": "unreachable", "missing_models": ["qwen3.8:27b"]}
     ]  # once per outage
 
-    # Only the text model pulled: merge_suggest only.
+    # Separate VLM and text models (still configurable), only the text model pulled:
+    # merge_suggest only.
+    rig.worker.settings = replace(rig.settings, vlm_model="qwen3.5:9b", text_model="qwen3.5:4b")
     rig.ollama.tags = {"models": [{"name": "qwen3.5:4b", "model": "qwen3.5:4b"}]}
     assert rig.worker.claimable_types() == ["merge_suggest"]
     assert rig.worker.run_once() is False
@@ -309,8 +315,8 @@ def test_heartbeat_at_startup_and_every_ten_minutes(rig: Rig) -> None:
     assert beats[0] == {
         "version": "0.0.0",
         "sha": None,  # local build: no PANDABASE_BUILD_SHA
-        "vlm_model": "qwen3.5:9b",
-        "text_model": "qwen3.5:4b",
+        "vlm_model": "qwen3.8:27b",
+        "text_model": "qwen3.8:27b",
         "ollama_ok": None,  # not checked yet
     }
     rig.ollama.tags = None
