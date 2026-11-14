@@ -91,7 +91,7 @@ def test_00_stack_is_up(stack: Stack) -> None:
         "worker heartbeat",
         lambda: stack.tools(["api", "get", "/api/health/worker"])["heartbeat"],
     )
-    assert health["sha"] == "systemtest" and health["vlm_model"] == "qwen3.5:9b"
+    assert health["sha"] == "systemtest" and health["vlm_model"] == "qwen3.8:27b"
     shown = stack.tools(["config", "show"])
     assert shown["token_set"] is True and shown["api_base_url"] == stack.base_url
 
@@ -260,11 +260,11 @@ def test_07_paper_receipt_photo(stack: Stack) -> None:
     assert stack.r2.content_type(key) == "image/png"
     job = finished_job(stack, out["job_id"])
     assert job["status"] == "completed", job["error"]
-    assert job["model"] == "qwen3.5:9b" and job["prompt_version"] == "paper_receipt.v1"
+    assert job["model"] == "qwen3.8:27b" and job["prompt_version"] == "paper_receipt.v1"
     # The worker sent Ollama what DESIGN §1.2/§5 say, and stored a keyframe through its presign.
     chat = stack.ollama.chats[-1]
-    assert chat["keep_alive"] == "2m" and chat["think"] is False and chat["stream"] is False
-    assert chat["options"]["num_ctx"] == 8192 and chat["format"]["properties"]["lines"]
+    assert "keep_alive" not in chat and chat["think"] is False and chat["stream"] is False
+    assert chat["options"]["num_ctx"] == 32768 and chat["format"]["properties"]["lines"]
     assert stack.r2.content_type(f"keyframes/{out['job_id']}/0.jpg") is not None
     receipt = stack.one("select * from receipt where job_id = ?", out["job_id"])
     # The fixture's $1 coupon isn't a line, but the totals still add up (discount_cents).
@@ -589,7 +589,7 @@ def test_14_merge_suggestions(stack: Stack) -> None:
     for queued in out["jobs"]:
         job = finished_job(stack, queued["id"])
         assert job["status"] == "completed", job["error"]
-        assert job["model"] == "qwen3.5:4b" and job["prompt_version"] == "merge_suggest.v1"
+        assert job["model"] == "qwen3.8:27b" and job["prompt_version"] == "merge_suggest.v1"
     # Idempotent while queued/claimed; once done a new run may queue again.
     reviews = stack.rows(
         "select * from review_item where kind = 'merge_suggestion' and status = 'pending'"
@@ -600,7 +600,7 @@ def test_14_merge_suggestions(stack: Stack) -> None:
     assert stack.telemetry("merge_suggest_requested", t)[0]["payload"]["trigger"] == "backfill"
     # The text model got the State Engine's item list, never the catalog itself.
     chat = stack.ollama.chats[-1]
-    assert chat["model"] == "qwen3.5:4b" and W["new_item"] in json.dumps(chat["messages"])
+    assert chat["model"] == "qwen3.8:27b" and W["new_item"] in json.dumps(chat["messages"])
 
 
 @preview

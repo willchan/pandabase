@@ -20,9 +20,9 @@ load_agent_env
 HOST_OLLAMA_URL="${HOST_OLLAMA_URL:-$(env_get HOST_OLLAMA_URL)}"
 HOST_OLLAMA_URL="${HOST_OLLAMA_URL:-http://127.0.0.1:11434}"
 VLM_MODEL="$(env_get OLLAMA_VLM_MODEL)"
-VLM_MODEL="${VLM_MODEL:-qwen3.5:9b}"
+VLM_MODEL="${VLM_MODEL:-qwen3.8:27b}"
 TEXT_MODEL="$(env_get OLLAMA_TEXT_MODEL)"
-TEXT_MODEL="${TEXT_MODEL:-qwen3.5:4b}"
+TEXT_MODEL="${TEXT_MODEL:-qwen3.8:27b}"
 TOOLS_PY="$ROOT/agent/tools/.venv/bin/python"
 passed=0 failed=0 skipped=0
 
@@ -88,17 +88,18 @@ check_worker() {
 }
 
 check_ollama() {
-  local tags missing=() m
+  local tags missing=() m models=("$VLM_MODEL")
+  [ "$TEXT_MODEL" = "$VLM_MODEL" ] || models+=("$TEXT_MODEL")
   if ! tags="$(curl -fsS --max-time 5 "$HOST_OLLAMA_URL/api/tags" 2>&1)"; then
     fail ollama "$HOST_OLLAMA_URL unreachable — is Ollama running? ($tags)"
     return
   fi
-  for m in "$VLM_MODEL" "$TEXT_MODEL"; do
+  for m in "${models[@]}"; do
     printf '%s' "$tags" | jq -e --arg m "$m" '[.models[] | .name, .model] | index($m) != null' >/dev/null ||
       missing+=("$m")
   done
   if [ "${#missing[@]}" -eq 0 ]; then
-    pass ollama "$VLM_MODEL and $TEXT_MODEL pulled"
+    pass ollama "${models[*]} pulled"
   else
     fail ollama "not pulled: ${missing[*]} — ollama pull ${missing[*]}"
   fi

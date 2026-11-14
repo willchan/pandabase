@@ -210,15 +210,15 @@ Then:
 ```sh
 make install-ollama-env            # OLLAMA_NUM_PARALLEL=1, OLLAMA_MAX_LOADED_MODELS=1, OLLAMA_NO_CLOUD=1
 # quit Ollama from the menu bar and open it again so it reads them
-ollama pull qwen3.5:9b             # the VLM: receipts, Trash Cam, and OpenClaw's photo descriptions
-ollama pull qwen3.5:4b             # merge suggestions (skip if you choose the single-model option)
+ollama pull qwen3.8:27b            # one model: OpenClaw's replies and photo descriptions, receipts,
+                                   # Trash Cam and merge suggestions
 ```
 
 Also turn on **Ollama → Settings → Airplane mode**: the app passes its own `OLLAMA_NO_CLOUD` to
 the server from that setting, overriding launchd. On a host whose Ollama other apps share, skip
 `make install-ollama-env`: the host owns these settings ([SETUP-MAC.md](docs/SETUP-MAC.md) §3).
 
-Check: `curl -s localhost:11434/api/tags | jq -r '.models[].name'` lists both models;
+Check: `curl -s localhost:11434/api/tags | jq -r '.models[].name'` lists the model;
 `ps eww -p "$(pgrep -f 'ollama serve' | head -1)" | tr ' ' '\n' | grep '^OLLAMA_'` shows the
 three settings the server actually got.
 
@@ -227,28 +227,29 @@ three settings the server actually got.
 | Component | Resident | Notes |
 |---|---|---|
 | macOS, Docker Desktop VM, worker | ~5GB | the worker container itself is ~150MB |
-| `qwen3.5:9b` (VLM, q4_K_M, 8K context) | ~7–8GB while loaded | worker and OpenClaw use `keep_alive` 2m: unloads two minutes after the last photo |
-| `qwen3.5:4b` (text, `OLLAMA_TEXT_MODEL`) | ~3.5–4GB while loaded | merge suggestions only; with `OLLAMA_MAX_LOADED_MODELS=1` it replaces the VLM rather than sitting beside it |
+| `qwen3.8:27b` at a 32K context | ~18.6GB while loaded | OpenClaw's reply model and every worker job (`OLLAMA_VLM_MODEL` = `OLLAMA_TEXT_MODEL`); stays loaded for the host's `keep_alive` |
 | OpenClaw gateway (Node) | ~0.5–1GB | |
-| OpenClaw's reply model, `$OPENCLAW_MODEL` | 0 if cloud; its size if local | if it runs on this Ollama, set `OLLAMA_MAX_LOADED_MODELS=2` in `ops/launchd/com.pandabase.ollama-env.plist` and budget its size here |
 | PandaBase's Chrome (`pandabase` profile) | ~0.5–1.5GB | other agents' Chrome profiles are their setup's budget |
 | Evening Claude Code sessions | ~1–2GB | |
-| **Worst case** | **~18–20GB + `$OPENCLAW_MODEL`** | leaves headroom for the OS cache |
+| **Worst case** | **~26–30GB** | the model is the same one whatever runs |
 
-**With a local reply model** (our setup: `qwen3.5:27b` on this Ollama, ~25GB resident at a 32K
-context) there is no room for a second model on 32GB. Keep `OLLAMA_MAX_LOADED_MODELS=1`: Ollama
-swaps models, so the first reply after a photo or a worker job waits for the 27B to load again
-(seconds, not minutes). Raise it to `2` only with a smaller reply model or more memory.
+**One resident model.** The worker uses the model the reply agents already keep loaded, so a
+photo, a receipt or a merge job never swaps it out and the next Discord reply never waits for a
+reload. Three things keep it that way, because Ollama loads a model per settings:
 
-`OLLAMA_NUM_PARALLEL=1` keeps one request (and one KV cache) at a time; the worker is
-single-job anyway. `OLLAMA_MAX_LOADED_MODELS=1` caps Ollama at one resident model.
+- **Same `num_ctx`.** The worker sends 32768, OpenClaw's context for the model; a request with a
+  different `num_ctx` reloads it.
+- **No `keep_alive` from the worker.** Ollama keeps the last request's value, so a short one
+  would cut the reply model's residency. Without one, a request gets the server's default (5
+  minutes unless `OLLAMA_KEEP_ALIVE` is set): set `OLLAMA_KEEP_ALIVE` at least as long as the
+  reply model's own `keep_alive` (OpenClaw's model params), or a worker job shortens it.
+- **One request at a time** (`OLLAMA_NUM_PARALLEL=1`): a worker job delays a reply by its own
+  length, about 5–20 s warm (synthetic checks, 2026-11-14). `OLLAMA_MAX_LOADED_MODELS=1` caps
+  Ollama at one resident model.
 
-**Single-model option:** set `OLLAMA_TEXT_MODEL=qwen3.5:9b` in `.env` (and skip pulling the 4B).
-Then only one model ever loads: no swap when a merge job follows a receipt, ~3.4GB less disk,
-one model to keep updated. The cost: merge suggestions run on the bigger model, a little slower
-per job (they're rare, short text jobs, so it barely matters), and you lose the 4B's lower peak
-memory if a merge job is the only thing running. Either works; the default keeps the 4B because
-it frees memory sooner on a busy evening.
+Splitting the models again (`OLLAMA_VLM_MODEL` / `OLLAMA_TEXT_MODEL` in `.env`) still works, with
+a swap per job; with a smaller reply model or a cloud one, `qwen3.5:9b` (VLM) and `qwen3.5:4b`
+(text) are the earlier defaults: DESIGN §10 #32 has the trade-off.
 
 ### 9. Mac Mini: agent tools and worker
 
@@ -361,7 +362,7 @@ browser tool has no URL denylist, so a local model with it next to a signed-in A
 could be talked into Buy Now by a product page (`openclaw security audit` flags this as
 `models.small_params`). An agent that does have the browser uses its own Chrome profile: remove
 any OpenClaw browser profile that attaches to PandaBase's DevTools port (older versions of this
-file had `pandabase-<member>` ones). The patch names `qwen3.5:9b`: if you change
+file had `pandabase-<member>` ones). The patch names `qwen3.8:27b`: if you change
 `OLLAMA_VLM_MODEL`, change it there too. Arrays in a patch replace: if you already had
 `tools.media.models` or Ollama models configured, merge those lists by hand.
 
@@ -369,16 +370,17 @@ Exec policy: OpenClaw's default host exec mode works as is. If you run `tools.ex
 "allowlist"`, allowlist `pandabase-tools` (the only command the skills run).
 
 The patch leaves `models.providers.ollama.models` alone: onboarding already lists every pulled
-model, and a patch array would replace that list (deleting your reply model). To tune the VLM,
-find its index with `openclaw config get models.providers.ollama.models --json` and set
-`openclaw config set "models.providers.ollama.models[<i>].params" '{"num_ctx":8192,"keep_alive":"2m"}' --strict-json`.
+model, and a patch array would replace that list (deleting your reply model). The model's
+`params` must keep `num_ctx` at 32768, the worker's value (find its index with `openclaw config
+get models.providers.ollama.models --json`; `openclaw config set
+"models.providers.ollama.models[<i>].params" '{"num_ctx":32768}' --strict-json`).
 
 Check:
 
 ```sh
 openclaw skills check --agent pandabase   # the five PandaBase skills are eligible
 openclaw automations list # pandabase-* jobs on the `pandabase` agent, household-TZ schedules
-openclaw infer image describe --file <any photo> --model ollama/qwen3.5:9b --timeout-ms 180000
+openclaw infer image describe --file <any photo> --model ollama/qwen3.8:27b --timeout-ms 180000
 # local vision works (the default 30s timeout is too short while the model loads)
 ```
 
@@ -514,7 +516,7 @@ telemetry (weekly report, *Deploys*). It needs a clean checkout on `main`.
 
 PandaBase is local-first for vision ([PRD §3.6](docs/PRD.md), [DESIGN §10 #10, #34](docs/DESIGN.md#10-key-decisions--rationale)):
 the worker only talks to the local Ollama, and the step-11 config makes OpenClaw describe each
-inbound Discord photo with the same local model (`tools.media.models` → `ollama/qwen3.5:9b`), so
+inbound Discord photo with the same local model (`tools.media.models` → `ollama/qwen3.8:27b`), so
 the skills work from that text and the agent's reply model never needs the pixels. This is per
 agent: a photo sent to another agent on the gateway (e.g. in a DM bound to a member's own agent)
 follows that agent's model.
@@ -533,10 +535,9 @@ model instead: it never leaves the Mac. That's option C below, with two conditio
 - **No cloud fallback.** OpenClaw's model setting can list backups (`model: { primary,
   fallbacks }`). Don't put a cloud model there, and the simplest guarantee is to configure no
   cloud provider keys at all.
-- **Memory.** The reply model and `qwen3.5:9b` share one Ollama. With
-  `OLLAMA_MAX_LOADED_MODELS=1` each photo swaps them (unload yours, describe the photo, reload
-  yours): correct but slower. If both fit (see [Memory budget](#memory-budget-32gb)), set it
-  to `2` in `ops/launchd/com.pandabase.ollama-env.plist` and re-run `make install-ollama-env`.
+- **Memory.** Our reply model is also the media model (`qwen3.8:27b`), so a photo needs no
+  swap. With a different reply model on the same Ollama and `OLLAMA_MAX_LOADED_MODELS=1`, each
+  photo swaps them: correct but slower ([Memory budget](#memory-budget-32gb)).
 
 Small local models are weaker than cloud ones at multi-step tool use; the Saturday cart build
 (tier-2 search-and-pick for lines the add-to-cart link couldn't handle) is the most demanding job, so

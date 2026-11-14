@@ -29,9 +29,10 @@
 //   # agents.entries.pandabase.tools.deny ["group:web","browser"], and the whole `bindings`
 //   # list with a #pandabase peer rule added (SETUP-MAC §5 step 4 has the file)
 //
-//   # The VLM's params (README step 11):
+//   # The model's params (README step 11): num_ctx must match the worker's 32768, or Ollama
+//   # reloads the model between a reply and a worker job:
 //   openclaw config set "models.providers.ollama.models[<i>].params" \
-//     '{"num_ctx":8192,"keep_alive":"2m"}' --strict-json
+//     '{"num_ctx":32768}' --strict-json
 //
 // Its id goes in .env as OPENCLAW_AGENT so the automations run as it.
 //
@@ -67,16 +68,17 @@
   },
 
   // Local vision for inbound photos (PRD §3.6, DESIGN §6): OpenClaw describes each photo with the
-  // same Ollama VLM the worker uses, and the reply model gets that text instead of the pixels.
+  // same Ollama model the worker and the reply agents use (one resident model, no swap), and the
+  // reply model gets that text instead of the pixels.
   // Residual risk and the mitigation: README "Photo privacy" (agent/openclaw.privacy.example.json5).
   // Gateway-wide, so it serves every agent's photos. No `deny` here: the `pandabase` agent's
   // web/browser deny is per agent (`agents.entries.pandabase.tools.deny`, header).
   tools: {
     media: {
       models: [
-        { provider: "ollama", model: "qwen3.5:9b", capabilities: ["image"], timeoutSeconds: 180 },
+        { provider: "ollama", model: "qwen3.8:27b", capabilities: ["image"], timeoutSeconds: 180 },
       ],
-      image: { preferredModel: "ollama/qwen3.5:9b" },
+      image: { preferredModel: "ollama/qwen3.8:27b" },
     },
   },
 

@@ -7,9 +7,9 @@ never calls cloud vision/LLM APIs. One job at a time. See DESIGN §1.2 and §5.
 
 | Job | Model (env) | Prompt |
 |---|---|---|
-| `paper_receipt` | `OLLAMA_VLM_MODEL` (`qwen3.5:9b`) | `prompts/paper_receipt.v1.md` (transcription only) |
+| `paper_receipt` | `OLLAMA_VLM_MODEL` (`qwen3.8:27b`) | `prompts/paper_receipt.v1.md` (transcription only) |
 | `trash_cam` | `OLLAMA_VLM_MODEL` | `prompts/trash_cam.v1.md` |
-| `merge_suggest` | `OLLAMA_TEXT_MODEL` (`qwen3.5:4b`) | `prompts/merge_suggest.v1.md` |
+| `merge_suggest` | `OLLAMA_TEXT_MODEL` (`qwen3.8:27b`) | `prompts/merge_suggest.v1.md` |
 
 Prompts are versioned: to change one, add `{job_type}.v{N+1}.md` (the highest version is used and
 recorded as `prompt_version`).
