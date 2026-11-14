@@ -84,9 +84,8 @@ ollama pull qwen3.8:27b   # the one model: replies, photo descriptions and every
 ```
 
 One ~18.6GB model serves OpenClaw and the worker, so nothing swaps (README "Memory budget"): keep
-`OLLAMA_MAX_LOADED_MODELS=1`, and set `OLLAMA_KEEP_ALIVE` at least as long as the reply model's
-`keep_alive`, since the worker's requests send none and get the server default.
-`OLLAMA_NO_CLOUD=1` turns off Ollama's cloud models.
+`OLLAMA_MAX_LOADED_MODELS=1`. The worker sends the model's OpenClaw `num_ctx` (32768) and
+`keep_alive` (30m), so a job keeps it resident. `OLLAMA_NO_CLOUD=1` turns off Ollama's cloud models.
 
 **Also turn on Ollama → Settings → Airplane mode.** The Ollama app passes its own
 `OLLAMA_NO_CLOUD` to the server from that setting, overriding launchd, so with Airplane mode off
@@ -99,9 +98,9 @@ the models.
 
 **On a shared host** (other apps on the same Ollama, a host-level runbook): Ollama's settings
 and which models are pulled belong to the host, not to PandaBase. Skip `make install-ollama-env`
-and check the host sets the three values above and `OLLAMA_KEEP_ALIVE`. PandaBase needs the model
-in `OLLAMA_VLM_MODEL` / `OLLAMA_TEXT_MODEL` (default `qwen3.8:27b`, the reply model) pulled, and
-sends it OpenClaw's 32K `num_ctx` and no `keep_alive` (README "Memory budget").
+and check the host sets the three values above. PandaBase needs the model in `OLLAMA_VLM_MODEL` /
+`OLLAMA_TEXT_MODEL` (default `qwen3.8:27b`, the reply model) pulled, and sends it OpenClaw's 32K
+`num_ctx` and 30m `keep_alive` (README "Memory budget").
 
 ## 4. Agent tools and config
 

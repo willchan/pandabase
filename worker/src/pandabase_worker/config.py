@@ -6,14 +6,16 @@ from dataclasses import dataclass
 from pathlib import Path
 
 # DESIGN §1.2: one resident model on the Mac Mini. The worker uses the model OpenClaw's agents
-# already keep loaded (Qwen3.8 27B: vision, ≈ 18GB), so a job never swaps it out. Requests send no
-# `keep_alive`: Ollama keeps the last request's value, so the host's default (the runbook's
-# `OLLAMA_KEEP_ALIVE`) decides residency, not a worker job.
+# already keep loaded (Qwen3.8 27B: vision, ≈ 18GB), so a job never swaps it out.
 DEFAULT_VLM_MODEL = "qwen3.8:27b"
 DEFAULT_TEXT_MODEL = "qwen3.8:27b"
 # Context window per request. Must equal OpenClaw's for the shared model: Ollama reloads a model
 # whose `num_ctx` changes. A receipt image + prompt + ~100 lines of JSON needs well under 8K.
 NUM_CTX = 32768
+# Must equal OpenClaw's `keep_alive` for the shared model: Ollama keeps the last request's value, so
+# a shorter one would cut the reply model's residency. Sent explicitly because the Ollama app
+# (0.40.14) doesn't pass the host's `OLLAMA_KEEP_ALIVE` to its server: without it a request gets 5m.
+KEEP_ALIVE = "30m"
 # Output cap per job type (Ollama `num_predict`; DESIGN §5). With none, an answer stuck in a
 # repetition loop runs until the context fills — ~4 min on the 4B model, the whole timeout. A
 # 40-item merge_suggest answer needs well under 1K tokens. Receipts and trash-cam have no cap yet:

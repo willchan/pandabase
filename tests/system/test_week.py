@@ -263,7 +263,7 @@ def test_07_paper_receipt_photo(stack: Stack) -> None:
     assert job["model"] == "qwen3.8:27b" and job["prompt_version"] == "paper_receipt.v1"
     # The worker sent Ollama what DESIGN §1.2/§5 say, and stored a keyframe through its presign.
     chat = stack.ollama.chats[-1]
-    assert "keep_alive" not in chat and chat["think"] is False and chat["stream"] is False
+    assert chat["keep_alive"] == "30m" and chat["think"] is False and chat["stream"] is False
     assert chat["options"]["num_ctx"] == 32768 and chat["format"]["properties"]["lines"]
     assert stack.r2.content_type(f"keyframes/{out['job_id']}/0.jpg") is not None
     receipt = stack.one("select * from receipt where job_id = ?", out["job_id"])

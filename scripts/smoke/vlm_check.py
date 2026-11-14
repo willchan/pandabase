@@ -2,7 +2,7 @@
 
 Runs inside the worker image (`docker compose run`), so it also proves the container reaches the
 host's Ollama. Renders a receipt with Pillow, sends it with the current paper_receipt prompt and
-the schema as `format` through the worker's own client (OpenClaw's `num_ctx`, no `keep_alive`),
+the schema as `format` through the worker's own client (OpenClaw's `num_ctx` and `keep_alive`),
 and checks that the reply validates as `VlmReceipt` within the time limit. Prints one JSON line;
 exit 0 pass, 1 fail.
 """
