@@ -578,7 +578,7 @@ would also work — set `OLLAMA_TEXT_MODEL=qwen3.5:9b` to keep one model residen
 
 *Superseded 2026-11-14 (DESIGN §10 #70):* once the reply model ran on the same Ollama, "too big"
 stopped applying. Every job now runs on `qwen3.8:27b`, the reply agents' model, at their `num_ctx`
-(32768) with no `keep_alive`, so a job never evicts the reply model. Synthetic checks on the Mac:
+(32768) and `keep_alive` (30m), so a job never evicts the reply model or shortens its residency. Synthetic checks on the Mac:
 same receipt and Trash Cam accuracy as the 9B, 8/8 planted merge duplicates against the 4B's 1/8,
 5–20 s per job warm.
 

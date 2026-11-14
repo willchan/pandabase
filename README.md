@@ -227,7 +227,7 @@ three settings the server actually got.
 | Component | Resident | Notes |
 |---|---|---|
 | macOS, Docker Desktop VM, worker | ~5GB | the worker container itself is ~150MB |
-| `qwen3.8:27b` at a 32K context | ~18.6GB while loaded | OpenClaw's reply model and every worker job (`OLLAMA_VLM_MODEL` = `OLLAMA_TEXT_MODEL`); stays loaded for the host's `keep_alive` |
+| `qwen3.8:27b` at a 32K context | ~18.6GB while loaded | OpenClaw's reply model and every worker job (`OLLAMA_VLM_MODEL` = `OLLAMA_TEXT_MODEL`); stays loaded for OpenClaw's `keep_alive` (30m), which the worker sends too |
 | OpenClaw gateway (Node) | ~0.5–1GB | |
 | PandaBase's Chrome (`pandabase` profile) | ~0.5–1.5GB | other agents' Chrome profiles are their setup's budget |
 | Evening Claude Code sessions | ~1–2GB | |
@@ -239,10 +239,10 @@ reload. Three things keep it that way, because Ollama loads a model per settings
 
 - **Same `num_ctx`.** The worker sends 32768, OpenClaw's context for the model; a request with a
   different `num_ctx` reloads it.
-- **No `keep_alive` from the worker.** Ollama keeps the last request's value, so a short one
-  would cut the reply model's residency. Without one, a request gets the server's default (5
-  minutes unless `OLLAMA_KEEP_ALIVE` is set): set `OLLAMA_KEEP_ALIVE` at least as long as the
-  reply model's own `keep_alive` (OpenClaw's model params), or a worker job shortens it.
+- **Same `keep_alive`.** Ollama keeps the last request's value, so the worker sends OpenClaw's
+  30m (worker `KEEP_ALIVE`; OpenClaw's model params): a shorter one would cut the reply model's
+  residency, and so would none, which gets the server default (5 minutes; the Ollama app 0.40.14
+  doesn't pass a launchd `OLLAMA_KEEP_ALIVE` to its server). Change both together.
 - **One request at a time** (`OLLAMA_NUM_PARALLEL=1`): a worker job delays a reply by its own
   length, about 5–20 s warm (synthetic checks, 2026-11-14). `OLLAMA_MAX_LOADED_MODELS=1` caps
   Ollama at one resident model.

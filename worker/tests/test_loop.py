@@ -65,11 +65,11 @@ def test_paper_receipt_end_to_end(rig: Rig) -> None:
         assert max(kf.size) == 2048
 
     # The VLM got the same keyframe, JSON-schema mode, temperature 0, OpenClaw's context window
-    # (a different num_ctx reloads the shared model) and no keep_alive (it would override the
-    # reply model's residency: Ollama keeps the last request's value).
+    # (a different num_ctx reloads the shared model) and its keep_alive (Ollama keeps the last
+    # request's value: a shorter one, or none, which gets the 5m default, cuts the reply model's).
     (req,) = rig.ollama.requests
     assert req["model"] == "qwen3.8:27b"
-    assert "keep_alive" not in req
+    assert req["keep_alive"] == "30m"
     assert req["options"]["num_ctx"] == 32768
     assert req["stream"] is False
     assert req["think"] is False
