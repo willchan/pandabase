@@ -424,6 +424,70 @@ def test_10_froze_the_chicken(stack: Stack) -> None:
     assert frozen["frozen_at"] and frozen["quantity"] >= ev["quantity"]
 
 
+def test_10b_costco_trip_and_store_pin(stack: Stack) -> None:
+    """ "going to Costco today" → a trip with its list; the weekly plan leaves Costco items out
+    until it (DESIGN §4.8); "get toilet paper at Amazon" pins it. The trip stays planned through
+    Saturday's build (step 11) and closes with "back from Costco" (step 11b)."""
+    # "4 oz of blueberries left": they run out within days, and the seed bought them at Costco
+    # once. (Not eggs: step 3's "3 eggs" is a human's quantity, which keeps them in this cart.)
+    berries = resolve(stack, "frozen blueberries", DI)
+    assert berries == item_id(stack, "Frozen Blueberries")
+    stack.skill(
+        DI,
+        "/api/inventory/events",
+        json_body={"events": [{"item_id": berries, "kind": "observed", "quantity": 4}]},
+        sender_id=SAM,
+        message_id=stack.message_id(),
+    )
+    msg = stack.message_id()
+    posted = stack.skill(GC, "costco plan", day="today", message_id=msg, sender_id=SAM)
+    print("COSTCO", posted)
+    assert posted.startswith("🏬 **Costco list — ")
+    trip = stack.one("select * from costco_trip where status = 'planned'")
+    assert trip["planned_for"] == stack.today() and trip["discord_thread_id"] == msg
+    W["trip"] = trip["id"]
+    listed = stack.tools(["api", "get", "/api/costco/trip"])
+    on_list = {x["item_id"] for x in listed["lines"]}
+    assert on_list and all(x["product"]["vendor"] == "costco" for x in listed["lines"])
+    # Re-delivering the message changes nothing (Idempotency-Key = discord:<message id>).
+    stack.skill(GC, "costco plan", day="today", message_id=msg, sender_id=SAM)
+    assert len(stack.rows("select * from costco_trip")) == 1
+
+    plan = stack.tools(["api", "get", "/api/predictions", "-q", f"cycle_id={W['cycle']}"])
+    waiting = {x["item_id"] for x in plan["costco_waiting"]}
+    assert plan["costco_trip_date"] == stack.today()
+    # Waiting items are on the trip's list, and in neither the cart nor "please check".
+    assert berries in waiting and waiting <= on_list
+    assert not waiting & {x["item_id"] for x in plan["lines"]}
+    checkin = stack.tools(["api", "get", "/api/grocery/checkin"])
+    assert not waiting & {x["item_id"] for x in checkin["please_check"]}
+    W["costco_waiting"] = waiting
+
+    # "get toilet paper at Amazon": a pin that goes against Costco's cheaper price.
+    tp = resolve(stack, "toilet paper", DI)
+    assert tp == item_id(stack, "Toilet Paper")
+    pinned = stack.skill(
+        DI,
+        "/store-pin",
+        item_id=tp,
+        json_body={"store": "regular"},
+        sender_id=ALEX,
+        message_id=stack.message_id(),
+    )
+    assert pinned["choice"] == {
+        "store": "regular",
+        "why": "pinned",
+        "reason": pinned["choice"]["reason"],
+        "savings_ratio": None,
+    }
+    assert stack.one("select store_pin from item where id = ?", tp)["store_pin"] == "regular"
+    relisted = stack.tools(["api", "get", "/api/costco/trip"])
+    assert tp in on_list and tp not in {x["item_id"] for x in relisted["lines"]}
+    [override] = [x["payload"] for x in stack.telemetry("store_override")]
+    assert override["itemId"] == tp and override["kind"] == "store_override_to_regular"
+    assert pinned["threshold_changed"] and pinned["switch_threshold"] == 0.2
+
+
 @preview
 def test_11_saturday_build(stack: Stack) -> None:
     """`cart build` (price checks → tier 1 on synthetic Amazon) → tier 2 → `cart finish`."""
@@ -439,6 +503,8 @@ def test_11_saturday_build(stack: Stack) -> None:
     print("BUILD", again)
     assert again.startswith("🛒 **Cart built**") and f"**Added ({len(added)}):**" in again
     assert "🔎 **Still to find" in again
+    if W.get("costco_waiting"):  # step 10b (local runs): blueberries wait for the Costco trip
+        assert "🏬 **Waiting for the Costco trip" in again and "Frozen Blueberries" in again
     # The 10:30 search job reads what's left from the build state, without a browser.
     pending = stack.skill(GC, "cart pending")
     assert pending["status"] == "needs_agent" and pending["cycle_id"] == c
@@ -509,6 +575,26 @@ def test_11_saturday_build(stack: Stack) -> None:
     # Tiers 1 and 2 add from product pages (the add URL stopped working, 2026-11-04).
     clicked = [p["url"] for p in pages if p["kind"] == "clicked"]
     assert clicked and all(u.startswith("https://www.amazon.com/dp/") for u in clicked)
+
+
+def test_11b_back_from_costco(stack: Stack) -> None:
+    """ "back from Costco" closes the trip; telemetry counts what the week's cart bridged."""
+    cyc = stack.one("select cart_result from grocery_cycle where id = ?", W["cycle"])
+    result = json.loads(cyc["cart_result"])
+    waiting = W["costco_waiting"] - {item_id(stack, "Toilet Paper")}  # pinned in step 10b
+    assert item_id(stack, "Frozen Blueberries") in waiting
+    assert set(result["costco_waiting_item_ids"]) == waiting
+    out = stack.skill(GC, "costco done", sender_id=SAM, message_id=stack.message_id())
+    print("BACK", out)
+    assert out.startswith("✅ Welcome back")
+    trip = stack.one("select * from costco_trip where id = ?", W["trip"])
+    assert trip["status"] == "done" and trip["closed_at"] and trip["receipt_id"] is None
+    [closed] = [x["payload"] for x in stack.telemetry("costco_trip")]
+    assert closed["outcome"] == "done"
+    assert closed["bridged"] == len(set(result["costco_bridged_item_ids"]))
+    choices = [x["payload"] for x in stack.telemetry("store_choice")]
+    assert choices and {c["cycleId"] for c in choices} == {W["cycle"]}
+    assert {c["itemId"] for c in choices if c["timing"] == "wait"} == waiting
 
 
 @preview
@@ -636,6 +722,7 @@ def test_16_weekly_diagnostics(stack: Stack) -> None:
         "receipt_lines",
         "vlm",
         "product_choice",
+        "store_choice",
         "cart_injection",
         "ux",
         "data_quality",
@@ -649,7 +736,13 @@ def test_16_weekly_diagnostics(stack: Stack) -> None:
     this = stack.tools(["diagnostics", "write", "--week", f"{y}-W{w:02d}"])
     md = (root / f"{this['week']}.md").read_text()
     print(md[:3000])
-    for section in ("## 1. Summary", "## 4. VLM", "## 6. Cart injection", "## 8. Deploys"):
+    for section in (
+        "## 1. Summary",
+        "## 4. VLM",
+        "## 6. Store choice (Costco)",
+        "## 7. Cart injection",
+        "## 9. Deploys",
+    ):
         assert section in md
     vlm = (root / this["week"] / "vlm.jsonl").read_text()
     assert "paper_receipt.v1" in vlm and "trash_cam.v1" in vlm

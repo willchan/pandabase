@@ -61,6 +61,28 @@ ROUTES: dict[str, Route] = {
         Route(
             "POST", "/api/grocery/cycle/{id}/cart-result", c.CartResultResponse, c.CartResultRequest
         ),
+        Route("GET", "/api/costco/trip", c.CostcoTripResponse),
+        Route(
+            "POST",
+            "/api/costco/trip",
+            c.CostcoTripPlanResponse,
+            c.CostcoTripPlanRequest,
+            actor="optional",
+        ),
+        Route(
+            "POST",
+            "/api/costco/trip/{id}/status",
+            c.CostcoTripStatusResponse,
+            c.CostcoTripStatusRequest,
+            actor="optional",
+        ),
+        Route(
+            "POST",
+            "/api/items/{id}/store-pin",
+            c.StorePinResponse,
+            c.StorePinRequest,
+            actor="required",
+        ),
         Route("GET", "/api/items/lookup", c.LookupResponse, query=c.LookupQuery),
         Route(
             "POST",

@@ -137,6 +137,10 @@ def test_every_agent_route_is_used_by_some_skill_or_tool() -> None:
         "GET /api/diagnostics/weekly",
         "GET /api/grocery/checkin",  # `cycle nudge` (the Friday command automation)
         "GET /api/health/worker",  # scripts/deploy/mac-update.sh health check (`api get`)
+        # `costco plan` / `costco done` / `costco cancel` (grocery-cycle §5)
+        "GET /api/costco/trip",
+        "POST /api/costco/trip",
+        "POST /api/costco/trip/{id}/status",
     }
     unused = set(ROUTES) - used - tool_routes
     assert unused == {"GET /api/freezer/aging"}  # the check-in already lists the oldest items

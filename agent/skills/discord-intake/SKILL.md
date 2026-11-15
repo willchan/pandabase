@@ -1,6 +1,6 @@
 ---
 name: discord-intake
-description: "PandaBase intake in the #pandabase Discord channel — paper-receipt and Trash Cam photos become audit jobs (local VLM only), and text like \"bought milk\", \"we're out of eggs\", \"froze the chicken\" or \"never buy that brand again\" updates inventory."
+description: "PandaBase intake in the #pandabase Discord channel — paper-receipt and Trash Cam photos become audit jobs (local VLM only), and text like \"bought milk\", \"we're out of eggs\", \"froze the chicken\", \"never buy that brand again\" or \"get eggs at Costco\" updates inventory and store choices."
 metadata:
   {
     "openclaw":
@@ -14,8 +14,8 @@ metadata:
 # Discord intake
 
 Scope: messages in `#pandabase` (`channels.intake_channel` from `pandabase-tools config show`)
-and its cycle threads. Grocery-list edits in the cycle thread belong to `grocery-cycle`;
-"do we have X?" belongs to `item-lookup`.
+and its cycle threads. Grocery-list edits in the cycle thread and Costco trips ("going to Costco
+Saturday", "back from Costco") belong to `grocery-cycle`; "do we have X?" belongs to `item-lookup`.
 
 Same ground rules as every PandaBase skill: **nothing blocks on a human, ask once and never nag,
 cart only**; short Discord markdown with ✅ ⚠️ ❓; `--actor <sender discord id>` on every write a
@@ -79,6 +79,19 @@ not the name). Then:
 
 Up to 50 events per call. Items with no match: say so once — "❓ I don't track cake flour yet;
 it'll show up after it's on a receipt." React ✅ when everything applied.
+
+**"Get X at Costco" / "get X at Whole Foods"** (or Amazon): pins where the item comes from, and
+when that goes against PandaBase's price-based choice it nudges the household's Costco threshold
+too. Resolve the item as above, then (`"costco"`, or `"regular"` for Whole Foods / Amazon;
+`null` for "you choose again"):
+
+```sh
+pandabase-tools api post /api/items/<item id>/store-pin --json '{"store": "costco"}' --actor <sender id> --key discord:<message id>
+```
+
+Reply in one line from the response: "✅ <name>: <choice.reason>." When you pinned Costco but
+`choice.why` is `no_costco_product`, add "— it moves to the Costco list after it's been bought
+there once." No confident match → ask once which item, like "never buy" below.
 
 **"Never buy X again"**: find the product among the current plan's candidates —
 `pandabase-tools api get /api/predictions` → the `candidates[]` entry whose `title` matches — then

@@ -53,11 +53,14 @@ def line(name: str, prod: dict[str, Any] | None, qty: float = 1, **kw: Any) -> d
         "quantity": qty,
         "reason_text": f"{name}: running low",
         "switched": False,
+        "bridging_to_costco": kw.get("bridging_to_costco", False),
     }
 
 
 def cart(*lines: dict[str, Any]) -> c.CartResponse:
-    return c.CartResponse.model_validate({"cycle_id": "C1", "lines": list(lines)})
+    return c.CartResponse.model_validate(
+        {"cycle_id": "C1", "lines": list(lines), "costco_trip_date": None, "costco_waiting": []}
+    )
 
 
 def items_of(url: str) -> list[tuple[str, str]]:
@@ -246,6 +249,8 @@ def test_price_checks_quote_candidates_and_log_failures(no_sleep: Callable[[floa
             "generated_at": "2026-10-24T17:00:00Z",
             "needs_price_check_item_ids": ["I-eggs"],
             "skipped_item_ids": [],
+            "costco_trip_date": None,
+            "costco_waiting": [],
             "lines": [
                 {
                     "item_id": "I-eggs",
@@ -258,6 +263,7 @@ def test_price_checks_quote_candidates_and_log_failures(no_sleep: Callable[[floa
                     "product": None,
                     "needs_price_check": True,
                     "choice_reason": None,
+                    "store": None,
                     "candidates": [
                         product("P1", "B0SYNTH001"),
                         product("P5", "B0SYNTH005"),
@@ -292,6 +298,8 @@ def test_no_asin_candidates_dont_use_up_the_price_check_budget(
             "generated_at": "2026-10-24T17:00:00Z",
             "needs_price_check_item_ids": ["I-eggs"],
             "skipped_item_ids": [],
+            "costco_trip_date": None,
+            "costco_waiting": [],
             "lines": [
                 {
                     "item_id": "I-eggs",
@@ -304,6 +312,7 @@ def test_no_asin_candidates_dont_use_up_the_price_check_budget(
                     "product": None,
                     "needs_price_check": True,
                     "choice_reason": None,
+                    "store": None,
                     "candidates": cands,
                 }
             ],
