@@ -1,6 +1,7 @@
 // Grocery cycle orchestration (DESIGN §4.3, §4.4, §4.7): open, overrides, status, check-in,
 // predictions, price quotes, final cart, cart result.
 import {
+  costcoTrip,
   groceryCycle,
   groceryCycleOverride,
   item,
@@ -25,6 +26,8 @@ import type {
   PredictionsResponse,
   PriceQuotesRequest,
   ProductRef,
+  PlanStore,
+  CostcoWaitingLine,
 } from "../contracts";
 import type { CartResultT } from "../contracts/cycle";
 import {
@@ -41,6 +44,8 @@ import {
   type CartLine,
   type CartPlan,
   type CycleOverride,
+  type PlanItemInput,
+  type StoreNote,
 } from "../domain/predictions";
 import { ITEM_REVIEW_KINDS, reprioritize } from "../domain/review";
 import {
@@ -186,7 +191,20 @@ export async function setCycleStatus(
         await emitTelemetry(
           tx,
           "state_engine",
-          plan.lapsed.map((x) => ({ metric: "item_lapsed", cycleId, ...x })),
+          [
+            ...plan.lapsed.map((x) => ({ metric: "item_lapsed", cycleId, ...x })),
+            // §4.8, once per planned item per build: where it comes from and why.
+            ...plan.storeChoices.map((c) => ({
+              metric: "store_choice",
+              cycleId,
+              itemId: c.itemId,
+              store: c.store,
+              why: c.why,
+              savingsRatio: c.savingsRatio,
+              timing: c.timing,
+              bridgeCause: c.bridgeCause,
+            })),
+          ],
           ctx.now,
         );
       }
@@ -203,7 +221,30 @@ interface PlanState {
   estimates: Map<string, ItemEstimate>;
   products: Map<string, ProductRow[]>;
   quotes: Record<string, number>;
+  /** The planned Costco trip's local date, or null (§4.8). */
+  costcoTripDate: string | null;
 }
+
+/** The planned Costco trip (at most one, §2.6 partial unique index), or null. */
+export async function plannedTrip(q: Q) {
+  const [row] = await q.select().from(costcoTrip).where(eq(costcoTrip.status, "planned"));
+  return row ?? null;
+}
+
+/** `planCart` / `costcoTripList` inputs from read-time estimates and products. */
+export const planItems = (
+  estimates: Map<string, ItemEstimate>,
+  products: Map<string, ProductRow[]>,
+): PlanItemInput[] =>
+  [...estimates.values()].map((e) => ({
+    itemId: e.item.id,
+    item: e.inv,
+    baseUnit: e.item.baseUnit,
+    switchThreshold: e.item.switchThreshold,
+    estimate: e.estimate,
+    products: (products.get(e.item.id) ?? []).map(toCandidate),
+    storePin: e.item.storePin ?? null,
+  }));
 
 async function overridesOf(q: Q, cycleId: string) {
   return q
@@ -237,25 +278,23 @@ export async function planFor(q: Q, cycle: CycleRow | null, ctx: ReadCtx): Promi
       }))
     : [];
   const quotes = cycle ? await quotesOf(q, cycle.id) : {};
+  const costcoTripDate = (await plannedTrip(q))?.plannedFor ?? null;
   const plan = planCart({
-    items: [...estimates.values()].map((e) => ({
-      itemId: e.item.id,
-      item: e.inv,
-      baseUnit: e.item.baseUnit,
-      switchThreshold: e.item.switchThreshold,
-      estimate: e.estimate,
-      products: (products.get(e.item.id) ?? []).map(toCandidate),
-    })),
+    items: planItems(estimates, products),
     overrides,
     vendors: ctx.config.cartVendors,
     quotes,
+    costcoTripDate,
     now: ctx.now,
     config: ctx.config,
   });
-  return { plan, estimates, products, quotes };
+  return { plan, estimates, products, quotes, costcoTripDate };
 }
 
-const productRef = (p: ProductRow, quotes: Record<string, number>): z.input<typeof ProductRef> => ({
+export const productRef = (
+  p: ProductRow,
+  quotes: Record<string, number>,
+): z.input<typeof ProductRef> => ({
   id: p.id,
   vendor: p.vendor,
   asin: p.asin,
@@ -302,6 +341,7 @@ export async function predictions(
       ),
       needs_price_check: l.choice?.needsPriceCheck ?? false,
       choice_reason: l.choice?.reason ?? null,
+      store: l.store ? planStore(l.store) : null,
     };
   });
   return {
@@ -310,7 +350,47 @@ export async function predictions(
     lines,
     skipped_item_ids: s.plan.skippedItemIds,
     needs_price_check_item_ids: s.plan.needsPriceCheckItemIds,
+    costco_trip_date: s.costcoTripDate,
+    costco_waiting: costcoWaiting(s),
   };
+}
+
+const planStore = (n: StoreNote): z.input<typeof PlanStore> => ({
+  store: n.store,
+  why: n.why,
+  reason: n.reason,
+  savings_ratio: n.savingsRatio,
+  costco: n.timing ? { timing: n.timing, bridge_cause: n.bridgeCause } : null,
+});
+
+const costcoWaiting = (s: PlanState): z.input<typeof CostcoWaitingLine>[] =>
+  s.plan.costcoWaiting.map((w) => ({
+    item_id: w.itemId,
+    name: s.estimates.get(w.itemId)?.item.canonicalName ?? w.itemId,
+    runout_at: w.runoutAt,
+    reason: w.store.reason,
+  }));
+
+const shortDate = (d: string) =>
+  new Date(`${d}T12:00:00Z`).toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    timeZone: "UTC",
+  });
+
+/** §4.8 reason text for a Costco item the weekly cart buys anyway. */
+export function bridgeText(n: StoreNote, tripDate: string | null): string | null {
+  if (n.timing !== "bridge") return null;
+  switch (n.bridgeCause) {
+    case "no_trip":
+      return "Bridging to Costco: no trip planned";
+    case "needed_now":
+      return "Bridging to Costco: needed now";
+    case "trip_after_runout":
+      return `Bridging to Costco: runs out before the ${tripDate ? shortDate(tripDate) : ""} trip`;
+    default:
+      return "Bridging to Costco";
+  }
 }
 
 /** Final cart (§4.4): chosen product and a reason per line, after quotes. */
@@ -323,23 +403,28 @@ export async function cart(
   const s = await planFor(q, cycle, ctx);
   return {
     cycle_id: cycle.id,
+    costco_trip_date: s.costcoTripDate,
+    costco_waiting: costcoWaiting(s),
     lines: s.plan.lines.map((l) => {
       const row = rowOf(s, l);
       const picked = l.overrides.includes("product");
+      const bridge = l.store ? bridgeText(l.store, s.costcoTripDate) : null;
+      const why = l.freeText
+        ? "One-off add"
+        : picked && row
+          ? `Your pick: ${row.title}`
+          : row
+            ? (l.choice?.reason ?? row.title)
+            : "No product from the cart's vendors — add by hand";
       return {
         item_id: l.itemId,
         name: lineName(l, s),
         free_text: l.freeText,
         product: row ? productRef(row, s.quotes) : null,
         quantity: l.quantity,
-        reason_text: l.freeText
-          ? "One-off add"
-          : picked && row
-            ? `Your pick: ${row.title}`
-            : row
-              ? (l.choice?.reason ?? row.title)
-              : "No product from the cart's vendors — add by hand",
+        reason_text: bridge ? `${bridge} · ${why}` : why,
         switched: !picked && (l.choice?.switched ?? false),
+        bridging_to_costco: bridge !== null,
       };
     }),
   };
@@ -366,6 +451,8 @@ function pleaseCheck(s: PlanState, ctx: ReadCtx) {
   const planned = new Set([
     ...s.plan.lines.map((l) => l.itemId).filter((x): x is string => x !== null),
     ...s.plan.skippedItemIds,
+    // Waiting for the Costco trip (§4.8): planned, just not in this cart.
+    ...s.plan.costcoWaiting.map((w) => w.itemId),
   ]);
   const candidates = [...s.estimates.values()].flatMap((e) => {
     const reason = pleaseCheckReason({
@@ -639,6 +726,10 @@ export async function recordCartResult(
       lines: input.lines,
       please_check_item_ids: pleaseCheck(s, ctx).map((c) => c.e.item.id),
       recorded_at: ctx.now,
+      costco_bridged_item_ids: s.plan.lines
+        .filter((l) => l.store?.timing === "bridge" && l.itemId)
+        .map((l) => l.itemId!),
+      costco_waiting_item_ids: s.plan.costcoWaiting.map((w) => w.itemId),
     };
     await tx
       .update(groceryCycle)

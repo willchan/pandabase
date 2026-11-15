@@ -29,6 +29,17 @@ export interface ItemSpec {
   auditHint?: string;
   reorderThreshold?: number;
   products: ProductSpec[];
+  /**
+   * A Costco product as if bought once on a past Costco run (DESIGN §4.8: Costco products come
+   * from Costco receipts). Kept out of the weekly simulation, so it changes nothing else.
+   */
+  costco?: CostcoSpec;
+}
+
+export interface CostcoSpec {
+  title: string;
+  unit: number;
+  priceCents: number;
 }
 
 const wf = (title: string, unit: number, priceCents: number, from?: number): ProductSpec => ({
@@ -88,6 +99,8 @@ export const ITEMS: ItemSpec[] = [
       wf("365 Large Brown Eggs 12ct", 12, 499),
       wf("Pasture Hen Large Eggs 12ct", 12, 649, 11),
     ],
+    // ~20% cheaper per egg; 24 eggs last ~13 days, well inside the shelf life → Costco.
+    costco: { title: "Kirkland Signature Organic Large Eggs 24ct", unit: 24, priceCents: 799 },
   },
   {
     name: "Whole Milk",
@@ -166,6 +179,8 @@ export const ITEMS: ItemSpec[] = [
     shelfLifeDays: 7,
     auditHint: "Clamshell in the crisper drawer",
     products: [wf("365 Organic Baby Spinach 5oz", 5, 349)],
+    // Much cheaper, but 40oz lasts ~32 days and keeps 7 → stays at Whole Foods (spoils first).
+    costco: { title: "Kirkland Signature Organic Baby Spinach 2.5lb", unit: 40, priceCents: 699 },
   },
   {
     name: "Avocados",
@@ -348,6 +363,7 @@ export const ITEMS: ItemSpec[] = [
     baseUnit: "lb",
     days: 14,
     products: [wf("Golden Fields Jasmine Rice 2lb", 2, 649)],
+    costco: { title: "Kirkland Signature Jasmine Rice 25lb", unit: 25, priceCents: 2199 },
   },
   {
     name: "Rolled Oats",
@@ -396,6 +412,8 @@ export const ITEMS: ItemSpec[] = [
     days: 40,
     reorderThreshold: 1,
     products: [wf("365 Extra Virgin Olive Oil 1L", 1, 1199)],
+    // Only ~12% cheaper per bottle → not cheaper enough.
+    costco: { title: "Kirkland Signature Organic Olive Oil 2 × 1L", unit: 2, priceCents: 2099 },
   },
   {
     name: "Sea Salt",
@@ -425,6 +443,7 @@ export const ITEMS: ItemSpec[] = [
     baseUnit: "oz",
     days: 0.31,
     products: [wf("365 Organic Wild Blueberries 32oz", 32, 999)],
+    costco: { title: "Kirkland Signature Organic Blueberries 3lb", unit: 48, priceCents: 1099 },
   },
   {
     name: "Ice Cream",
@@ -446,6 +465,7 @@ export const ITEMS: ItemSpec[] = [
     defaultEma: true,
     auditHint: "Count rolls in the cabinet under the sink",
     products: [amz("SoftCloud Toilet Paper 24 Mega Rolls", "B0SEED0004", 24, 2899)],
+    costco: { title: "Kirkland Signature Bath Tissue 30 Rolls", unit: 30, priceCents: 2499 },
   },
   {
     name: "Paper Towels",

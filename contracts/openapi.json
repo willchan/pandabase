@@ -74,6 +74,9 @@
       },
       "CartLine": {
         "properties": {
+          "bridging_to_costco": {
+            "type": "boolean"
+          },
           "free_text": {
             "type": [
               "string",
@@ -118,12 +121,26 @@
           "product",
           "quantity",
           "reason_text",
-          "switched"
+          "switched",
+          "bridging_to_costco"
         ],
         "type": "object"
       },
       "CartResponse": {
         "properties": {
+          "costco_trip_date": {
+            "format": "date",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "costco_waiting": {
+            "items": {
+              "$ref": "#/components/schemas/CostcoWaitingLine"
+            },
+            "type": "array"
+          },
           "cycle_id": {
             "maxLength": 64,
             "minLength": 1,
@@ -138,12 +155,26 @@
         },
         "required": [
           "cycle_id",
-          "lines"
+          "lines",
+          "costco_trip_date",
+          "costco_waiting"
         ],
         "type": "object"
       },
       "CartResult": {
         "properties": {
+          "costco_bridged_item_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "costco_waiting_item_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
           "lines": {
             "items": {
               "$ref": "#/components/schemas/CartResultLine"
@@ -456,6 +487,325 @@
           "input",
           "expected_state_snapshot",
           "keyframe_uploads"
+        ],
+        "type": "object"
+      },
+      "CostcoListLine": {
+        "properties": {
+          "base_unit": {
+            "type": "string"
+          },
+          "item_id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "on_hand": {
+            "type": "number"
+          },
+          "product": {
+            "$ref": "#/components/schemas/ProductRef"
+          },
+          "quantity": {
+            "type": "number"
+          },
+          "reason": {
+            "enum": [
+              "runout",
+              "critical",
+              "consumed",
+              "static_threshold"
+            ],
+            "type": "string"
+          },
+          "runout_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "savings_ratio": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "store_reason": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "item_id",
+          "name",
+          "base_unit",
+          "product",
+          "quantity",
+          "reason",
+          "on_hand",
+          "runout_at",
+          "store_reason",
+          "savings_ratio"
+        ],
+        "type": "object"
+      },
+      "CostcoTiming": {
+        "properties": {
+          "bridge_cause": {
+            "enum": [
+              "no_trip",
+              "needed_now",
+              "trip_after_runout"
+            ],
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "timing": {
+            "enum": [
+              "wait",
+              "bridge"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "timing",
+          "bridge_cause"
+        ],
+        "type": "object"
+      },
+      "CostcoTrip": {
+        "properties": {
+          "close_reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "closed_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "discord_thread_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          },
+          "list": {
+            "items": {
+              "$ref": "#/components/schemas/CostcoListLine"
+            },
+            "type": "array"
+          },
+          "planned_for": {
+            "format": "date",
+            "type": "string"
+          },
+          "receipt_id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "$ref": "#/components/schemas/CostcoTripStatus"
+          }
+        },
+        "required": [
+          "id",
+          "planned_for",
+          "status",
+          "discord_thread_id",
+          "list",
+          "receipt_id",
+          "closed_at",
+          "close_reason",
+          "created_at"
+        ],
+        "type": "object"
+      },
+      "CostcoTripPlanRequest": {
+        "properties": {
+          "actor_discord_id": {
+            "maxLength": 32,
+            "minLength": 1,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "discord_thread_id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "planned_for": {
+            "format": "date",
+            "type": "string"
+          }
+        },
+        "required": [
+          "planned_for"
+        ],
+        "type": "object"
+      },
+      "CostcoTripPlanResponse": {
+        "properties": {
+          "created": {
+            "type": "boolean"
+          },
+          "lines": {
+            "items": {
+              "$ref": "#/components/schemas/CostcoListLine"
+            },
+            "type": "array"
+          },
+          "moved_from": {
+            "format": "date",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "trip": {
+            "$ref": "#/components/schemas/CostcoTrip"
+          }
+        },
+        "required": [
+          "trip",
+          "lines",
+          "created",
+          "moved_from"
+        ],
+        "type": "object"
+      },
+      "CostcoTripResponse": {
+        "properties": {
+          "lines": {
+            "items": {
+              "$ref": "#/components/schemas/CostcoListLine"
+            },
+            "type": "array"
+          },
+          "trip": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CostcoTrip"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "trip",
+          "lines"
+        ],
+        "type": "object"
+      },
+      "CostcoTripStatus": {
+        "enum": [
+          "planned",
+          "done",
+          "cancelled"
+        ],
+        "type": "string"
+      },
+      "CostcoTripStatusRequest": {
+        "properties": {
+          "actor_discord_id": {
+            "maxLength": 32,
+            "minLength": 1,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "reason": {
+            "maxLength": 200,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "enum": [
+              "done",
+              "cancelled"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "type": "object"
+      },
+      "CostcoTripStatusResponse": {
+        "properties": {
+          "changed": {
+            "type": "boolean"
+          },
+          "trip": {
+            "$ref": "#/components/schemas/CostcoTrip"
+          }
+        },
+        "required": [
+          "trip",
+          "changed"
+        ],
+        "type": "object"
+      },
+      "CostcoWaitingLine": {
+        "properties": {
+          "item_id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "runout_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "item_id",
+          "name",
+          "runout_at",
+          "reason"
         ],
         "type": "object"
       },
@@ -1516,6 +1866,11 @@
       },
       "MaintenanceResponse": {
         "properties": {
+          "expired_costco_trips": {
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
           "expired_reviews": {
             "maximum": 9007199254740991,
             "minimum": -9007199254740991,
@@ -1572,7 +1927,8 @@
           "purged_telemetry",
           "opened_cycle_id",
           "merge_suggest_jobs",
-          "reprioritized_reviews"
+          "reprioritized_reviews",
+          "expired_costco_trips"
         ],
         "type": "object"
       },
@@ -1896,6 +2252,16 @@
                 "type": "null"
               }
             ]
+          },
+          "store": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PlanStore"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -1909,7 +2275,45 @@
           "product",
           "candidates",
           "needs_price_check",
-          "choice_reason"
+          "choice_reason",
+          "store"
+        ],
+        "type": "object"
+      },
+      "PlanStore": {
+        "properties": {
+          "costco": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CostcoTiming"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reason": {
+            "type": "string"
+          },
+          "savings_ratio": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "store": {
+            "$ref": "#/components/schemas/Store"
+          },
+          "why": {
+            "$ref": "#/components/schemas/StoreWhy"
+          }
+        },
+        "required": [
+          "store",
+          "why",
+          "reason",
+          "savings_ratio",
+          "costco"
         ],
         "type": "object"
       },
@@ -1925,6 +2329,19 @@
       },
       "PredictionsResponse": {
         "properties": {
+          "costco_trip_date": {
+            "format": "date",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "costco_waiting": {
+            "items": {
+              "$ref": "#/components/schemas/CostcoWaitingLine"
+            },
+            "type": "array"
+          },
           "cycle_id": {
             "maxLength": 64,
             "minLength": 1,
@@ -1961,7 +2378,9 @@
           "generated_at",
           "lines",
           "skipped_item_ids",
-          "needs_price_check_item_ids"
+          "needs_price_check_item_ids",
+          "costco_trip_date",
+          "costco_waiting"
         ],
         "type": "object"
       },
@@ -2456,6 +2875,115 @@
         ],
         "type": "string"
       },
+      "Store": {
+        "enum": [
+          "costco",
+          "regular"
+        ],
+        "type": "string"
+      },
+      "StoreChoice": {
+        "properties": {
+          "reason": {
+            "type": "string"
+          },
+          "savings_ratio": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "store": {
+            "$ref": "#/components/schemas/Store"
+          },
+          "why": {
+            "$ref": "#/components/schemas/StoreWhy"
+          }
+        },
+        "required": [
+          "store",
+          "why",
+          "reason",
+          "savings_ratio"
+        ],
+        "type": "object"
+      },
+      "StorePinRequest": {
+        "properties": {
+          "actor_discord_id": {
+            "maxLength": 32,
+            "minLength": 1,
+            "type": "string"
+          },
+          "store": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Store"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "actor_discord_id",
+          "store"
+        ],
+        "type": "object"
+      },
+      "StorePinResponse": {
+        "properties": {
+          "choice": {
+            "$ref": "#/components/schemas/StoreChoice"
+          },
+          "item_id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "store_pin": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Store"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "switch_threshold": {
+            "type": "number"
+          },
+          "threshold_changed": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "item_id",
+          "name",
+          "store_pin",
+          "choice",
+          "switch_threshold",
+          "threshold_changed"
+        ],
+        "type": "object"
+      },
+      "StoreWhy": {
+        "enum": [
+          "pinned",
+          "no_costco_product",
+          "costco_only",
+          "no_price",
+          "not_cheaper_enough",
+          "spoils_first",
+          "cheaper"
+        ],
+        "type": "string"
+      },
       "TelemetryEvent": {
         "properties": {
           "metric_type": {
@@ -2885,6 +3413,284 @@
           }
         ],
         "summary": "Queue merge_suggest jobs for unverified items (end of a receipt backfill)",
+        "x-scopes": [
+          "agent"
+        ]
+      }
+    },
+    "/api/costco/trip": {
+      "get": {
+        "operationId": "getCostcoTrip",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CostcoTripResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Wrong scope, or unknown actor_discord_id"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict (e.g. invalid cycle transition, stale job attempt)"
+          }
+        },
+        "security": [
+          {
+            "agent": []
+          }
+        ],
+        "summary": "The planned Costco trip (or null) and its live list",
+        "x-scopes": [
+          "agent"
+        ]
+      },
+      "post": {
+        "operationId": "planCostcoTrip",
+        "parameters": [
+          {
+            "description": "Replays the stored response for 24h (same key + route + scope).",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "maxLength": 200,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CostcoTripPlanRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CostcoTripPlanResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Wrong scope, or unknown actor_discord_id"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict (e.g. invalid cycle transition, stale job attempt)"
+          }
+        },
+        "security": [
+          {
+            "agent": []
+          }
+        ],
+        "summary": "\"Going to Costco Saturday\": plan the trip, or move the planned one to the new date; returns its list",
+        "x-scopes": [
+          "agent"
+        ]
+      }
+    },
+    "/api/costco/trip/{id}/status": {
+      "post": {
+        "operationId": "setCostcoTripStatus",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Replays the stored response for 24h (same key + route + scope).",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "maxLength": 200,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CostcoTripStatusRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CostcoTripStatusResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Wrong scope, or unknown actor_discord_id"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict (e.g. invalid cycle transition, stale job attempt)"
+          }
+        },
+        "security": [
+          {
+            "agent": []
+          }
+        ],
+        "summary": "\"Back from Costco\" (done) or \"not going\" (cancelled)",
         "x-scopes": [
           "agent"
         ]
@@ -4150,6 +4956,112 @@
           }
         ],
         "summary": "\"Do we have X?\" — matches + estimate + confidence text",
+        "x-scopes": [
+          "agent"
+        ]
+      }
+    },
+    "/api/items/{id}/store-pin": {
+      "post": {
+        "operationId": "setItemStorePin",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Replays the stored response for 24h (same key + route + scope).",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "maxLength": 200,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StorePinRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StorePinResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Wrong scope, or unknown actor_discord_id"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict (e.g. invalid cycle transition, stale job attempt)"
+          }
+        },
+        "security": [
+          {
+            "agent": []
+          }
+        ],
+        "summary": "\"Get X at Costco / Whole Foods\": pin the item's store (null clears it)",
         "x-scopes": [
           "agent"
         ]

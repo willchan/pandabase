@@ -15,6 +15,13 @@
       "when": 1792477829295,
       "tag": "0001_critical_override_event",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1794778529612,
+      "tag": "0002_costco_trips",
+      "breakpoints": true
     }
   ]
 }

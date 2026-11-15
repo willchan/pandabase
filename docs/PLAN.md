@@ -43,7 +43,7 @@ contracts.
 | M7 Agent skill pack & tools | done | #9 |
 | M8 Ops, compose, README | done | #11 |
 | M9 Continuous deployment | done | #14 |
-| M10 Costco | in progress (M10.1 in review) | |
+| M10 Costco | in progress (M10.1 done, M10.2 in review) | #66, #67 |
 
 ---
 
@@ -1277,3 +1277,37 @@ This Week with a planned trip; the prod copy for the store split of the real cat
 - *M10.1:* the store functions are pure and uncalled, so they emit no telemetry yet; M10.2 adds
   `store_choice` when the cart plan calls them (CLAUDE.md *Diagnostics*). `costco.vendor` is a
   config string so the receipt importer and the products it creates agree on `costco`.
+- *M10.2:* as planned, plus:
+  - **Trip default outcome:** the daily cron cancels a planned trip
+    `costco.tripExpireAfterDays` (7) past its date with no receipt (`close_reason` `expired`), so
+    the weekly cart stops waiting; "back from Costco" closes it `done` with no receipt until M10.3
+    (TODO in `services/costco.ts` and `cycle_replies.costco_closed`). Dates are today to
+    `costco.tripMaxAheadDays` (60) ahead. DESIGN §10 #75.
+  - **Routes:** planning while a trip is planned *moves* it (one route, `moved_from` in the
+    response), so there is no separate move route. `GET/POST /api/costco/trip`,
+    `POST /api/costco/trip/{id}/status`, `POST /api/items/{id}/store-pin`. Agent commands:
+    `pandabase-tools costco plan --when <day> | done | cancel` print the Discord reply.
+  - **`item.store_pin` has no CHECK** (a CHECK would make drizzle-kit rebuild `item`); Zod is the
+    only writer. `costco_trip` has its enum / closed_at / one-planned constraints.
+  - **A human override on a waiting Costco item** (add / qty / product) puts it back in the week's
+    cart as a bridge. Tier A found this: step 3's "3 eggs" kept eggs in the cart, so step 10b uses
+    frozen blueberries for the `wait` case.
+  - **Extra telemetry:** `costco_trip_planned` and `store_override` besides `store_choice` /
+    `costco_trip`; the weekly report gets §6 *Store choice (Costco)* (later sections renumber to
+    7–10) and a `store_choice` extract.
+  - **Seed:** six synthetic Costco products (eggs, spinach, rice, olive oil, blueberries, toilet
+    paper) covering `cheaper`, `spoils_first` and `not_cheaper_enough`, appended last so the rest
+    of the seed keeps its ids.
+  - **Gap, not fixed (needs a decision):** a text purchase "got 2 milk at Costco"
+    (`vendor: "costco"` through discord-intake) records the purchase but **creates no Costco
+    product and no price** (`applyReceipt` only creates products for ASIN lines), so the item stays
+    `no_costco_product`. Pinned by a test in `app/api/costco/costco.test.ts`. M10.3's importer is
+    the planned source; making manual Costco buys create a product would need a price we don't
+    have.
+  - **For the owner:** an item that is *out* or *critical* both bridges in the weekly cart and is on
+    the trip list (`needed now`), per M10.1's `costcoTiming` / `costcoListLine`, so a trip within
+    days can buy it twice. Leaving it to a decision (e.g. drop critical items from a list whose trip
+    is within `lowWithinDays`).
+  - **Prod copy (counts only, 2026-11-15):** 471 items, 0 Costco products (amazon 120, wholefoods
+    351), so all 471 are `regular` / `no_costco_product`; 48 plan lines, 0 waiting, an empty trip
+    list. Nothing changes for the household until M10.3 imports Costco receipts.

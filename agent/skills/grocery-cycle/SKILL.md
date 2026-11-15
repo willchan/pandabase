@@ -1,6 +1,6 @@
 ---
 name: grocery-cycle
-description: "PandaBase weekly grocery cycle in the #pandabase Discord channel — open a cycle thread, record list edits/skips/away/other-store from thread replies, post the Friday nudge, and build (never check out) the Saturday cart."
+description: "PandaBase weekly grocery cycle in the #pandabase Discord channel — open a cycle thread, record list edits/skips/away/other-store from thread replies, post the Friday nudge, build (never check out) the Saturday cart, and plan Costco trips (\"going to Costco Saturday\", \"back from Costco\")."
 metadata:
   {
     "openclaw":
@@ -88,7 +88,7 @@ Use `matches[0].item_id` when its `match` is `confident`; otherwise treat the wo
 | "3 milk", "only 1 X" | same route, `{"kind": "qty", "item_id": "<id>", "quantity": 3}` |
 | "get the <brand> one" | find the candidate in `pandabase-tools api get /api/predictions -q cycle_id=<C>` → `{"kind": "product", "item_id": "<id>", "product_id": "<candidate id>"}` |
 | "skip this week" | `pandabase-tools api post /api/grocery/cycle/<C>/status --json '{"status": "skipped", "reason": "skip this week"}' --actor <sender id> --key discord:<message id>` → then §1 |
-| "shopping at Trader Joe's" | same route, `{"status": "other_store", "reason": "Trader Joe's"}` → reply "✅ Have fun at Trader Joe's — send the receipt photo here after." → then §1 |
+| "shopping at Trader Joe's" | same route, `{"status": "other_store", "reason": "Trader Joe's"}` → reply "✅ Have fun at Trader Joe's — send the receipt photo here after." → then §1 — **not for Costco**: a Costco run is a trip (§5), and the weekly cart still happens |
 | "away until Nov 3" | `pandabase-tools api post /api/away-periods --json '{"starts_on": "<today>", "ends_on": "2026-11-03", "note": "away"}' --actor <sender id> --key discord:<message id>` (dates in household TZ) → "✅ Away until Nov 3 — no cart while you're gone." |
 | "done", "picked it up" | `{"status": "closed", "reason": "done"}` (only valid when the cycle is `ready`) → then §1 |
 | A count answering the nudge ("6 eggs") | `pandabase-tools api post /api/inventory/events --json '{"events": [{"item_id": "<id>", "kind": "observed", "quantity": 6, "source": "checkin"}]}' --actor <sender id> --key discord:<message id>` |
@@ -181,3 +181,23 @@ and posts to the ops channel only when one doesn't. You don't run it.
 
 The cycle closes by itself when the order's digital receipt is ingested (the receipt skill posts
 it), or when someone says "done".
+
+## 5. Costco trips (in `#pandabase` or the cycle thread)
+
+Costco is a separate in-store run about once a month (PRD §4.8). PandaBase keeps its list; there
+is **no Costco cart** and nothing to browse. Each step is one command that does the work and
+prints the reply: post its text as your reply to their message (message tool `reply`), word for
+word. Don't add to it, shorten it, or make up a list yourself.
+
+| They say | Run, then post what it prints |
+|---|---|
+| "going to Costco Saturday", "Costco run on the 21st", "Costco tomorrow" | `pandabase-tools costco plan --when <day> --thread-id <message id> --actor <sender id> --key discord:<message id>` — `<day>` is `YYYY-MM-DD`, `today`, `tomorrow` or a weekday (`saturday`: the next one, today included). Saying it again with another day moves the trip |
+| "back from Costco", "just got back from Costco" | `pandabase-tools costco done --actor <sender id> --key discord:<message id>` |
+| "not going to Costco after all" | `pandabase-tools costco cancel --actor <sender id> --key discord:<message id>` |
+
+"What's on the Costco list?" → `pandabase-tools api get /api/costco/trip` and list the `lines`
+(name, quantity × product title); no trip → say so and how to plan one. Purchases they tell you
+about ("got 2 eggs at Costco") are text purchases: `discord-intake`. A trip nobody closes is closed
+by PandaBase a week after its date, so never nag about it.
+
+"Get X at Costco" / "get X at Whole Foods" pins where an item comes from: `discord-intake`.

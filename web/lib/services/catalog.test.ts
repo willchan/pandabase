@@ -28,7 +28,8 @@ describe("itemDetail", () => {
     const eggs = await h.itemId("Eggs");
     const d = await itemDetail(h.db, eggs, ctx, { eventLimit: 5 });
     expect(d.estimate.item.canonicalName).toBe("Eggs");
-    expect(d.products).toHaveLength(2);
+    // Two Whole Foods products and the seed's Kirkland 24ct (§4.8).
+    expect(d.products.map((p) => p.vendor).sort()).toEqual(["costco", "wholefoods", "wholefoods"]);
     expect(d.events).toHaveLength(5);
     expect(d.events.map((e) => e.occurredAt)).toEqual(
       [...d.events.map((e) => e.occurredAt)].sort().reverse(),

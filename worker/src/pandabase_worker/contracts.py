@@ -45,6 +45,30 @@ class KeyframeUpload(BaseModel):
     url: AnyUrl
 
 
+class CostcoTiming(BaseModel):
+    bridge_cause: Literal["no_trip", "needed_now", "trip_after_runout"] | None
+    timing: Literal["wait", "bridge"]
+
+
+class CostcoTripPlanRequest(BaseModel):
+    actor_discord_id: Annotated[str | None, Field(max_length=32, min_length=1)] = None
+    discord_thread_id: Annotated[str | None, Field(max_length=64, min_length=1)] = None
+    planned_for: date_aliased
+
+
+class CostcoTripStatusRequest(BaseModel):
+    actor_discord_id: Annotated[str | None, Field(max_length=32, min_length=1)] = None
+    reason: Annotated[str | None, Field(max_length=200)] = None
+    status: Literal["done", "cancelled"]
+
+
+class CostcoWaitingLine(BaseModel):
+    item_id: Annotated[str, Field(max_length=64, min_length=1)]
+    name: str
+    reason: str
+    runout_at: AwareDatetime | None
+
+
 class CycleOpenRequest(BaseModel):
     discord_thread_id: Annotated[str, Field(min_length=1)]
 
@@ -139,6 +163,7 @@ class LookupResponse(BaseModel):
 
 
 class MaintenanceResponse(BaseModel):
+    expired_costco_trips: Annotated[int, Field(ge=-9007199254740991, le=9007199254740991)]
     expired_reviews: Annotated[int, Field(ge=-9007199254740991, le=9007199254740991)]
     failed_jobs: Annotated[int, Field(ge=-9007199254740991, le=9007199254740991)]
     merge_suggest_jobs: Annotated[int, Field(ge=-9007199254740991, le=9007199254740991)]
@@ -264,6 +289,11 @@ class ReceiptLineOut(BaseModel):
     trust: Literal["confirmed", "unverified"]
 
 
+class StorePinRequest(BaseModel):
+    actor_discord_id: Annotated[str, Field(max_length=32, min_length=1)]
+    store: Literal["costco", "regular"] | None
+
+
 class TelemetryEvent(BaseModel):
     metric_type: Annotated[str, Field(pattern="^[a-z][a-z0-9_]{0,63}$")]
     occurred_at: AwareDatetime | None = None
@@ -315,6 +345,7 @@ class WorkerHealthResponse(BaseModel):
 
 
 class CartLine(BaseModel):
+    bridging_to_costco: bool
     free_text: str | None
     item_id: Annotated[str | None, Field(max_length=64, min_length=1)]
     name: str
@@ -325,11 +356,15 @@ class CartLine(BaseModel):
 
 
 class CartResponse(BaseModel):
+    costco_trip_date: date_aliased | None
+    costco_waiting: list[CostcoWaitingLine]
     cycle_id: Annotated[str, Field(max_length=64, min_length=1)]
     lines: list[CartLine]
 
 
 class CartResult(BaseModel):
+    costco_bridged_item_ids: list[str] | None = None
+    costco_waiting_item_ids: list[str] | None = None
     lines: list[CartResultLine]
     order_ids: list[str]
     please_check_item_ids: list[str]
@@ -373,6 +408,48 @@ class ClaimedJob(BaseModel):
     lease_expires_at: AwareDatetime
     media_r2_key: str | None
     media_url: AnyUrl | None
+
+
+class CostcoListLine(BaseModel):
+    base_unit: str
+    item_id: Annotated[str, Field(max_length=64, min_length=1)]
+    name: str
+    on_hand: float
+    product: ProductRef
+    quantity: float
+    reason: Literal["runout", "critical", "consumed", "static_threshold"]
+    runout_at: AwareDatetime | None
+    savings_ratio: float | None
+    store_reason: str
+
+
+class CostcoTrip(BaseModel):
+    close_reason: str | None
+    closed_at: AwareDatetime | None
+    created_at: AwareDatetime
+    discord_thread_id: str | None
+    id: Annotated[str, Field(max_length=64, min_length=1)]
+    list_: Annotated[list[CostcoListLine], Field(alias="list")]
+    planned_for: date_aliased
+    receipt_id: Annotated[str | None, Field(max_length=64, min_length=1)]
+    status: Literal["planned", "done", "cancelled"]
+
+
+class CostcoTripPlanResponse(BaseModel):
+    created: bool
+    lines: list[CostcoListLine]
+    moved_from: date_aliased | None
+    trip: CostcoTrip
+
+
+class CostcoTripResponse(BaseModel):
+    lines: list[CostcoListLine]
+    trip: CostcoTrip | None
+
+
+class CostcoTripStatusResponse(BaseModel):
+    changed: bool
+    trip: CostcoTrip
 
 
 class Cycle(BaseModel):
@@ -530,26 +607,20 @@ class MergeSuggestRunResponse(BaseModel):
     skipped: Literal["already_queued", "no_candidates"] | None
 
 
-class PlanLine(BaseModel):
-    base_unit: str | None
-    candidates: list[ProductRef]
-    choice_reason: str | None
-    free_text: str | None
-    item_id: Annotated[str | None, Field(max_length=64, min_length=1)]
-    name: str
-    needs_price_check: bool
-    overrides: list[Literal["add", "skip", "qty", "product"]]
-    product: ProductRef | None
-    quantity: float
-    reason: Literal["runout", "critical", "consumed", "static_threshold"] | None
-
-
-class PredictionsResponse(BaseModel):
-    cycle_id: Annotated[str | None, Field(max_length=64, min_length=1)]
-    generated_at: AwareDatetime
-    lines: list[PlanLine]
-    needs_price_check_item_ids: list[str]
-    skipped_item_ids: list[str]
+class PlanStore(BaseModel):
+    costco: CostcoTiming | None
+    reason: str
+    savings_ratio: float | None
+    store: Literal["costco", "regular"]
+    why: Literal[
+        "pinned",
+        "no_costco_product",
+        "costco_only",
+        "no_price",
+        "not_cheaper_enough",
+        "spoils_first",
+        "cheaper",
+    ]
 
 
 class ReceiptIngestRequest(BaseModel):
@@ -577,5 +648,54 @@ class ReceiptIngestResponse(BaseModel):
     totals_check: Literal["pass", "fail", "n/a"]
 
 
+class StoreChoice(BaseModel):
+    reason: str
+    savings_ratio: float | None
+    store: Literal["costco", "regular"]
+    why: Literal[
+        "pinned",
+        "no_costco_product",
+        "costco_only",
+        "no_price",
+        "not_cheaper_enough",
+        "spoils_first",
+        "cheaper",
+    ]
+
+
+class StorePinResponse(BaseModel):
+    choice: StoreChoice
+    item_id: Annotated[str, Field(max_length=64, min_length=1)]
+    name: str
+    store_pin: Literal["costco", "regular"] | None
+    switch_threshold: float
+    threshold_changed: bool
+
+
 class CartResultResponse(BaseModel):
     cycle: Cycle
+
+
+class PlanLine(BaseModel):
+    base_unit: str | None
+    candidates: list[ProductRef]
+    choice_reason: str | None
+    free_text: str | None
+    item_id: Annotated[str | None, Field(max_length=64, min_length=1)]
+    name: str
+    needs_price_check: bool
+    overrides: list[Literal["add", "skip", "qty", "product"]]
+    product: ProductRef | None
+    quantity: float
+    reason: Literal["runout", "critical", "consumed", "static_threshold"] | None
+    store: PlanStore | None
+
+
+class PredictionsResponse(BaseModel):
+    costco_trip_date: date_aliased | None
+    costco_waiting: list[CostcoWaitingLine]
+    cycle_id: Annotated[str | None, Field(max_length=64, min_length=1)]
+    generated_at: AwareDatetime
+    lines: list[PlanLine]
+    needs_price_check_item_ids: list[str]
+    skipped_item_ids: list[str]

@@ -42,7 +42,7 @@ describe("receiptRepository", () => {
     });
     await expect(repo.item("nope")).rejects.toThrow(/not found/);
     const products = await repo.products(eggs);
-    expect(products.map((p) => p.unitQuantity)).toEqual([12, 12]);
+    expect(products.map((p) => p.unitQuantity)).toEqual([12, 12, 24]); // + the seed's Costco 24ct
     const acq = await repo.acquisitions(eggs);
     expect(acq.length).toBeGreaterThan(5);
     expect(acq.map((a) => a.at)).toEqual([...acq.map((a) => a.at)].sort());

@@ -112,6 +112,14 @@ export const DEFAULT_CONFIG = {
     thresholdFloor: 0,
     /** Days between Costco trips: a trip's list covers until the next one (owner: monthly). */
     tripGapDays: 35,
+    /**
+     * A planned trip whose date is this many days past with no Costco receipt and nobody saying
+     * "back from Costco" is closed by the daily cron as `cancelled` (`close_reason` `expired`), so
+     * the weekly cart stops waiting for it. A week covers the receipt sweep's weekly fallback.
+     */
+    tripExpireAfterDays: 7,
+    /** Trip dates more than this far ahead are refused ("going to Costco" means soon). */
+    tripMaxAheadDays: 60,
   },
 
   /** §4.5 Receipt matching. */

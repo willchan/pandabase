@@ -110,6 +110,7 @@ UI can edit. Code defaults live in `web/lib/config.ts`; a row overrides.
 - `ema_outlier_streak` (int), `ema_outlier_direction` (`high`|`low`|null)
 - `reorder_threshold` (real, static items), `shelf_life_days` (int, nullable), `audit_hint` (text)
 - `switch_threshold` (real, default 0.15) — see §4.4
+- `store_pin` (`costco`|`regular`, nullable; no CHECK — §4.8) — "get X at Costco / Whole Foods"
 - `trust` (`confirmed`|`unverified`), `merged_into_item_id` (nullable)
 
 **product** — a concrete purchasable thing for an item.
@@ -192,6 +193,9 @@ for v1.1 and already allowed by the CHECK), `status` (`queued`|`claimed`|`comple
 please_check_item_ids, recorded_at}` — contract `CartResult`). `week_label` is unique (opening is
 idempotent per week). At most one *active* cycle (`open`|`building`|`ready`; `closed`, `skipped`
 and `other_store` are terminal per §4.7), enforced by a partial unique index.
+
+**costco_trip** — §4.8 (`planned_for`, `status`, `discord_thread_id`, `list`, `receipt_id`,
+`closed_at`, `close_reason`; at most one `planned`).
 
 **grocery_cycle_override** — `cycle_id`, `kind` (`add`|`skip`|`qty`|`product`), `item_id`
 (nullable), `free_text` (nullable, one-off adds), `quantity`, `product_id`, `actor_member_id`.
@@ -283,6 +287,10 @@ All routes under `/web/app/api`. Payloads defined once as **Zod schemas** in `we
 | `POST /api/grocery/price-quotes` | agent | Agent-observed prices for candidates |
 | `GET /api/grocery/cycle/{id}/cart` | agent | Final cart lines (product chosen, reason text) after quotes |
 | `POST /api/grocery/cycle/{id}/cart-result` | agent | Per-line injection outcome (tier1/tier2/failed), vendors, order ids; an open/building cycle becomes `ready` |
+| `GET /api/costco/trip` | agent | The planned Costco trip (or null) and its live list (§4.8) |
+| `POST /api/costco/trip` | agent | "Going to Costco Saturday": plan the trip, or move the planned one; body `planned_for`, optional `discord_thread_id`; returns the list, `created`, `moved_from` |
+| `POST /api/costco/trip/{id}/status` | agent | `done` ("back from Costco") or `cancelled`; a repeat is `changed: false`, changing a closed trip 409 |
+| `POST /api/items/{id}/store-pin` | agent | "Get X at Costco / Whole Foods": `store` `costco`/`regular`/null; returns the item's choice and the household `costco.switchThreshold` (§4.8 learning) |
 | `GET /api/items/lookup?q=` | agent | "Do we have X?" — matches + estimate + confidence text. Each match has `match` (`confident`: the top hit, score ≥ `lookup.confidentScore` 0.9 and ≥ `lookup.confidentLead` 0.1 ahead of the next — the skills act on its `item_id`; else `possible`) and `confidence` (the *estimate's*: high only after a recent count) |
 | `POST /api/inventory/events` | agent | Counts (`observed`), `critical` flags, `consumed` ("we're out"), `discarded`, `moved` ("froze the chicken"), text purchases (`acquired` → a manual receipt through `applyReceipt`). `discarded` / `moved` without a `quantity` take everything estimated at `location` |
 | `GET /api/freezer/aging?limit=` | agent | Oldest freezer stock |
@@ -300,13 +308,14 @@ All routes under `/web/app/api`. Payloads defined once as **Zod schemas** in `we
 | `POST /api/telemetry` | agent, worker | Telemetry events (batched) |
 | `GET /api/health/worker` | agent | Latest `worker_heartbeat`: `{heartbeat: {at, version, sha, vlm_model, text_model, ollama_ok} \| null}` (worker-sourced rows only). The Mac Mini deploy health check (§8) waits for one from the new image's `sha` |
 | `GET /api/diagnostics/weekly?week=` | agent | Rendered Markdown + JSONL extracts |
-| `GET /api/cron/maintenance` | cron | Expire review items, shelf-life discards, release stale leases, purge idempotency/telemetry, open an overdue cycle, weekly merge suggestions (§4.5) |
+| `GET /api/cron/maintenance` | cron | Expire review items, shelf-life discards, release stale leases, purge idempotency/telemetry, open an overdue cycle, expire an unclosed Costco trip (§4.8), weekly merge suggestions (§4.5) |
 
 UI mutations use server actions (`web/app/(app)/**/actions.ts`) that call the same services as
 the routes — never the HTTP routes themselves. Services added for the UI (reusable by future agent
 routes): `reviews.ts` (`answerReceiptReview`, `mergeItems`, `confirmItem`, `answerTrashCam`,
 `dismissReview`, `pendingReviews`, `receiptReviewDetail`), `catalog.ts` (`itemDetail`,
-`updateItemSettings`), `settings.ts` (`updateMember`, `setCartAccount`, `deleteAwayPeriod`,
+`updateItemSettings`), `costco.ts` (`planCostcoTrip`, `setCostcoTripStatus`, `setStorePin`,
+`itemStoreChoice` — This Week's trip section and the item page's pin), `settings.ts` (`updateMember`, `setCartAccount`, `deleteAwayPeriod`,
 `updateSettings`) and `inventory.ts#markItem` ("we're out" / "running low" / a count, via
 `recordInventoryEvents`). Each action resolves the signed-in member (`web/lib/auth/current.ts`,
 which re-checks `ALLOWED_EMAILS` on every request), turns `ApiError`s into an inline form message,
@@ -640,8 +649,9 @@ and Saturday build act on whichever cycle is current, so it would be nudged and 
 
 ### 4.8 Store choice & Costco trips (M10)
 
-`web/lib/domain/storeChoice.ts`, tunables `costco.*` in `config.ts`. **M10.1 ships the pure
-functions only;** the cart plan, the trip list route and telemetry call them from M10.2 (PLAN §M10).
+`web/lib/domain/storeChoice.ts` and `costcoTrip.ts`, tunables `costco.*` in `config.ts`, service
+`web/lib/services/costco.ts`. M10.1 shipped the pure functions; M10.2 calls them from the cart
+plan, the trip routes, the item page and telemetry; receipts are M10.3 and `freezesBulk` M10.4.
 
 **Store choice** (`chooseStore`), per item, `regular` = the weekly cart's vendors (`cartVendors`):
 
@@ -664,6 +674,14 @@ to the freezer); until then it is false.
 (`wait`) when a trip is planned on or before its runout date; otherwise it stays in the cart as
 usual (`bridge`, the regular product for `cartCoverDays`): no trip planned, the trip is after the
 runout, or the item is critical / out. An unknown runout waits for a planned trip.
+`planCart` runs `chooseStore` + `costcoTiming` for every restock-flagged item (`storeNote`):
+`wait` lines go to `costcoWaiting` (in `PredictionsResponse` / `CartResponse.costco_waiting`, never
+on *please check*); `bridge` lines keep the §4.4 product and sizing unchanged, and the cart's
+`reason_text` starts "Bridging to Costco: no trip planned / needed now / runs out before the
+<date> trip" (`bridging_to_costco: true`). An `add` / `qty` / `product` override on a waiting item
+puts it back in this week's cart (bridge, `needed_now`): a human asked for it. A skip of a waiting
+item does nothing. `cart_result` records `costco_bridged_item_ids` and `costco_waiting_item_ids`
+(optional fields, absent before M10.2), and the Saturday summary names both.
 
 **Trip list** (`costcoListLine`, trip on local date `T`): items whose store is `costco` and that are
 critical / consumed, static at or below `reorder_threshold`, or velocity with a runout
@@ -677,12 +695,33 @@ contradicts a price-based choice (`cheaper` / `not_cheaper_enough`), the househo
 `costco.switchThreshold` (a `setting` row) moves: away from Costco `+ thresholdStepUp` (0.05, cap
 0.6), toward it `− thresholdStepDown` (0.03, floor 0), on the 0.01 grid. Other choices only pin.
 
-**Planned schema (expand-only; M10.2–M10.3):** `item.store_pin` (nullable), `costco_trip`
-(`planned_for` local date, `status` `planned`|`done`|`cancelled`, `discord_thread_id`, `list`
-json snapshot, `receipt_id`, `closed_at`; at most one `planned`), `vendor_alias.kind` gains
-`item_number` (Costco's item number, matched like an ASIN), `product.vendor_sku` (nullable, unique
-per vendor). Telemetry: `store_choice` per planned item (`why`, savings) and `costco_trip`
-(list lines, bought, bridged, savings) → weekly report §2.
+**Trips** (`costco_trip`, migration `0002_costco_trips`): `planned_for` (household-local date),
+`status` `planned`|`done`|`cancelled`, `discord_thread_id` (the message the list was posted
+under), `list` (json: the `CostcoListLine[]` as last posted, refreshed when the trip moves),
+`receipt_id` (nullable, M10.3), `closed_at` (set iff not `planned`, CHECK), `close_reason`
+(`back_from_costco`, `cancelled`, `expired`, or the human's reason). At most one `planned` trip
+(partial unique index `costco_trip_one_planned`). Planning while one is planned moves it (and
+fills in its message). A date must be from today to `costco.tripMaxAheadDays` (60) ahead.
+`item.store_pin` (nullable `costco`|`regular`) has no CHECK: adding one to the existing `item`
+table makes drizzle-kit rebuild it (DROP + RENAME, which the expand-only check refuses); the
+route's Zod enum is the only writer. **Default outcome and expiry:** the daily cron closes a
+planned trip whose date is more than `costco.tripExpireAfterDays` (7, room for the receipt
+sweep's weekly fallback) past, with no receipt, as `cancelled` / `expired`: an unclosed trip in the
+past would keep Costco items out of the weekly cart, and nothing says the trip happened.
+"Back from Costco" closes it `done` without a receipt until M10.3's sweep links one.
+**Pins** (`POST /api/items/{id}/store-pin`): `learnStoreOverride` against the choice PandaBase
+would make *without* a pin; a threshold change is upserted as the `setting` row
+`costco.switchThreshold`; `null` clears the pin and teaches nothing. A Costco pin on an item with
+no Costco product is stored but doesn't apply until one exists (rule 1).
+**Still planned (M10.3):** `vendor_alias.kind` gains `item_number` (Costco's item number, matched
+like an ASIN), `product.vendor_sku` (nullable, unique per vendor).
+**Telemetry:** `store_choice {cycleId, itemId, store, why, savingsRatio, timing, bridgeCause}`
+once per restock-flagged item when the cycle moves to `building`; `costco_trip_planned {tripId,
+plannedFor, movedFrom, created, listLines}`; `costco_trip {tripId, plannedFor, outcome:
+done|cancelled|expired, listLines, bridged, receiptId}` on close (`bridged` = distinct
+`costco_bridged_item_ids` of carts built since the trip was planned; `bought` / savings come with
+M10.3); `store_override {itemId, from, to, kind, thresholdBefore, thresholdAfter, store, why}` →
+weekly report §6 *Store choice* and the `store_choice` extract.
 
 **Costco receipts (M10.3):** `pandabase-tools receipts sweep --vendor costco` on the `pandabase`
 profile (Playwright over CDP, like Amazon; the agent itself has no browser, §10 #52): Orders &
@@ -774,8 +813,8 @@ API with `PANDABASE_AGENT_API_TOKEN` (the engine's `AGENT_API_TOKEN`), read from
 
 | Skill | Trigger | Does |
 |---|---|---|
-| `grocery-cycle` | automations Fri 18:00, Sat 10:00, Mon 09:00; replies in the cycle thread | Open cycles (thread per cycle), record list edits/skips/away/other-store, Friday nudge (incl. freezer), Saturday build (`cart build` → a `layout_alert` goes once to the ops channel → tier-2 fallback with `cart search` / `cart add`, never the browser tool → `cart finish` → summary). The Fri 15:00 add-button check is a **command automation** (`pandabase-tools cart probe --reply` → ops channel, `NO_REPLY` when fine) |
-| `discord-intake` | photo or inventory text in `#pandabase` | Photos: `photo submit` (classify, upload, create job); text purchases, "we're out", "froze X", "never buy X" → inventory events / product reject. Job results are posted by a **command automation** (`pandabase-tools jobs replies` every 5 min, no model call; an API failure is `NO_REPLY` until it has lasted `jobs.outage_alert_minutes`, then one ⚠️ and a ✅ on recovery, §10 #68) |
+| `grocery-cycle` | automations Fri 18:00, Sat 10:00, Mon 09:00; replies in the cycle thread; Costco trip messages | Costco trips as one command each that prints the reply (`costco plan --when <day>`, `costco done` — M10.3's receipt sweep hooks in there —, `costco cancel`; a Costco run is never `other_store`). Open cycles (thread per cycle), record list edits/skips/away/other-store, Friday nudge (incl. freezer), Saturday build (`cart build` → a `layout_alert` goes once to the ops channel → tier-2 fallback with `cart search` / `cart add`, never the browser tool → `cart finish` → summary). The Fri 15:00 add-button check is a **command automation** (`pandabase-tools cart probe --reply` → ops channel, `NO_REPLY` when fine) |
+| `discord-intake` | photo or inventory text in `#pandabase` | Photos: `photo submit` (classify, upload, create job); text purchases, "we're out", "froze X", "never buy X" → inventory events / product reject; "get X at Costco / Whole Foods" → store pin. Job results are posted by a **command automation** (`pandabase-tools jobs replies` every 5 min, no model call; an API failure is `NO_REPLY` until it has lasted `jobs.outage_alert_minutes`, then one ⚠️ and a ✅ on recovery, §10 #68) |
 | `digital-receipt-scraper` | automations daily 21:00 (cart member), Sun 21:00 (other member); backfill on request | `receipts sweep` per member profile → `/api/receipts/ingest`; agent extracts zero-ASIN pages; a finished backfill ends with `POST /api/catalog/merge-suggestions/run` |
 | `item-lookup` | "do we have X?" in `#pandabase` or its threads | `/api/items/lookup` → `matches[0].text` |
 | `telemetry-aggregator` | automation Sun 23:00 | `diagnostics write` → `/diagnostics` → 3-line summary |
@@ -1021,17 +1060,20 @@ sha, outcome, previous_sha?, reason?, run_url?, host?}` — posted with the agen
    up to now — each also a `worker_gap` row in the `vlm` extract with the heartbeats and merge
    metrics)
 5. Product choice (switches, overrides, threshold drift)
-6. Cart injection (tier-1 success, tier-2 fallbacks, failures with selector/error, layout alerts
+6. Store choice (Costco, §4.8): planned items by store × why × wait/bridge, median Costco saving,
+   trips planned / closed by outcome (list lines, bridged), store pins and the Costco threshold;
+   findings for an expired trip and ≥ 3 pins in a week
+7. Cart injection (tier-1 success, tier-2 fallbacks, failures with selector/error, layout alerts
    and the weekly add-button check)
-7. UX friction (expired items, answered reviews by kind/outcome with median age, clarifying
+8. UX friction (expired items, answered reviews by kind/outcome with median age, clarifying
    questions, slow routes)
-8. Deploys (per component: deploys, succeeded, failed/rolled back; Mac Mini rollbacks; every
+9. Deploys (per component: deploys, succeeded, failed/rolled back; Mac Mini rollbacks; every
    `deploy` row with its sha and reason)
-9. Data appendix (extract paths, keyframe R2 keys)
+10. Data appendix (extract paths, keyframe R2 keys)
 
 `GET /api/diagnostics/weekly?week=` (default: the last complete household-TZ ISO week) returns
 `{week, markdown, extracts:[{name, jsonl}]}`; extracts are `velocity`, `receipt_lines`, `vlm`,
-`product_choice`, `cart_injection`, `ux`, `data_quality` (`.jsonl`), always present. The summary ranks findings
+`product_choice`, `store_choice`, `cart_injection`, `ux`, `data_quality` (`.jsonl`), always present. The summary ranks findings
 (cart failures, tier-1 rate below 90%, one-store weeks, ad-like items in the plan (else
 score 2) and planned items long past runout first, then paper exact-alias rate below 70%, totals-check
 failures, server errors, failed Mac Mini rollbacks and worker silence (no heartbeat, or a gap), then Ollama unreachable, failed or rolled-back deploys, overbuys, estimate error, pending lines, failed jobs, overrides,
@@ -1345,3 +1387,4 @@ docker-compose.yml (+ docker-compose.build.yml), Makefile, CLAUDE.md, README.md,
 | 72 | The `pandabase` agent's `AGENTS.md` and `IDENTITY.md` are owned by this repo (`agent/workspace/`) and replaced on install; `USER.md` is only seeded | `openclaw agents add` writes a personal assistant's generic files: check email and calendar, reach out after 8 quiet hours, send messages freely, and ~10k characters in every turn's prompt (2026-11-14). A household channel needs its own rules, and repo ownership keeps them reviewed and the same after a rebuild. `USER.md` is where the agent records preferences it learns, so the installer never overwrites real directives |
 | 73 | The State Engine opens the next cycle itself when a cycle ends and the next build is within 7 days; the agent only gives it a Discord thread, and the Monday 9am cron stays the fallback | Live 2026-11-11: W45's order was ingested on a Wednesday by the 9pm receipt sweep, whose local model never ran "open the next cycle"; the cron waits for the Monday after a close, so W46 got no Friday check-in and no Saturday cart. Same lesson as #60: steps that need no judgment don't belong to the model. The 7-day limit keeps a mid-week skip from opening next week's cycle, which the Friday/Saturday automations would act on a week early |
 | 74 | Costco is a second store chosen per item by unit price, spoilage and trip timing, with a list instead of a cart, prices only from receipts, and overrides that pin the item | The household shops Costco in store about monthly: a cart would be automation against Costco's bot checks for a store we mostly walk. Bulk is only cheaper if it's used up, so the shelf-life check decides, and trip timing decides whether the weekly cart bridges. Prices from receipts cost no page loads; an item is a candidate once bought there. A pin is the predictable reading of "get X at Whole Foods"; the household threshold still learns from overrides that go against price |
+| 75 | A Costco trip nobody closes is cancelled (`expired`) by the daily cron a week after its date; "back from Costco" closes it `done` even before receipts are read; store pins have no CHECK constraint | CLAUDE.md: nothing blocks on a human. An open trip in the past would keep Costco items out of the weekly cart forever, and without a receipt nothing says the trip happened, so the safe default is to stop waiting (the cart then bridges). A week leaves room for the receipt sweep's weekly fallback. A CHECK on the new `item` column would make drizzle-kit rebuild the table, which the expand-only rule refuses; the API's enum is its only writer |
