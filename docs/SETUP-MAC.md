@@ -43,7 +43,7 @@ needs them present.
   Check: `docker compose version`.
 - **Ollama.app** opened once in the agent account, with *launch at login* on.
 - **OpenClaw** installed for the agent account and **onboarded on a local Ollama model** (pull it
-  first: `ollama pull qwen3.5:27b`, or the most capable model your memory allows). Onboarding
+  first: `ollama pull qwen3.8:27b`, or the most capable model your memory allows). Onboarding
   writes `~/.openclaw/openclaw.json` and lists every pulled Ollama model; PandaBase's config is a
   patch on top of that.
 - **A Discord bot** (Developer Portal application) and a server with a `#pandabase` channel.
@@ -125,12 +125,12 @@ Check: `scripts/ops/agent-run.sh config show` prints your members and `"token_se
 ## 5. OpenClaw: Discord, PandaBase config, skills, automations
 
 The gateway may host more than one agent on the same Discord bot, routed by channel and by DM
-sender. PandaBase's config describes the **`pandabase` agent**: the agent bound to `#pandabase` (and
-the household's other shared channels), on the local model, with no web or browser tools, and
+sender. PandaBase's config describes the **`pandabase` agent**: the agent bound to `#pandabase` and
+only there, on the local model, with no web or browser tools, and
 the one the automations run as. Any other agents (e.g. a member's personal agent for their own DMs
-and channels) are set up outside this repo, and may have the PandaBase skill and token too. So not
-every Discord message reaches the `pandabase` agent, and the `pandabase` agent isn't the only one
-that can call PandaBase; shared data lives in PandaBase, not in agent memory.
+and channels) are set up outside this repo and don't get PandaBase's skills: PandaBase works only
+in `#pandabase` and its threads (DESIGN §10 #71). Shared data lives in PandaBase, not in agent
+memory.
 
 1. **Discord plugin.** If `openclaw plugins list` doesn't show Discord, install it at your
    OpenClaw version and pin it:
@@ -169,7 +169,7 @@ that can call PandaBase; shared data lives in PandaBase, not in agent memory.
    ```sh
    openclaw agents list && openclaw config get bindings --json   # what's there now
    openclaw agents add pandabase --workspace ~/.openclaw/workspace-pandabase \
-     --model ollama/qwen3.5:27b --non-interactive
+     --model ollama/qwen3.8:27b --non-interactive
    rm ~/.openclaw/workspace-pandabase/BOOTSTRAP.md   # else the first chat starts onboarding
    ```
 
@@ -202,16 +202,17 @@ that can call PandaBase; shared data lives in PandaBase, not in agent memory.
    match, so order doesn't decide it; keeping the catch-all last is for readability. Cycle threads
    need no binding of their own: a thread reaches its parent channel's agent.
 
-   If the gateway's default agent had the PandaBase skills, take them off its `skills` list once
+   The gateway's default agent must not have the PandaBase skills: take them off its `skills` list once
    the automations have moved (step 5): set `agents.entries.main.skills` to its list minus the
    five. An agent with no `skills` list sees every skill, so give it a full list instead.
 
-   The model's `num_ctx` must match the worker's 32768 (a different one reloads it), by index:
+   The model's `num_ctx` and `keep_alive` must match the worker's 32768 and `"30m"` (README
+   "Memory budget"), by index. `config set` replaces the whole `params` object, so set both:
 
    ```sh
    openclaw config get models.providers.ollama.models --json   # find qwen3.8:27b's index
    openclaw config set "models.providers.ollama.models[<i>].params" \
-     '{"num_ctx":32768}' --strict-json
+     '{"num_ctx":32768,"keep_alive":"30m"}' --strict-json
    openclaw gateway restart
    ```
 

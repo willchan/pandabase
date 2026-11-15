@@ -125,6 +125,7 @@ make install-agent-cron      # OpenClaw automations (list, then edit or add)
 make mac-rollout             # by hand: green main + the agent installers (make update runs them itself when needed)
 make install-chromium        # per-member Chrome LaunchAgents (CHROMIUM_BIN; loopback-only CDP)
 make install-ollama-env      # OLLAMA_NUM_PARALLEL=1, OLLAMA_MAX_LOADED_MODELS=1, OLLAMA_NO_CLOUD=1 at login
+                             # (not on a shared host: the host owns them; the Mac uses its own)
 make backfill [MEMBER=m]     # 12-month receipt backfill, resumable
 make smoke                   # live checks; SMOKE_CART=1 / SMOKE_E2E=1 opt-ins, SMOKE_ONLY="api vlm"
                              # a full run restarts the worker and runs one VLM call on the shared

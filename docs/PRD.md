@@ -113,7 +113,8 @@ hour or more gets one ⚠️ line in `#pandabase` (and a ✅ when it's over).
 
 ### 4.4 "Do we have X?"
 
-Ask the agent anywhere in Discord (e.g. from the store aisle). It answers from the inventory
+Ask the agent in `#pandabase` or one of its threads (e.g. from the store aisle); PandaBase doesn't
+answer elsewhere in Discord. It answers from the inventory
 estimate with an honest confidence hint: "~2 milk (bought Oct 12, unverified) → probably fine."
 
 ### 4.5 Learning
