@@ -237,8 +237,10 @@ three settings the server actually got.
 photo, a receipt or a merge job never swaps it out and the next Discord reply never waits for a
 reload. Three things keep it that way, because Ollama loads a model per settings:
 
-- **Same `num_ctx`.** The worker sends 32768, OpenClaw's context for the model; a request with a
-  different `num_ctx` reloads it.
+- **Same `num_ctx`.** The worker sends 32768, OpenClaw's context for the model. On Ollama 0.40.14
+  the request that *loads* the model fixes its context for every later caller (a later `num_ctx`
+  is ignored, no reload), so a job that loaded it at 8K would leave OpenClaw's replies at 8K
+  until it unloads. `ollama ps` (`CONTEXT`) shows it.
 - **Same `keep_alive`.** Ollama keeps the last request's value, so the worker sends OpenClaw's
   30m (worker `KEEP_ALIVE`; OpenClaw's model params): a shorter one would cut the reply model's
   residency, and so would none, which gets the server default (5 minutes; the Ollama app 0.40.14
@@ -324,10 +326,11 @@ then connect the bot as OpenClaw's docs describe.
 
 The gateway can host more than one agent on the same bot, routed by channel and DM sender
 (`bindings`). PandaBase's config describes the **`pandabase` agent**: the one bound to `#pandabase`
-(and the household's other shared channels), on a local model, with no web or browser tools, and
+and only there, on a local model, with no web or browser tools, and
 running the automations. Other agents (say, a member's personal agent for their own DMs) are set
 up outside this repo; they may get the PandaBase skill and token too. Not every Discord message
-reaches the `pandabase` agent: a DM goes to whichever agent its sender is bound to.
+reaches the `pandabase` agent, and PandaBase only works in `#pandabase` and its threads: other
+agents (the gateway's default `main` included) don't get PandaBase's skills (DESIGN §10 #71).
 
 ```sh
 cp agent/openclaw.pandabase.example.json5 agent/openclaw.pandabase.json5
@@ -339,7 +342,7 @@ openclaw gateway start
 # the `pandabase` agent: its own workspace; then one `config set --batch-file` for PandaBase's
 # skills only, no web or browser tools, and the #pandabase binding (docs/SETUP-MAC.md §5 step 4)
 openclaw agents add pandabase --workspace ~/.openclaw/workspace-pandabase \
-  --model ollama/qwen3.5:27b --non-interactive
+  --model ollama/qwen3.8:27b --non-interactive
 rm ~/.openclaw/workspace-pandabase/BOOTSTRAP.md   # no onboarding chat in a shared channel
 # .env: OPENCLAW_AGENT=pandabase, so the automations run as it (unset: `main`, the old single agent)
 
@@ -371,9 +374,10 @@ Exec policy: OpenClaw's default host exec mode works as is. If you run `tools.ex
 
 The patch leaves `models.providers.ollama.models` alone: onboarding already lists every pulled
 model, and a patch array would replace that list (deleting your reply model). The model's
-`params` must keep `num_ctx` at 32768, the worker's value (find its index with `openclaw config
+`params` must keep `num_ctx` at 32768 and `keep_alive` at `"30m"`, the worker's values; `config set`
+replaces the whole `params` object, so always set both (find its index with `openclaw config
 get models.providers.ollama.models --json`; `openclaw config set
-"models.providers.ollama.models[<i>].params" '{"num_ctx":32768}' --strict-json`).
+"models.providers.ollama.models[<i>].params" '{"num_ctx":32768,"keep_alive":"30m"}' --strict-json`).
 
 Check:
 
@@ -384,8 +388,7 @@ openclaw infer image describe --file <any photo> --model ollama/qwen3.8:27b --ti
 # local vision works (the default 30s timeout is too short while the model loads)
 ```
 
-Then post a test message in `#pandabase`, and say "do we have milk?" mentioning the bot in another
-channel the `pandabase` agent is bound to.
+Then post a test message in `#pandabase`, and ask "do we have milk?" there.
 
 ### 12. Decide on photo privacy
 

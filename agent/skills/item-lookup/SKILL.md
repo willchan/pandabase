@@ -1,6 +1,6 @@
 ---
 name: item-lookup
-description: "Answer \"do we have X?\" / \"how much X is left?\" anywhere in Discord from PandaBase's inventory estimate, with an honest confidence hint."
+description: "Answer \"do we have X?\" / \"how much X is left?\" in #pandabase from PandaBase's inventory estimate, with an honest confidence hint."
 metadata:
   {
     "openclaw":
@@ -14,7 +14,7 @@ metadata:
 # Item lookup
 
 Trigger: a household member asks whether we have something, how much is left, or whether to buy
-it — in `#pandabase`, a cycle thread, a DM, or another channel where you were mentioned (often
+it — in `#pandabase` or one of its threads (cycle threads included; often
 from a store aisle, so answer fast and short). Read-only: no writes, no `--actor`.
 
 ```sh

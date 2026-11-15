@@ -2,11 +2,11 @@
 //
 // The gateway can host several agents on one Discord bot, routed by channel and DM sender
 // (`bindings`). This file describes PandaBase's side of it: the **`pandabase` agent**, the one
-// bound to #pandabase (and the household's other shared channels), which runs PandaBase's
+// bound to #pandabase and only there, which runs PandaBase's
 // automations on a local model with no web or browser tools. Other agents on the same gateway
 // (e.g. a member's personal agent with web tools and its own Chrome profile) are set up outside
-// this repo; they may also have the PandaBase skill and token, but they never drive PandaBase's
-// browser. Shared data lives in PandaBase, not in any agent's memory.
+// this repo and don't get PandaBase's skills: PandaBase works only in #pandabase and its
+// threads (DESIGN §10 #71). Shared data lives in PandaBase, not in any agent's memory.
 //
 // Copy to agent/openclaw.pandabase.json5 (gitignored), replace every <…>, then apply:
 //
@@ -29,10 +29,11 @@
 //   # agents.entries.pandabase.tools.deny ["group:web","browser"], and the whole `bindings`
 //   # list with a #pandabase peer rule added (SETUP-MAC §5 step 4 has the file)
 //
-//   # The model's params (README step 11): num_ctx must match the worker's 32768, or Ollama
-//   # reloads the model between a reply and a worker job:
+//   # The model's params (README step 11): num_ctx and keep_alive must match the worker's
+//   # 32768 and "30m" (README "Memory budget"). `config set` replaces the whole object, so set
+//   # both, or the missing one falls back to Ollama's default:
 //   openclaw config set "models.providers.ollama.models[<i>].params" \
-//     '{"num_ctx":32768}' --strict-json
+//     '{"num_ctx":32768,"keep_alive":"30m"}' --strict-json
 //
 // Its id goes in .env as OPENCLAW_AGENT so the automations run as it.
 //
@@ -48,7 +49,8 @@
       guilds: {
         "<GUILD_ID>": {
           // A channel map is an allowlist: keep "*" so the bot still answers members when
-          // mentioned elsewhere ("do we have eggs?"), but only members. Which agent answers is
+          // mentioned elsewhere, but only members. That's for other agents: PandaBase's skills
+          // answer only in #pandabase and its threads. Which agent answers is
           // the gateway's `bindings`' call (by channel and DM sender), not this map's.
           channels: {
             "<PANDABASE_CHANNEL_ID>": {
