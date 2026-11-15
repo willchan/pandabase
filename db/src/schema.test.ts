@@ -20,7 +20,14 @@ beforeAll(async () => {
   await db
     .insert(schema.idempotencyKey)
     .values({ key: "k1", scope: "receipts", responseStatus: 201, responseBody: { ok: true } });
+  await db.insert(schema.costcoTrip).values({ plannedFor: "2026-11-21", list: [] });
 });
+
+/**
+ * Enum columns without a CHECK, on purpose: a CHECK on a column added to an existing SQLite table
+ * makes drizzle-kit rebuild the table (DROP + RENAME), which the expand-only rule refuses.
+ */
+const UNCHECKED_ENUMS = new Set(["item.store_pin"]);
 afterAll(() => db.$client.close());
 
 /** Run raw SQL and return the constraint failure message ("" if it succeeded). */
@@ -41,7 +48,7 @@ describe("migrations", () => {
     );
     const names = res.rows.map((r) => r.name).sort();
     expect(names).toEqual(tables.map((t) => getTableName(t)).sort());
-    expect(names).toHaveLength(19);
+    expect(names).toHaveLength(20);
   });
 
   it("enforce foreign keys", async () => {
@@ -57,7 +64,8 @@ describe("enum, boolean and json CHECKs", () => {
     const name = getTableName(t);
     return getTableConfig(t).columns.flatMap((c) => {
       const out: { table: string; column: string; bad: string | number }[] = [];
-      if (c.enumValues?.length) out.push({ table: name, column: c.name, bad: "__bogus__" });
+      if (c.enumValues?.length && !UNCHECKED_ENUMS.has(`${name}.${c.name}`))
+        out.push({ table: name, column: c.name, bad: "__bogus__" });
       if (c.columnType === "SQLiteBoolean") out.push({ table: name, column: c.name, bad: 2 });
       if (c.columnType === "SQLiteTextJson")
         out.push({ table: name, column: c.name, bad: "{not json" });
@@ -123,6 +131,14 @@ describe("row CHECKs", () => {
       "non-positive unit quantity",
       `UPDATE product SET unit_quantity = 0 WHERE ${firstRow("product")}`,
     ],
+    [
+      "planned trip with closed_at",
+      `UPDATE costco_trip SET closed_at = '2026-11-22T00:00:00.000Z' WHERE status = 'planned'`,
+    ],
+    [
+      "closed trip without closed_at",
+      `UPDATE costco_trip SET status = 'done' WHERE status = 'planned'`,
+    ],
   ])("reject %s", async (_, sql) => {
     expect(await failure(sql)).toMatch(/CHECK constraint failed/);
   });
@@ -165,6 +181,10 @@ describe("uniques", () => {
       "one active cycle",
       "UPDATE grocery_cycle SET status = 'ready' WHERE id = (SELECT min(id) FROM grocery_cycle)",
     ],
+    [
+      "one planned costco trip",
+      "INSERT INTO costco_trip (id, planned_for, list) VALUES ('t2', '2026-11-28', '[]')",
+    ],
     ["setting.key", "INSERT INTO setting (key, value) VALUES ('probe', '1')"],
     [
       "inventory_state (item_id, location)",
@@ -183,6 +203,15 @@ describe("uniques", () => {
       "SELECT count(*) AS n FROM product WHERE vendor = 'wholefoods' AND asin IS NULL",
     );
     expect(Number(res.rows[0]!.n)).toBeGreaterThan(1);
+  });
+
+  it("allow many closed costco trips", async () => {
+    const closed = "'done', '2026-11-01T00:00:00.000Z', '[]'";
+    expect(
+      await failure(
+        `INSERT INTO costco_trip (id, planned_for, status, closed_at, list) VALUES ('d1', '2026-10-01', ${closed}), ('d2', '2026-10-31', ${closed})`,
+      ),
+    ).toBe("");
   });
 
   it("allow many terminal cycles", async () => {

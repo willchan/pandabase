@@ -36,6 +36,8 @@
 
 ## product_choice.jsonl
 
+## store_choice.jsonl
+
 ## cart_injection.jsonl
 
 ## ux.jsonl

@@ -352,3 +352,124 @@ describe("pleaseCheckReason / pleaseCheckList — PRD §4.1", () => {
     expect(list).toHaveLength(config.checkin.pleaseCheckMax);
   });
 });
+
+describe("planCart — Costco items (DESIGN §4.8)", () => {
+  // Whole Foods eggs: 12 at $8.40 (70¢/egg); Kirkland 24 at $9.60 (40¢/egg, 43% cheaper).
+  const costcoEggs = (o: Partial<PlanItemInput> = {}): PlanItemInput => ({
+    itemId: "eggs",
+    item: { ...eggs, emaDays: 0.5, shelfLifeDays: 35 },
+    baseUnit: "egg",
+    switchThreshold: 0.15,
+    estimate: { onHand: 4, runoutAt: at("2026-10-26"), status: "low" },
+    products: [
+      prod("wf", { stance: "preferred", lastPriceCents: 840 }),
+      prod("ks", { vendor: "costco", unitQuantity: 24, lastPriceCents: 960 }),
+    ],
+    ...o,
+  });
+  const spinach: PlanItemInput = {
+    itemId: "spinach",
+    item: { ...eggs, emaDays: 0.8, shelfLifeDays: 7 },
+    baseUnit: "oz",
+    switchThreshold: 0.15,
+    estimate: { onHand: 1, runoutAt: at("2026-10-25"), status: "low" },
+    products: [
+      prod("wf-spinach", { unitQuantity: 5, lastPriceCents: 349 }),
+      prod("ks-spinach", { vendor: "costco", unitQuantity: 40, lastPriceCents: 699 }),
+    ],
+  };
+  const run = (
+    items: PlanItemInput[],
+    costcoTripDate: string | null,
+    overrides: CycleOverride[] = [],
+  ) => planCart({ items, overrides, vendors: ["wholefoods"], costcoTripDate, now, config });
+
+  it("leaves a Costco item out when a trip comes before it runs out (wait)", () => {
+    const p = run([costcoEggs(), spinach], "2026-10-25");
+    expect(p.lines.map((l) => l.itemId)).toEqual(["spinach"]);
+    expect(p.costcoWaiting).toEqual([
+      {
+        itemId: "eggs",
+        runoutAt: at("2026-10-26"),
+        store: expect.objectContaining({ store: "costco", why: "cheaper", timing: "wait" }),
+      },
+    ]);
+    // Every flagged item's choice is reported, waiting or not (telemetry `store_choice`).
+    expect(p.storeChoices.map((c) => [c.itemId, c.store, c.why, c.timing])).toEqual([
+      ["eggs", "costco", "cheaper", "wait"],
+      ["spinach", "regular", "spoils_first", null],
+    ]);
+    expect(p.storeChoices[0]!.savingsRatio).toBeCloseTo(3 / 7);
+  });
+
+  it.each([
+    ["no trip planned", null, {}, "no_trip"],
+    ["the trip is after the runout", "2026-10-31", {}, "trip_after_runout"],
+    [
+      "the item is out",
+      "2026-10-25",
+      { estimate: { onHand: 0, runoutAt: at("2026-10-23"), status: "consumed" as const } },
+      "needed_now",
+    ],
+  ])("bridges with the regular product when %s", (_, trip, o, cause) => {
+    const p = run([costcoEggs(o)], trip);
+    const l = p.lines[0]!;
+    expect(l.product?.id).toBe("wf"); // §4.4 choice among the weekly cart's vendors, unchanged
+    expect(l.store).toMatchObject({ store: "costco", timing: "bridge", bridgeCause: cause });
+    expect(p.costcoWaiting).toEqual([]);
+  });
+
+  it("keeps regular items' product choice and sizing unchanged", () => {
+    const withCostco = run([spinach], "2026-10-25").lines[0]!;
+    const without = planCart({
+      items: [{ ...spinach, products: spinach.products.filter((x) => x.vendor !== "costco") }],
+      overrides: [],
+      vendors: ["wholefoods"],
+      now,
+      config,
+    }).lines[0]!;
+    expect({ ...withCostco, store: null }).toEqual({ ...without, store: null });
+    expect(withCostco.store).toMatchObject({ store: "regular", why: "spoils_first" });
+  });
+
+  it("follows the store pin", () => {
+    const pinned = run([{ ...spinach, storePin: "costco" }], "2026-10-25");
+    expect(pinned.costcoWaiting.map((w) => [w.itemId, w.store.why])).toEqual([
+      ["spinach", "pinned"],
+    ]);
+    const regular = run([costcoEggs({ storePin: "regular" })], "2026-10-25");
+    expect(regular.lines[0]!.store).toMatchObject({ store: "regular", why: "pinned" });
+  });
+
+  it("puts a waiting item back when someone adds or re-sizes it this week", () => {
+    const add: CycleOverride = {
+      kind: "qty",
+      itemId: "eggs",
+      freeText: null,
+      quantity: 2,
+      productId: null,
+    };
+    const p = run([costcoEggs()], "2026-10-25", [add]);
+    expect(p.costcoWaiting).toEqual([]);
+    expect(p.lines[0]).toMatchObject({
+      itemId: "eggs",
+      quantity: 2,
+      reason: "runout",
+      overrides: ["qty"],
+      store: { timing: "bridge", bridgeCause: "needed_now" },
+    });
+  });
+
+  it("a skip on a waiting item changes nothing (it isn't in the cart)", () => {
+    const skip: CycleOverride = {
+      kind: "skip",
+      itemId: "eggs",
+      freeText: null,
+      quantity: null,
+      productId: null,
+    };
+    const p = run([costcoEggs()], "2026-10-25", [skip]);
+    expect(p.skippedItemIds).toEqual([]);
+    expect(p.costcoWaiting.map((w) => w.itemId)).toEqual(["eggs"]);
+  });
+});

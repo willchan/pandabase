@@ -2,6 +2,13 @@
 import type { Config } from "../config";
 import type { Estimate, InventoryItem } from "./inventory";
 import { chooseProduct, type Choice, type ProductCandidate } from "./productChoice";
+import {
+  chooseStore,
+  costcoTiming,
+  type CostcoTiming,
+  type Store,
+  type StoreWhy,
+} from "./storeChoice";
 import { addDays, localDate } from "./time";
 
 export type RestockReason = "runout" | "critical" | "consumed" | "static_threshold";
@@ -104,6 +111,23 @@ export interface PlanItemInput {
   switchThreshold: number;
   estimate: Pick<Estimate, "onHand" | "runoutAt" | "status">;
   products: readonly ProductCandidate[];
+  /** `item.store_pin` (§4.8). */
+  storePin?: Store | null;
+}
+
+/** Why a Costco item stays in the weekly cart (`bridge`, §4.8). */
+export type BridgeCause = "no_trip" | "needed_now" | "trip_after_runout";
+
+/** §4.8 store choice for a planned item, and for a Costco item what the weekly cart does. */
+export interface StoreNote {
+  store: Store;
+  why: StoreWhy;
+  /** `chooseStore`'s reason ("Costco: 20% cheaper per egg than 365 Large Brown Eggs 12ct"). */
+  reason: string;
+  savingsRatio: number | null;
+  /** Costco items only: `wait` (left out until the trip) or `bridge` (bought this week). */
+  timing: CostcoTiming | null;
+  bridgeCause: BridgeCause | null;
 }
 
 /** A `grocery_cycle_override` row. */
@@ -126,6 +150,8 @@ export interface CartLine {
   reason: RestockReason | null;
   choice: Choice | null;
   overrides: CycleOverride["kind"][];
+  /** §4.8, for lines the restock rule planned (null for override-only lines and free text). */
+  store: StoreNote | null;
 }
 
 export interface CartPlan {
@@ -136,21 +162,67 @@ export interface CartPlan {
   lapsed: { itemId: string; runoutAt: string }[];
   /** Items with several candidate products: the agent should post price quotes. */
   needsPriceCheckItemIds: string[];
+  /**
+   * Restock-flagged items whose store is Costco and a planned trip comes before they run out
+   * (§4.8 `wait`): left out of the weekly cart (and off *please check*) until the trip.
+   */
+  costcoWaiting: { itemId: string; runoutAt: string | null; store: StoreNote }[];
+  /** The store choice of every restock-flagged item (telemetry `store_choice`). */
+  storeChoices: ({ itemId: string } & StoreNote)[];
+}
+
+/** §4.8 for one restock-flagged item: its store, and for a Costco item the weekly cart's timing. */
+export function storeNote(
+  i: PlanItemInput,
+  tripDate: string | null,
+  quotes: Readonly<Record<string, number>> | undefined,
+  config: Config,
+): StoreNote {
+  const c = chooseStore({
+    item: i.item,
+    baseUnit: i.baseUnit,
+    products: i.products,
+    quotes,
+    switchThreshold: i.switchThreshold,
+    pin: i.storePin ?? null,
+    // Learned from post-trip freezer answers in M10.4; until then nobody freezes bulk.
+    freezesBulk: false,
+    config,
+  });
+  const base = { store: c.store, why: c.why, reason: c.reason, savingsRatio: c.savingsRatio };
+  if (c.store !== "costco") return { ...base, timing: null, bridgeCause: null };
+  const timing = costcoTiming({ estimate: i.estimate, tripDate, config });
+  const urgent = i.estimate.status === "critical" || i.estimate.status === "consumed";
+  const bridgeCause: BridgeCause | null =
+    timing === "wait"
+      ? null
+      : tripDate === null
+        ? "no_trip"
+        : urgent
+          ? "needed_now"
+          : "trip_after_runout";
+  return { ...base, timing, bridgeCause };
 }
 
 /**
  * §4.3: flag items, choose products (§4.4), size quantities, then apply the cycle's overrides in
  * order (skip removes, qty replaces, add inserts incl. free text, product replaces the product).
+ * §4.8: a flagged item whose store is Costco waits for a planned trip that comes before it runs
+ * out (left out); otherwise it stays, bridging to Costco. An override on a waiting item puts it
+ * back in the weekly cart (a human asked for it this week).
  */
 export function planCart(input: {
   items: readonly PlanItemInput[];
   overrides: readonly CycleOverride[];
   vendors: readonly string[];
   quotes?: Readonly<Record<string, number>>;
+  /** The planned Costco trip's local date, or null (§4.8). */
+  costcoTripDate?: string | null;
   now: string;
   config: Config;
 }): CartPlan {
   const { items, overrides, vendors, quotes, now, config } = input;
+  const tripDate = input.costcoTripDate ?? null;
   const byId = new Map(items.map((i) => [i.itemId, i]));
   const lines = new Map<string, CartLine>();
   const extra: CartLine[] = [];
@@ -174,6 +246,7 @@ export function planCart(input: {
       reason,
       choice,
       overrides: [],
+      store: null,
     };
   };
   const bare = (itemId: string): CartLine => ({
@@ -184,12 +257,23 @@ export function planCart(input: {
     reason: null,
     choice: null,
     overrides: [],
+    store: null,
   });
 
   const lapsed: CartPlan["lapsed"] = [];
+  const waiting = new Map<string, CartPlan["costcoWaiting"][number]>();
+  const storeChoices: CartPlan["storeChoices"] = [];
   for (const i of items) {
     const reason = restockReason(i.item, i.estimate, now, config);
-    if (reason) lines.set(i.itemId, lineFor(i, reason));
+    if (reason) {
+      const store = storeNote(i, tripDate, quotes, config);
+      storeChoices.push({ itemId: i.itemId, ...store });
+      if (store.timing === "wait") {
+        waiting.set(i.itemId, { itemId: i.itemId, runoutAt: i.estimate.runoutAt, store });
+      } else {
+        lines.set(i.itemId, { ...lineFor(i, reason), store });
+      }
+    }
     const { runoutAt } = i.estimate;
     if (i.item.trackingType === "velocity" && runoutAt && isLapsed(runoutAt, now, config)) {
       lapsed.push({ itemId: i.itemId, runoutAt });
@@ -213,7 +297,16 @@ export function planCart(input: {
     const ensure = () => {
       let line = lines.get(o.itemId!);
       if (!line) {
-        line = known ? lineFor(known, null) : bare(o.itemId!);
+        const wait = waiting.get(o.itemId!);
+        line = known
+          ? lineFor(
+              known,
+              wait ? (restockReason(known.item, known.estimate, now, config) ?? null) : null,
+            )
+          : bare(o.itemId!);
+        // A human asked for a waiting Costco item this week: it bridges after all.
+        if (wait) line.store = { ...wait.store, timing: "bridge", bridgeCause: "needed_now" };
+        waiting.delete(o.itemId!);
         lines.set(o.itemId!, line);
       }
       skipped.delete(o.itemId!);
@@ -260,5 +353,7 @@ export function planCart(input: {
     skippedItemIds: [...skipped],
     lapsed: lapsed.filter((x) => !lines.has(x.itemId)),
     needsPriceCheckItemIds: all.filter((l) => l.choice?.needsPriceCheck).map((l) => l.itemId!),
+    costcoWaiting: [...waiting.values()],
+    storeChoices,
   };
 }

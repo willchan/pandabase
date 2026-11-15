@@ -2,6 +2,9 @@
 import type { RouteName } from "@/lib/contracts";
 import * as awayPeriods from "@/app/api/away-periods/route";
 import * as mergeSuggestionsRun from "@/app/api/catalog/merge-suggestions/run/route";
+import * as costcoTripStatus from "@/app/api/costco/trip/[id]/status/route";
+import * as costcoTrip from "@/app/api/costco/trip/route";
+import * as itemStorePin from "@/app/api/items/[id]/store-pin/route";
 import * as cronMaintenance from "@/app/api/cron/maintenance/route";
 import * as diagnosticsWeekly from "@/app/api/diagnostics/weekly/route";
 import * as freezerAging from "@/app/api/freezer/aging/route";
@@ -32,6 +35,10 @@ export const HANDLERS: Record<RouteName, Record<string, unknown>> = {
   awayPeriods,
   mergeSuggestionsRun,
   cronMaintenance,
+  costcoTripCurrent: costcoTrip,
+  costcoTripPlan: costcoTrip,
+  costcoTripStatus,
+  itemStorePin,
   diagnosticsWeekly,
   workerHealth,
   freezerAging,

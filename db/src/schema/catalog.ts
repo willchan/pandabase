@@ -24,6 +24,8 @@ export const TRACKING_TYPES = ["velocity", "static"] as const;
 export const OUTLIER_DIRECTIONS = ["high", "low"] as const;
 export const STANCES = ["preferred", "acceptable", "rejected"] as const;
 export const ALIAS_KINDS = ["receipt_text", "asin"] as const;
+/** `item.store_pin` (DESIGN §4.8): `regular` = the weekly Whole Foods/Amazon cart. */
+export const STORE_PINS = ["costco", "regular"] as const;
 
 export const item = sqliteTable(
   "item",
@@ -45,6 +47,12 @@ export const item = sqliteTable(
     switchThreshold: real("switch_threshold").notNull().default(0.15),
     trust: enumText("trust", CATALOG_TRUST).notNull().default("unverified"),
     mergedIntoItemId: text("merged_into_item_id").references((): AnySQLiteColumn => item.id),
+    /**
+     * "Get X at Costco / Whole Foods" (§4.8). No CHECK: adding one to an existing SQLite table
+     * makes drizzle-kit rebuild it (a DROP + RENAME the expand-only rule refuses); the API's Zod
+     * enum is the only writer.
+     */
+    storePin: enumText("store_pin", STORE_PINS),
   },
   (t) => [
     enumCheck("item", t.defaultLocation, LOCATIONS),

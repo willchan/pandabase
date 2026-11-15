@@ -143,6 +143,7 @@ export async function renderWeekly(
     "receipt_lines.jsonl": [],
     "vlm.jsonl": [],
     "product_choice.jsonl": [],
+    "store_choice.jsonl": [],
     "cart_injection.jsonl": [],
     "ux.jsonl": [],
     "data_quality.jsonl": [],
@@ -552,7 +553,9 @@ export async function renderWeekly(
     (t) => t.metric === "vlm_parse_failure" || t.p.parse_failure === true,
   ).length;
   // Answers the worker cut off at its output cap (`MAX_OUTPUT_TOKENS`): likely repetition loops.
-  const cutOff = vlm.filter((t) => t.metric === "vlm_parse_failure" && t.p.truncated === true).length;
+  const cutOff = vlm.filter(
+    (t) => t.metric === "vlm_parse_failure" && t.p.truncated === true,
+  ).length;
   const totalsFailed =
     metric("job_finished").filter((t) => t.p.workerTotalsCheck === "fail").length +
     metric("vlm_inference").filter((t) => t.p.totals_check === "fail").length;
@@ -748,7 +751,113 @@ export async function renderWeekly(
       : [],
   );
 
-  // 6. Cart injection ----------------------------------------------------------------------------
+  // 6. Store choice (Costco, §4.8) --------------------------------------------------------------
+  const storeChoices = metric("store_choice");
+  const trips = metric("costco_trip_planned", "costco_trip");
+  const closedTrips = metric("costco_trip");
+  const storeOverrides = metric("store_override");
+  extracts["store_choice.jsonl"] = [...storeChoices, ...trips, ...storeOverrides].map((t) => ({
+    at: t.at,
+    metric: t.metric,
+    ...(s(t.p.itemId) ? { item: itemName(t.p) } : {}),
+    ...t.p,
+  }));
+  const timingOf = (t: Telemetry) =>
+    t.p.timing === "wait"
+      ? "wait"
+      : t.p.timing === "bridge"
+        ? `bridge (${s(t.p.bridgeCause) ?? "?"})`
+        : "–";
+  const savings = storeChoices
+    .filter((t) => t.p.store === "costco" && typeof t.p.savingsRatio === "number")
+    .map((t) => n(t.p.savingsRatio));
+  const overrideDrift = storeOverrides.filter(
+    (t) => n(t.p.thresholdBefore) !== n(t.p.thresholdAfter),
+  );
+  const expiredTrips = closedTrips.filter((t) => t.p.outcome === "expired");
+  const lateBridges = storeChoices.filter((t) => t.p.bridgeCause === "trip_after_runout");
+  if (expiredTrips.length)
+    findings.push({
+      score: 2,
+      text: `${expiredTrips.length} Costco trip(s) expired with nobody saying "back from Costco".`,
+    });
+  if (storeOverrides.length >= 3)
+    findings.push({
+      score: 2,
+      text: `${storeOverrides.length} store pins ("get X at …") — the store choice was corrected often.`,
+    });
+  const storeSection = section(
+    "6. Store choice (Costco)",
+    [
+      table(
+        ["Store", "Why", "Wait / bridge", "Planned items"],
+        countBy(
+          storeChoices,
+          (t) => `${s(t.p.store) ?? "?"}\t${s(t.p.why) ?? "?"}\t${timingOf(t)}`,
+        ).map(([k, c]) => [...k.split("\t"), c]),
+      ),
+      "",
+      `Costco savings per base unit (Costco items): median ${
+        savings.length ? pct(percentile(savings, 50) * 100, 100) : "–"
+      } over ${savings.length} planned item(s).`,
+      "",
+      `Trips: ${metric("costco_trip_planned").length} planned / moved, ${closedTrips.length} closed (${
+        countBy(closedTrips, (t) => s(t.p.outcome) ?? "?")
+          .map(([o, c]) => `${o} ${c}`)
+          .join(", ") || "none"
+      }). Store pins: ${storeOverrides.length}, ${overrideDrift.length} moved the Costco threshold${
+        overrideDrift.length
+          ? ` (${num(n(overrideDrift[0]!.p.thresholdBefore))} → ${num(n(overrideDrift.at(-1)!.p.thresholdAfter))})`
+          : ""
+      }.`,
+      ...(closedTrips.length
+        ? [
+            "",
+            table(
+              ["Trip", "Outcome", "List lines", "Bridged"],
+              closedTrips.map((t) => [
+                s(t.p.plannedFor),
+                s(t.p.outcome),
+                n(t.p.listLines),
+                n(t.p.bridged),
+              ]),
+            ),
+          ]
+        : []),
+    ].join("\n"),
+    bullets(
+      storeOverrides
+        .slice(0, 5)
+        .map(
+          (t) =>
+            `${itemName(t.p)}: pinned to ${s(t.p.to) ?? "cleared"} (${s(t.p.kind) ?? "no threshold change"})`,
+        ),
+    ),
+    [
+      ...(storeChoices.length > 0 && storeChoices.every((t) => t.p.why === "no_costco_product")
+        ? [
+            "No planned item has a Costco product yet: they come from Costco receipts (M10.3), so every item stays at the weekly cart.",
+          ]
+        : []),
+      ...(expiredTrips.length
+        ? [
+            'A trip expired unclosed: check the agent heard "back from Costco", or whether the trip happened.',
+          ]
+        : []),
+      ...(lateBridges.length >= 3
+        ? [
+            `${lateBridges.length} Costco items ran out before the planned trip and were bought this week anyway — trips may be further apart than \`costco.tripGapDays\`.`,
+          ]
+        : []),
+      ...(overrideDrift.length >= 2
+        ? [
+            "The household moved the Costco threshold more than once — check `costco.switchThreshold`.",
+          ]
+        : []),
+    ],
+  );
+
+  // 7. Cart injection ----------------------------------------------------------------------------
   const cartLines = metric("cart_line_result");
   const toolErrors = metric(
     "selector_error",
@@ -797,7 +906,7 @@ export async function renderWeekly(
   if (failedCart.length)
     findings.push({ score: 4, text: `${failedCart.length} cart line(s) failed to inject.` });
   const cartSection = section(
-    "6. Cart injection",
+    "7. Cart injection",
     [
       table(
         ["Outcome", "Lines"],
@@ -854,7 +963,7 @@ export async function renderWeekly(
     ],
   );
 
-  // 7. UX friction -------------------------------------------------------------------------------
+  // 8. UX friction -------------------------------------------------------------------------------
   const questions = metric("clarifying_question");
   // Photo intake: how the agent classified photos (caption / local description / default) and
   // how often a human re-filed one (the classifier's error signal).
@@ -912,7 +1021,7 @@ export async function renderWeekly(
   if (errors.length)
     findings.push({ score: 3, text: `Server errors on ${errors.map((r) => r.route).join(", ")}.` });
   const uxSection = section(
-    "7. UX friction",
+    "8. UX friction",
     [
       table(
         ["Expired review kind", "Count"],
@@ -956,7 +1065,7 @@ export async function renderWeekly(
     ],
   );
 
-  // 8. Deploys (M9): `deploy {component, sha, outcome, …}` from deploy.yml (migrate, web,
+  // 9. Deploys (M9): `deploy {component, sha, outcome, …}` from deploy.yml (migrate, web,
   // worker_image, web-smoke: the read-only production checks, `reason` = the failed ones) and the
   // Mac Mini updater (mac_mini: success / rolled_back / rollback_failed).
   const deploys = metric("deploy");
@@ -974,7 +1083,7 @@ export async function renderWeekly(
   else if (badDeploys.length)
     findings.push({ score: 2, text: `${badDeploys.length} deploy step(s) failed or rolled back.` });
   const deploysSection = section(
-    "8. Deploys",
+    "9. Deploys",
     [
       table(
         ["Component", "Deploys", "Succeeded", "Failed / rolled back"],
@@ -1034,12 +1143,12 @@ export async function renderWeekly(
     ],
   );
 
-  // 9. Data appendix ------------------------------------------------------------------------------
+  // 10. Data appendix ------------------------------------------------------------------------------
   const keyframes = jobsDone.flatMap((j) =>
     (j.keyframeR2Keys ?? []).map((k) => `\`${k}\` (${j.jobType} ${j.id})`),
   );
   const appendix = [
-    "## 9. Data appendix",
+    "## 10. Data appendix",
     "",
     "Extracts:",
     "",
@@ -1073,6 +1182,7 @@ export async function renderWeekly(
       receiptSection,
       vlmSection,
       productSection,
+      storeSection,
       cartSection,
       uxSection,
       deploysSection,
