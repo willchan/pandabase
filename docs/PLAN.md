@@ -1298,16 +1298,16 @@ This Week with a planned trip; the prod copy for the store split of the real cat
   - **Seed:** six synthetic Costco products (eggs, spinach, rice, olive oil, blueberries, toilet
     paper) covering `cheaper`, `spoils_first` and `not_cheaper_enough`, appended last so the rest
     of the seed keeps its ids.
-  - **Gap, not fixed (needs a decision):** a text purchase "got 2 milk at Costco"
-    (`vendor: "costco"` through discord-intake) records the purchase but **creates no Costco
-    product and no price** (`applyReceipt` only creates products for ASIN lines), so the item stays
-    `no_costco_product`. Pinned by a test in `app/api/costco/costco.test.ts`. M10.3's importer is
-    the planned source; making manual Costco buys create a product would need a price we don't
-    have.
-  - **For the owner:** an item that is *out* or *critical* both bridges in the weekly cart and is on
-    the trip list (`needed now`), per M10.1's `costcoTiming` / `costcoListLine`, so a trip within
-    days can buy it twice. Leaving it to a decision (e.g. drop critical items from a list whose trip
-    is within `lowWithinDays`).
+  - **Text purchases stay as they are (owner, 2026-11-15):** "got 2 milk at Costco" records the
+    purchase but creates no Costco product or price (`applyReceipt` only creates products for ASIN
+    lines; pinned by a test in `app/api/costco/costco.test.ts`). Costco ties every order to an
+    account, so every Costco purchase reaches PandaBase as a website receipt (M10.3), which creates
+    the product and its price.
+  - **Out items with a trip days away go to the weekly cart only (owner, 2026-11-15; follow-up
+    PR):** M10.2 shipped them both bridged and on the trip list ("needed now"), a possible double
+    buy. `costcoListLine` now leaves a critical / consumed item off a trip within `lowWithinDays`
+    (DESIGN §4.8); the weekly cart buys the usual week's worth, and once restocked it is listed by
+    runout again.
   - **Prod copy (counts only, 2026-11-15):** 471 items, 0 Costco products (amazon 120, wholefoods
     351), so all 471 are `regular` / `no_costco_product`; 48 plan lines, 0 waiting, an empty trip
     list. Nothing changes for the household until M10.3 imports Costco receipts.

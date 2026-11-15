@@ -171,7 +171,8 @@ if we use it up, so PandaBase decides per item where it comes from and keeps a l
   can plan, move or cancel one; each item's page shows where it comes from and can pin it.
 - **The weekly cart leaves Costco items out** when a trip is planned on or before they run out.
   Otherwise (no trip planned, the trip is later, or the item is critical/out) the week's
-  Whole Foods/Amazon cart buys the usual amount and says it's bridging to Costco. The Saturday
+  Whole Foods/Amazon cart buys the usual amount and says it's bridging to Costco. Something
+  we're out of with a trip only days away is bought in the weekly cart, not on the trip. The Saturday
   summary names both, and anyone adding the item to the week's list puts it back in the cart.
 - **Receipts (M10.3, not yet):** Will's Costco account (warehouse receipts and online orders) is read by the
   receipt sweep on the `pandabase` browser profile after "back from Costco", with a weekly

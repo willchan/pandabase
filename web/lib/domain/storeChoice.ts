@@ -172,8 +172,10 @@ export interface CostcoListLine {
 /**
  * §4.8 Costco trip list. An item assigned to Costco goes on the list for a trip on `tripDate` when
  * it would run out before the trip after (`tripDate + costco.tripGapDays`), is flagged critical /
- * consumed, or (static) is at its reorder threshold. Lapsed items stay off (§4.3). Quantity covers
- * until the following trip, capped at the shelf life for perishables nobody freezes (min 1 pack).
+ * consumed, or (static) is at its reorder threshold. Lapsed items stay off (§4.3), and so do
+ * critical / consumed items when the trip is within `lowWithinDays` (the weekly cart buys them).
+ * Quantity covers until the following trip, capped at the shelf life for perishables nobody
+ * freezes (min 1 pack).
  */
 export function costcoListLine(input: {
   item: InventoryItem;
@@ -188,7 +190,12 @@ export function costcoListLine(input: {
   const tz = config.householdTz;
   const gap = config.costco.tripGapDays;
   let reason: CostcoListReason | null = null;
-  if (estimate.status === "critical" || estimate.status === "consumed") reason = estimate.status;
+  if (estimate.status === "critical" || estimate.status === "consumed") {
+    // Out now with the trip only days away: the weekly cart buys it (`costcoTiming` bridges it),
+    // so the list leaves it off rather than buying it twice (owner decision 2026-11-15).
+    if (tripDate <= addDays(localDate(now, tz), config.lowWithinDays)) return null;
+    reason = estimate.status;
+  }
   else if (item.trackingType === "velocity") {
     if (estimate.runoutAt !== null && !isLapsed(estimate.runoutAt, now, config)) {
       if (localDate(estimate.runoutAt, tz) <= addDays(tripDate, gap)) reason = "runout";
