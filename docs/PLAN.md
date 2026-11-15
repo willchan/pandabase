@@ -43,7 +43,7 @@ contracts.
 | M7 Agent skill pack & tools | done | #9 |
 | M8 Ops, compose, README | done | #11 |
 | M9 Continuous deployment | done | #14 |
-| M10 Costco | in progress (M10.1 done, M10.2 in review) | #66 |
+| M10 Costco | in progress (M10.1 done, M10.2 in review) | #66, #67 |
 
 ---
 
