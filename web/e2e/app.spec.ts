@@ -58,3 +58,28 @@ test("Settings: add an away period", async ({ page }) => {
   await expect(page.getByText("Away period saved")).toBeVisible();
   await expect(page.getByText("Grandma's")).toBeVisible();
 });
+
+test("Costco: plan a trip from This Week, pin an item, cancel the trip (PRD §4.8)", async ({
+  page,
+}) => {
+  await signIn(page);
+  const costco = page.locator("section", { has: page.locator("#costco") });
+  await costco.getByRole("button", { name: "Plan a trip" }).click();
+  await expect(costco.locator("#costco")).toContainText("Costco trip");
+  const list = costco.getByRole("list", { name: "Costco list" });
+  await expect(list.getByRole("listitem").first()).toContainText(/Kirkland Signature/);
+
+  // "Get it at Whole Foods" on the first item takes it off the list.
+  const first = list.getByRole("listitem").first().getByRole("link");
+  const name = (await first.textContent())!;
+  await first.click();
+  await page.getByLabel("Get it at").selectOption("regular");
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(page.getByText(/^Saved: You get this at/)).toBeVisible();
+  await page.goto("/");
+  await expect(list.getByRole("link", { name, exact: true })).toHaveCount(0);
+
+  await costco.getByRole("button", { name: "Cancel trip" }).click();
+  await costco.getByRole("button", { name: "Yes, cancel the trip" }).click();
+  await expect(costco.getByRole("button", { name: "Plan a trip" })).toBeVisible();
+});

@@ -9,6 +9,7 @@ import {
   InboxIcon,
   PlusIcon,
   SnowflakeIcon,
+  WarehouseIcon,
 } from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
@@ -23,15 +24,28 @@ import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/ui/native-select";
 import { currentMember } from "@/lib/auth/current";
 import { cycleSchedule } from "@/lib/domain/cycle";
-import { amount, dayTime, money, monthDay, qty, relativeDay, vendorName } from "@/lib/format";
+import { addDays, localDate } from "@/lib/domain/time";
+import {
+  amount,
+  dayTime,
+  money,
+  monthDay,
+  qty,
+  relativeDay,
+  shortDate,
+  vendorName,
+} from "@/lib/format";
 import { activeCycle } from "@/lib/repo/cycles";
-import { checkin, predictions } from "@/lib/services/cycles";
+import { currentCostcoTrip } from "@/lib/services/costco";
+import { bridgeText, checkin, predictions } from "@/lib/services/cycles";
 import { pendingReviews } from "@/lib/services/reviews";
 import {
   addToListAction,
+  costcoTripStatusAction,
   cycleStatusAction,
   markItemAction,
   openCycleAction,
+  planCostcoTripAction,
   setProductAction,
   setQuantityAction,
   skipItemAction,
@@ -61,7 +75,7 @@ async function ThisWeekPageContent() {
   const { db, ctx } = await currentMember();
   const tz = ctx.config.householdTz;
   const cycle = await activeCycle(db);
-  const [plan, check, reviews, items] = await Promise.all([
+  const [plan, check, reviews, items, costco] = await Promise.all([
     predictions(db, cycle?.id ?? null, ctx),
     checkin(db, ctx),
     pendingReviews(db),
@@ -70,7 +84,17 @@ async function ThisWeekPageContent() {
       .from(item)
       .where(isNull(item.mergedIntoItemId))
       .orderBy(asc(item.canonicalName)),
+    currentCostcoTrip(db, ctx),
   ]);
+  const costcoSection = (
+    <CostcoSection
+      trip={costco.trip}
+      lines={costco.lines}
+      waiting={plan.costco_waiting}
+      now={ctx.now}
+      tz={tz}
+    />
+  );
   const runout = new Map(check.likely_needed.map((l) => [l.item_id, l.runout_at]));
   const names = new Map(items.map((i) => [i.id, i.name]));
   const urgent = reviews.filter((r) => r.urgency === "this_week");
@@ -93,6 +117,7 @@ async function ThisWeekPageContent() {
             </ActionForm>
           </CardContent>
         </Card>
+        {costcoSection}
       </>
     );
   }
@@ -273,6 +298,22 @@ async function ThisWeekPageContent() {
                             {l.overrides.includes("product") ? "Your pick" : l.choice_reason}
                           </span>
                         ) : null}
+                        {l.store?.costco?.timing === "bridge" ? (
+                          <span className="mt-0.5 flex items-center gap-1 text-xs text-muted-foreground">
+                            <WarehouseIcon className="size-3" aria-hidden="true" />
+                            {bridgeText(
+                              {
+                                store: l.store.store,
+                                why: l.store.why,
+                                reason: l.store.reason,
+                                savingsRatio: l.store.savings_ratio,
+                                timing: "bridge",
+                                bridgeCause: l.store.costco.bridge_cause,
+                              },
+                              plan.costco_trip_date,
+                            )}
+                          </span>
+                        ) : null}
                       </span>
                       {l.item_id ? (
                         <ChevronRightIcon
@@ -416,6 +457,8 @@ async function ThisWeekPageContent() {
         ) : null}
       </section>
 
+      {costcoSection}
+
       {overrides.length > 0 ? (
         <section aria-labelledby="running-list">
           <SectionTitle>
@@ -503,5 +546,154 @@ async function ThisWeekPageContent() {
         </section>
       ) : null}
     </>
+  );
+}
+
+type CostcoTripView = Awaited<ReturnType<typeof currentCostcoTrip>>;
+
+/** The next Saturday on or after today (household-local), the usual Costco day. */
+function nextSaturday(now: string, tz: string): string {
+  const today = localDate(now, tz);
+  const dow = new Date(`${today}T12:00:00Z`).getUTCDay();
+  return addDays(today, (6 - dow + 7) % 7);
+}
+
+/** PRD §4.8: the planned Costco trip and its list, or a form to plan one. */
+function CostcoSection({
+  trip,
+  lines,
+  waiting,
+  now,
+  tz,
+}: {
+  trip: CostcoTripView["trip"];
+  lines: CostcoTripView["lines"];
+  waiting: { item_id: string; name: string }[];
+  now: string;
+  tz: string;
+}) {
+  const today = localDate(now, tz);
+  const dateLabel = (d: string) => shortDate(`${d}T12:00:00Z`, "UTC");
+  return (
+    <section aria-labelledby="costco">
+      <SectionTitle
+        aside={
+          trip ? (
+            <span className="text-xs text-muted-foreground">
+              {lines.length} item{lines.length === 1 ? "" : "s"}
+            </span>
+          ) : null
+        }
+      >
+        <span id="costco" className="inline-flex items-center gap-1">
+          <WarehouseIcon className="size-3.5" aria-hidden="true" />
+          {trip ? `Costco trip · ${dateLabel(trip.planned_for)}` : "Costco"}
+        </span>
+      </SectionTitle>
+      {trip ? (
+        <>
+          {lines.length === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              Nothing on the list: an item joins it once it&apos;s been bought at Costco and Costco
+              is the cheaper place for it.
+            </p>
+          ) : (
+            <ul
+              className="flex flex-col overflow-hidden rounded-xl border bg-card"
+              aria-label="Costco list"
+            >
+              {lines.map((l) => (
+                <li key={l.item_id} className="border-b px-4 py-3 last:border-b-0">
+                  <span className="flex flex-wrap items-baseline justify-between gap-x-2">
+                    <Link
+                      href={`/pantry/${l.item_id}`}
+                      className="font-medium underline-offset-4 hover:underline"
+                    >
+                      {l.name}
+                    </Link>
+                    <span className="text-xs text-muted-foreground">
+                      {l.reason === "consumed" || l.reason === "critical"
+                        ? "needed now"
+                        : l.runout_at
+                          ? `runs out ${relativeDay(l.runout_at, now, tz)}`
+                          : ""}
+                    </span>
+                  </span>
+                  <span className="mt-0.5 block text-sm text-muted-foreground">
+                    {qty(l.quantity)} × {l.product.title}
+                    {money(l.product.last_price_cents)
+                      ? ` · ${money(l.product.last_price_cents)}`
+                      : ""}
+                  </span>
+                  <span className="mt-0.5 block text-xs text-muted-foreground">
+                    {l.store_reason}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+          {waiting.length > 0 ? (
+            <p className="mt-2 text-sm text-muted-foreground">
+              Left out of this week&apos;s cart until the trip:{" "}
+              {waiting.map((w) => w.name).join(", ")}.
+            </p>
+          ) : null}
+          <div className="mt-3 flex flex-wrap items-end gap-2">
+            <ActionForm action={planCostcoTripAction} className="flex items-end gap-2">
+              <span className="flex flex-col gap-1">
+                <label htmlFor="costco-move" className="text-xs text-muted-foreground">
+                  Move to
+                </label>
+                <Input
+                  id="costco-move"
+                  name="plannedFor"
+                  type="date"
+                  min={today}
+                  defaultValue={trip.planned_for}
+                  className="w-40"
+                  required
+                />
+              </span>
+              <SubmitButton size="sm" variant="secondary">
+                Move
+              </SubmitButton>
+            </ActionForm>
+            <ActionForm action={costcoTripStatusAction}>
+              <input type="hidden" name="tripId" value={trip.id} />
+              <input type="hidden" name="status" value="done" />
+              <SubmitButton size="sm" variant="outline">
+                Back from Costco
+              </SubmitButton>
+            </ActionForm>
+            <ActionForm action={costcoTripStatusAction}>
+              <input type="hidden" name="tripId" value={trip.id} />
+              <input type="hidden" name="status" value="cancelled" />
+              <ConfirmButton size="sm" variant="ghost" confirmLabel="Yes, cancel the trip">
+                Cancel trip
+              </ConfirmButton>
+            </ActionForm>
+          </div>
+        </>
+      ) : (
+        <ActionForm action={planCostcoTripAction} className="flex flex-col gap-1">
+          <label htmlFor="costco-date" className="text-sm text-muted-foreground">
+            Going to Costco? Pick the day and PandaBase lists what to get there — the weekly cart
+            leaves those items out until then.
+          </label>
+          <div className="flex gap-2">
+            <Input
+              id="costco-date"
+              name="plannedFor"
+              type="date"
+              min={today}
+              defaultValue={nextSaturday(now, tz)}
+              className="w-40"
+              required
+            />
+            <SubmitButton variant="secondary">Plan a trip</SubmitButton>
+          </div>
+        </ActionForm>
+      )}
+    </section>
   );
 }

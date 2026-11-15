@@ -13,12 +13,17 @@ import type {
 import type { CostcoListLineT, CostcoTripT } from "../contracts/costco";
 import type { Config } from "../config";
 import { costcoTripList, isTripExpired, tripDateProblem } from "../domain/costcoTrip";
-import { chooseStore, learnStoreOverride, type Store } from "../domain/storeChoice";
+import {
+  chooseStore,
+  learnStoreOverride,
+  type Store,
+  type StoreChoice,
+} from "../domain/storeChoice";
 import { badRequest, conflict, notFound } from "../http";
-import { productsByItem, toCandidate } from "../repo/catalog";
+import { productsByItem, toCandidate, type ProductRow } from "../repo/catalog";
 import { parseCartResult } from "../repo/cycles";
 import { batchThen, batchTransaction, type Q } from "../repo/db";
-import { loadEstimates } from "../repo/inventory";
+import { loadEstimates, type ItemEstimate } from "../repo/inventory";
 import { telemetryWrites } from "../telemetry";
 import { planItems, plannedTrip, productRef } from "./cycles";
 import { toItemEstimate } from "./inventory";
@@ -255,6 +260,25 @@ export async function expireCostcoTrips(db: Db, ctx: ReadCtx): Promise<number> {
     );
     return 1;
   });
+}
+
+/** An item's store choice with its pin, and what PandaBase would choose without one (item page). */
+export function itemStoreChoice(
+  e: Pick<ItemEstimate, "item" | "inv">,
+  products: readonly ProductRow[],
+  config: Config,
+): { choice: StoreChoice; auto: StoreChoice } {
+  const choose = (pin: Store | null) =>
+    chooseStore({
+      item: e.inv,
+      baseUnit: e.item.baseUnit,
+      products: products.map(toCandidate),
+      switchThreshold: e.item.switchThreshold,
+      pin,
+      freezesBulk: false,
+      config,
+    });
+  return { choice: choose(e.item.storePin ?? null), auto: choose(null) };
 }
 
 /**
