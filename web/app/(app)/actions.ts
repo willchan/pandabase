@@ -6,6 +6,7 @@ import { and, isNull, sql } from "drizzle-orm";
 import { runAction, str, num, type ActionResult } from "@/lib/actions";
 import { badRequest } from "@/lib/http";
 import { activeCycle } from "@/lib/repo/cycles";
+import { planCostcoTrip, setCostcoTripStatus } from "@/lib/services/costco";
 import { addOverride, openCycle, setCycleStatus } from "@/lib/services/cycles";
 import { markItem } from "@/lib/services/inventory";
 import type { Q } from "@/lib/repo/db";
@@ -141,5 +142,26 @@ export async function markItemAction(_: ActionResult, f: FormData): Promise<Acti
       return "Count saved.";
     }
     throw badRequest("Unknown action");
+  });
+}
+
+/** Plan the Costco trip, or move the planned one (§4.8). */
+export async function planCostcoTripAction(_: ActionResult, f: FormData): Promise<ActionResult> {
+  return runAction("plan_costco_trip", async ({ db, ctx }) => {
+    const plannedFor = need(str(f, "plannedFor"), "The trip's date");
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(plannedFor)) throw badRequest("Pick a date");
+    const res = await planCostcoTrip(db, { plannedFor, discordThreadId: null }, ctx);
+    const n = res.lines.length;
+    return `${res.moved_from ? "Trip moved" : "Trip planned"} — ${n} item${n === 1 ? "" : "s"} on the list.`;
+  });
+}
+
+/** "Back from Costco" or cancel the planned trip. */
+export async function costcoTripStatusAction(_: ActionResult, f: FormData): Promise<ActionResult> {
+  const status = str(f, "status");
+  return runAction(`costco_trip_${status ?? "?"}`, async ({ db, ctx }) => {
+    if (status !== "done" && status !== "cancelled") throw badRequest("Unknown status");
+    await setCostcoTripStatus(db, need(str(f, "tripId"), "Trip"), { status, reason: null }, ctx);
+    return status === "done" ? "Welcome back — trip closed." : "Trip cancelled.";
   });
 }

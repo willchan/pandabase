@@ -14,6 +14,7 @@ the household's own data; nothing here is page text.
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from datetime import date
 from typing import Any
 
 from . import contracts as c
@@ -129,6 +130,14 @@ def build(res: Mapping[str, Any], cycle: c.Cycle | None) -> str:
                 [f"{x['name']} — {FAIL_TEXT.get(str(x.get('reason')), 'error')}" for x in failed]
             )
         )
+    waiting = list(res.get("costco_waiting") or [])
+    if waiting:
+        trip = res.get("costco_trip_date")
+        when = f" ({_day(date.fromisoformat(trip))})" if trip else ""
+        out.append(f"🏬 **Waiting for the Costco trip{when}:** {_names(waiting)}")
+    bridged = list(res.get("costco_bridged") or [])
+    if bridged:
+        out.append(f"↪️ **Bought now, usually from Costco:** {_names(bridged)}")
     if res.get("layout_alert"):
         out.append("⚠️ Most product pages didn't work — Amazon's layout may have changed.")
     if stores:
@@ -137,3 +146,55 @@ def build(res: Mapping[str, Any], cycle: c.Cycle | None) -> str:
             + " · ".join(f"[{STORE_NAMES[s]}](<{CART_LINKS[s]}>)" for s in sorted(stores))
         )
     return "\n".join(out)
+
+
+# Costco trips (DESIGN §4.8) -------------------------------------------------------------------
+
+MAX_LIST_LINES = 25
+
+
+def _day(d: date) -> str:
+    return f"{d:%a %b} {d.day}"
+
+
+def costco_list(res: c.CostcoTripPlanResponse) -> str:
+    """The trip's list, posted in `#pandabase` after "going to Costco Saturday"."""
+    trip, lines = res.trip, res.lines
+    if res.moved_from is not None:
+        head = f"🏬 **Costco trip moved to {_day(trip.planned_for)}** (was {_day(res.moved_from)})"
+    else:
+        head = f"🏬 **Costco list — {_day(trip.planned_for)}**"
+    if not lines:
+        return (
+            f"{head}\nNothing on the list: an item joins it once it's been bought at Costco and "
+            "Costco is the cheaper place for it."
+        )
+    out = [f"{head} ({len(lines)} item{'s' if len(lines) != 1 else ''})"]
+    for x in lines[:MAX_LIST_LINES]:
+        packs = int(x.quantity) if float(x.quantity).is_integer() else x.quantity
+        saving = f" · {round(x.savings_ratio * 100)}% cheaper" if x.savings_ratio else ""
+        out.append(f"• **{x.name}** — {packs} × {x.product.title}{saving}")  # noqa: RUF001
+    if len(lines) > MAX_LIST_LINES:
+        out.append(f"+{len(lines) - MAX_LIST_LINES} more")
+    out.append(
+        'The weekly cart leaves these out until the trip. Say "back from Costco" when you\'re home.'
+    )
+    return "\n".join(out)
+
+
+def costco_closed(res: c.CostcoTripStatusResponse) -> str:
+    """The reply to "back from Costco" / "not going to Costco"."""
+    trip = res.trip
+    if not res.changed:
+        return f"✅ The {_day(trip.planned_for)} Costco trip was already {trip.status}."
+    if trip.status == "cancelled":
+        return (
+            f"✅ Costco trip on {_day(trip.planned_for)} cancelled — the weekly cart buys those "
+            "items again."
+        )
+    # TODO(M10.3): the Costco receipt sweep runs here and links the trip's receipt; until then
+    # what was bought only reaches PandaBase as text or a receipt photo.
+    return (
+        '✅ Welcome back — trip closed. Tell me what you bought ("got 2 eggs at Costco") or post '
+        "the receipt photo, so the pantry knows."
+    )

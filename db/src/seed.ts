@@ -839,6 +839,28 @@ export function buildSeed(opts: SeedOptions = {}): Rows {
     },
   );
 
+  // --- Costco (DESIGN §4.8) ------------------------------------------------------------------
+  // Last so the rows above keep their ids: one past Costco run bought each item's Costco pack.
+  const costcoMs = nowMs - 24 * DAY;
+  for (const [spec, irow] of itemRows) {
+    if (!spec.costco) continue;
+    rows.product.push({
+      ...stamp(costcoMs),
+      itemId: irow.id,
+      vendor: "costco",
+      asin: null,
+      title: spec.costco.title,
+      unitQuantity: spec.costco.unit,
+      unitQuantityTrust: irow.trust,
+      stance: "acceptable",
+      preferenceScore: 0,
+      timesBought: 1,
+      lastBoughtAt: iso(costcoMs),
+      lastPriceCents: spec.costco.priceCents,
+      lastPriceAt: iso(costcoMs),
+    });
+  }
+
   return rows;
 }
 

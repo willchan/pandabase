@@ -1,6 +1,15 @@
 // Grocery cycle, check-in, predictions, price quotes, cart (DESIGN §3.2, §4.3, §4.4, §4.7).
 import { z } from "zod";
-import { ActorDiscordId, Cents, Id, InventoryStatus, ProductRef, Timestamp } from "./common";
+import {
+  ActorDiscordId,
+  Cents,
+  Id,
+  InventoryStatus,
+  LocalDate,
+  ProductRef,
+  Timestamp,
+} from "./common";
+import { CostcoWaitingLine, PlanStore } from "./costco";
 import { named } from "./registry";
 
 export const CartResultLine = named(
@@ -27,6 +36,10 @@ export const CartResult = named(
     lines: z.array(CartResultLine),
     please_check_item_ids: z.array(z.string()),
     recorded_at: Timestamp,
+    /** §4.8 Costco items this cart bought anyway (`bridge`); absent before M10.2. */
+    costco_bridged_item_ids: z.array(z.string()).optional(),
+    /** §4.8 Costco items left out for the planned trip (`wait`); absent before M10.2. */
+    costco_waiting_item_ids: z.array(z.string()).optional(),
   }),
 );
 
@@ -183,6 +196,8 @@ export const PlanLine = named(
     candidates: z.array(ProductRef),
     needs_price_check: z.boolean(),
     choice_reason: z.string().nullable(),
+    /** §4.8 store choice (lines the restock rule planned; null for adds and free text). */
+    store: PlanStore.nullable(),
   }),
 );
 export const PredictionsResponse = named(
@@ -193,6 +208,10 @@ export const PredictionsResponse = named(
     lines: z.array(PlanLine),
     skipped_item_ids: z.array(z.string()),
     needs_price_check_item_ids: z.array(z.string()),
+    /** The planned Costco trip's local date, or null (§4.8). */
+    costco_trip_date: LocalDate.nullable(),
+    /** Costco items left out of this cart until that trip. */
+    costco_waiting: z.array(CostcoWaitingLine),
   }),
 );
 
@@ -230,11 +249,19 @@ export const CartLine = named(
     reason_text: z.string(),
     /** The cheaper product was chosen over the preferred one. */
     switched: z.boolean(),
+    /** A Costco item bought this week anyway (§4.8 `bridge`); `reason_text` says why. */
+    bridging_to_costco: z.boolean(),
   }),
 );
 export const CartResponse = named(
   "CartResponse",
-  z.object({ cycle_id: Id, lines: z.array(CartLine) }),
+  z.object({
+    cycle_id: Id,
+    lines: z.array(CartLine),
+    costco_trip_date: LocalDate.nullable(),
+    /** Costco items left out of this cart until the planned trip (§4.8 `wait`). */
+    costco_waiting: z.array(CostcoWaitingLine),
+  }),
 );
 
 export const CartResultRequest = named(

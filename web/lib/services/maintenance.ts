@@ -1,6 +1,6 @@
 // Daily maintenance (`GET /api/cron/maintenance`, Vercel Cron): review expiries (§4.6), shelf-life
 // discards (§4.2), stale leases (§5), retention purges (§2.7), the Monday-9am cycle fallback
-// (§4.7), the weekly merge suggestions (§4.5) and review priorities against the plan (§4.6). Each step is idempotent, so a re-run the same day
+// (§4.7), Costco trip expiry (§4.8), the weekly merge suggestions (§4.5) and review priorities against the plan (§4.6). Each step is idempotent, so a re-run the same day
 // is harmless.
 import {
   groceryCycle,
@@ -21,6 +21,7 @@ import { addDaysToInstant } from "../domain/time";
 import { asRecord } from "../repo/db";
 import { awayPeriods, loadEstimates, refreshInventoryState } from "../repo/inventory";
 import { emitTelemetry } from "../telemetry";
+import { expireCostcoTrips } from "./costco";
 import { openCycle, reprioritizeReviews } from "./cycles";
 import { releaseExpiredLeases } from "./jobs";
 import { scheduledMergeSuggestions } from "./mergeSuggest";
@@ -133,6 +134,9 @@ export async function runMaintenance(
     if (res.created) openedCycleId = res.cycle.id;
   }
 
+  // §4.8 default outcome: a trip nobody closed stops holding Costco items out of the cart.
+  const expiredTrips = await expireCostcoTrips(db, ctx);
+
   const merges = await scheduledMergeSuggestions(db, ctx);
   const reprioritized = await db.transaction((tx) => reprioritizeReviews(tx, ctx, "maintenance"));
 
@@ -146,6 +150,7 @@ export async function runMaintenance(
     opened_cycle_id: openedCycleId,
     merge_suggest_jobs: merges.jobs.length,
     reprioritized_reviews: reprioritized,
+    expired_costco_trips: expiredTrips,
   };
   await emitTelemetry(db, "cron", [{ metric: "maintenance_run", ...summary }], now);
   return summary;

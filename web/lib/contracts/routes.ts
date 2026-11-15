@@ -2,6 +2,7 @@
 // these definitions (`web/lib/route.ts`) and `openapi.ts` documents them, so the two can't drift.
 import type { z } from "zod";
 import { EmptyRequest } from "./common";
+import * as costco from "./costco";
 import * as c from "./cycle";
 import * as inv from "./inventory";
 import * as jobs from "./jobs";
@@ -126,6 +127,42 @@ export const ROUTES = {
     scopes: agent,
     body: c.CartResultRequest,
     response: c.CartResultResponse,
+  }),
+  costcoTripCurrent: route({
+    operationId: "getCostcoTrip",
+    method: "GET",
+    path: "/api/costco/trip",
+    summary: "The planned Costco trip (or null) and its live list",
+    scopes: agent,
+    response: costco.CostcoTripResponse,
+  }),
+  costcoTripPlan: route({
+    operationId: "planCostcoTrip",
+    method: "POST",
+    path: "/api/costco/trip",
+    summary:
+      '"Going to Costco Saturday": plan the trip, or move the planned one to the new date; returns its list',
+    scopes: agent,
+    body: costco.CostcoTripPlanRequest,
+    response: costco.CostcoTripPlanResponse,
+  }),
+  costcoTripStatus: route({
+    operationId: "setCostcoTripStatus",
+    method: "POST",
+    path: "/api/costco/trip/{id}/status",
+    summary: '"Back from Costco" (done) or "not going" (cancelled)',
+    scopes: agent,
+    body: costco.CostcoTripStatusRequest,
+    response: costco.CostcoTripStatusResponse,
+  }),
+  itemStorePin: route({
+    operationId: "setItemStorePin",
+    method: "POST",
+    path: "/api/items/{id}/store-pin",
+    summary: '"Get X at Costco / Whole Foods": pin the item\'s store (null clears it)',
+    scopes: agent,
+    body: costco.StorePinRequest,
+    response: costco.StorePinResponse,
   }),
   itemsLookup: route({
     operationId: "lookupItems",

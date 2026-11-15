@@ -166,12 +166,18 @@ class CycleServer:
                     "lines": [],
                     "skipped_item_ids": [],
                     "needs_price_check_item_ids": [],
+                    "costco_trip_date": None,
+                    "costco_waiting": [],
                 },
                 "GET /api/grocery/cycle/C1/cart": lambda _: {
                     "cycle_id": "C1",
+                    "costco_trip_date": "2026-10-31",
+                    "costco_waiting": [
+                        {"item_id": "I-rice", "name": "rice", "runout_at": None, "reason": "x"}
+                    ],
                     "lines": [
                         line("oats", product("P1", "B0SYNTH001"), 2),
-                        line("towels", product("P2", "B0SYNTH002")),
+                        line("towels", product("P2", "B0SYNTH002"), bridging_to_costco=True),
                         line("candles", None, free_text="birthday candles", item_id=None),
                     ],
                 },
@@ -666,6 +672,9 @@ def test_cart_build_reply_is_the_discord_summary(config: Path) -> None:
     assert "🔎 **Still to find (1):** candles — I'll search for these at 10:30." in out
     assert "[Amazon](<https://www.amazon.com/gp/cart/view.html>)" in out
     assert "Whole Foods" not in out
+    # §4.8: a Costco item left out for the planned trip is named, so nobody adds it by hand.
+    assert "🏬 **Waiting for the Costco trip (Sat Oct 31):** rice" in out
+    assert "↪️ **Bought now, usually from Costco:** towels" in out
     # The tier-2 job reads what's left without touching the browser or re-running the build.
     code, pending = run(config, ["cart", "pending"], server.api)
     assert code == 0 and pending["status"] == "needs_agent"
@@ -821,3 +830,136 @@ def test_receipts_ingest_gives_the_closed_cycles_discord_thread(config: Path) ->
     )
     assert code == 0
     assert out["closed_cycle_id"] == "C1" and out["closed_cycle_thread_id"] == "T1"
+
+
+# Costco trips (DESIGN §4.8) --------------------------------------------------------------------
+
+
+def _product(**kw: Any) -> dict[str, Any]:
+    return {
+        "id": "P1",
+        "vendor": "costco",
+        "asin": None,
+        "title": "Kirkland Signature Organic Large Eggs 24ct",
+        "unit_quantity": 24,
+        "stance": "acceptable",
+        "last_price_cents": 799,
+        "quote_cents": None,
+    } | kw
+
+
+def _trip(planned_for: str = "2026-10-24", **kw: Any) -> dict[str, Any]:
+    return {
+        "id": "T1",
+        "planned_for": planned_for,
+        "status": "planned",
+        "discord_thread_id": None,
+        "list": [],
+        "receipt_id": None,
+        "closed_at": None,
+        "close_reason": None,
+        "created_at": "2026-10-20T16:00:00Z",
+    } | kw
+
+
+def _list_line(name: str = "Eggs", **kw: Any) -> dict[str, Any]:
+    return {
+        "item_id": "I1",
+        "name": name,
+        "base_unit": "egg",
+        "product": _product(),
+        "quantity": 3,
+        "reason": "runout",
+        "on_hand": 2,
+        "runout_at": "2026-10-22T19:00:00Z",
+        "store_reason": "Costco: 27% cheaper per egg than 365 Large Brown Eggs 12ct",
+        "savings_ratio": 0.27,
+    } | kw
+
+
+@pytest.mark.parametrize(
+    ("when", "expected"),
+    [
+        ("saturday", date(2026, 10, 24)),  # today is Sat Oct 24: "Saturday" means today
+        ("Sat", date(2026, 10, 24)),
+        ("sunday", date(2026, 10, 25)),
+        ("friday", date(2026, 10, 30)),
+        ("today", date(2026, 10, 24)),
+        ("tomorrow", date(2026, 10, 25)),
+        ("2026-11-07", date(2026, 11, 7)),
+    ],
+)
+def test_trip_date_resolves_words_in_the_household_week(when: str, expected: date) -> None:
+    assert cli.trip_date(when, date(2026, 10, 24)) == expected
+
+
+def test_costco_plan_posts_the_date_and_prints_the_list(config: Path) -> None:
+    api = FakeApi(
+        {
+            "POST /api/costco/trip": lambda body: {
+                "trip": _trip(body["planned_for"]),
+                "lines": [_list_line(), _list_line("Toilet Paper", savings_ratio=None)],
+                "created": True,
+                "moved_from": None,
+            }
+        }
+    )
+    code, out = run(
+        config, ["costco", "plan", "--when", "sunday", "--actor", "42", "--key", "discord:9"], api
+    )
+    assert code == 0 and isinstance(out, str), out
+    assert api.bodies("POST /api/costco/trip") == [
+        {"planned_for": "2026-10-25", "actor_discord_id": "42", "discord_thread_id": None}
+    ]
+    assert api.requests[0].headers["idempotency-key"] == "discord:9"
+    assert out.splitlines() == [
+        "🏬 **Costco list — Sun Oct 25** (2 items)",
+        "• **Eggs** — 3 × Kirkland Signature Organic Large Eggs 24ct · 27% cheaper",  # noqa: RUF001
+        "• **Toilet Paper** — 3 × Kirkland Signature Organic Large Eggs 24ct",  # noqa: RUF001
+        "The weekly cart leaves these out until the trip. "
+        'Say "back from Costco" when you\'re home.',
+    ]
+
+
+def test_costco_plan_says_when_a_trip_moved_or_the_list_is_empty(config: Path) -> None:
+    api = FakeApi(
+        {
+            "POST /api/costco/trip": lambda body: {
+                "trip": _trip(body["planned_for"]),
+                "lines": [],
+                "created": False,
+                "moved_from": "2026-10-24",
+            }
+        }
+    )
+    code, out = run(config, ["costco", "plan", "--when", "2026-10-31"], api)
+    assert code == 0
+    assert out.startswith("🏬 **Costco trip moved to Sat Oct 31** (was Sat Oct 24)\nNothing")
+    code, err = run(config, ["costco", "plan", "--when", "someday"], api)
+    assert code == 2 and "--when 'someday'" in err["error"]
+
+
+def test_costco_done_closes_the_planned_trip(config: Path) -> None:
+    api = FakeApi(
+        {
+            "GET /api/costco/trip": lambda _: {"trip": _trip(), "lines": []},
+            "POST /api/costco/trip/T1/status": lambda body: {
+                "trip": _trip(status=body["status"], closed_at="2026-10-24T22:00:00Z"),
+                "changed": True,
+            },
+        }
+    )
+    code, out = run(config, ["costco", "done", "--actor", "42", "--key", "discord:10"], api)
+    assert code == 0 and out.startswith("✅ Welcome back — trip closed.")
+    assert api.bodies("POST /api/costco/trip/T1/status") == [
+        {"status": "done", "actor_discord_id": "42"}
+    ]
+    code, out = run(config, ["costco", "cancel"], api)
+    assert code == 0 and "cancelled" in out
+
+
+def test_costco_done_without_a_trip_posts_nothing(config: Path) -> None:
+    api = FakeApi({"GET /api/costco/trip": lambda _: {"trip": None, "lines": []}})
+    code, out = run(config, ["costco", "done"], api)
+    assert code == 0 and out.startswith("❓ No Costco trip is planned.")
+    assert api.bodies("POST /api/costco/trip/T1/status") == []

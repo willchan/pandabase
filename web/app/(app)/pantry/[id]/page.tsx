@@ -27,8 +27,10 @@ import {
 } from "@/lib/format";
 import { ApiError } from "@/lib/http";
 import { itemDetail } from "@/lib/services/catalog";
+import { itemStoreChoice } from "@/lib/services/costco";
+import { NativeSelect } from "@/components/ui/native-select";
 import { markItemAction } from "../../actions";
-import { rejectProductAction, updateItemSettingsAction } from "../actions";
+import { rejectProductAction, setStorePinAction, updateItemSettingsAction } from "../actions";
 
 export const metadata: Metadata = { title: "Item" };
 
@@ -71,6 +73,11 @@ async function ItemPageContent(props: PageProps<"/pantry/[id]">) {
   if (it.mergedIntoItemId) redirect(`/pantry/${it.mergedIntoItemId}`);
   const est = d.estimate.estimate;
   const unit = it.baseUnit;
+  const store = itemStoreChoice(d.estimate, d.products, ctx.config);
+  const regularLabel =
+    [...new Set(d.products.filter((p) => p.vendor !== "costco").map((p) => vendorName(p.vendor)))]
+      .sort()
+      .join(" / ") || "Whole Foods / Amazon";
   const useBy =
     it.shelfLifeDays && d.estimate.lastAcquired
       ? bestBeforeDate(d.estimate.lastAcquired.at, it.shelfLifeDays, tz)
@@ -189,6 +196,42 @@ async function ItemPageContent(props: PageProps<"/pantry/[id]">) {
           <EmaChart points={d.emaHistory} unit={unit === "count" ? "unit" : unit} tz={tz} />
         </section>
       ) : null}
+
+      <section aria-labelledby="store">
+        <SectionTitle>
+          <span id="store">Where it comes from</span>
+        </SectionTitle>
+        <div className="flex flex-col gap-3 rounded-xl border bg-card p-4">
+          <p className="flex flex-wrap items-center gap-2 text-sm">
+            <Badge variant={store.choice.store === "costco" ? "ok" : "secondary"}>
+              {store.choice.store === "costco" ? "Costco" : regularLabel}
+            </Badge>
+            <span>{store.choice.reason}</span>
+          </p>
+          {it.storePin && store.auto.store !== store.choice.store ? (
+            <p className="text-xs text-muted-foreground">Without the pin: {store.auto.reason}.</p>
+          ) : null}
+          <ActionForm action={setStorePinAction} className="flex items-center gap-2">
+            <input type="hidden" name="itemId" value={it.id} />
+            <label htmlFor="store-pin" className="text-sm">
+              Get it at
+            </label>
+            <NativeSelect
+              id="store-pin"
+              name="store"
+              defaultValue={it.storePin ?? "auto"}
+              className="flex-1"
+            >
+              <option value="auto">PandaBase chooses</option>
+              <option value="costco">Costco</option>
+              <option value="regular">{regularLabel}</option>
+            </NativeSelect>
+            <SubmitButton size="sm" variant="secondary">
+              Save
+            </SubmitButton>
+          </ActionForm>
+        </div>
+      </section>
 
       <section aria-labelledby="products">
         <SectionTitle

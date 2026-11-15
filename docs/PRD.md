@@ -134,7 +134,7 @@ estimate with an honest confidence hint: "~2 milk (bought Oct 12, unverified) â†
 
 | Page | Purpose |
 |------|---------|
-| **This Week** | Current cycle, planned cart with reasons, running list, overrides. (Urgent HITL.) |
+| **This Week** | Current cycle, planned cart with reasons, running list, overrides, the Costco trip and its list. (Urgent HITL.) |
 | **Cleanup** | Tabs: receipts (photo beside the lines, one dropdown per line, one confirm), merges (suggested merges and new products), unverified items, jobs (failed jobs and unsure Trash Cam photos) â€” sorted by impact on this week's cart (re-checked daily, so a review about something in this week's cart moves up to This Week), with expiry shown; 20 per tab, then "Show more". New products bought only once are left out (counted in a note): they stay as their own item, and come back if bought again or added to a cart. (Long-term HITL.) |
 | **Pantry** | Estimated inventory by location; item detail with products, thresholds, EMA history, event log. |
 | **Insights** | Visual view of the diagnostics metrics. |
@@ -150,7 +150,7 @@ Weekly Markdown report + raw JSONL extracts written to `/diagnostics` on the Mac
 every learning component and UX friction. A documented Claude Code workflow ("review
 diagnostics") turns these into proposed improvements.
 
-### 4.8 Costco (M10, in progress)
+### 4.8 Costco
 
 Costco is bought **in store, about once a month**, plus the odd delivery order. Bulk is cheaper only
 if we use it up, so PandaBase decides per item where it comes from and keeps a list for the next run.
@@ -166,14 +166,17 @@ if we use it up, so PandaBase decides per item where it comes from and keeps a l
 - **Costco list on demand:** "going to Costco Saturday" (or a planned date) posts the list for that
   trip: Costco items that would run out before the trip after it (~35 days later), with pack counts
   that cover until then (perishables nobody freezes: no more than keeps). No cart is filled for
-  Costco, delivery included.
+  Costco, delivery included. Saying another day moves the trip; "back from Costco" closes it, and
+  a trip nobody closes is dropped a week after its date. This Week shows the trip and its list and
+  can plan, move or cancel one; each item's page shows where it comes from and can pin it.
 - **The weekly cart leaves Costco items out** when a trip is planned on or before they run out.
   Otherwise (no trip planned, the trip is later, or the item is critical/out) the week's
-  Whole Foods/Amazon cart buys the usual amount and says it's bridging to Costco.
-- **Receipts:** Will's Costco account (warehouse receipts and online orders) is read by the
+  Whole Foods/Amazon cart buys the usual amount and says it's bridging to Costco. The Saturday
+  summary names both, and anyone adding the item to the week's list puts it back in the cart.
+- **Receipts (M10.3, not yet):** Will's Costco account (warehouse receipts and online orders) is read by the
   receipt sweep on the `pandabase` browser profile after "back from Costco", with a weekly
   fallback; a trip's receipt ends that trip. Costco item numbers are remembered like ASINs.
-- **After a trip:** one Discord question about bulk perishables ("froze any of the chicken /
+- **After a trip (M10.4, not yet):** one Discord question about bulk perishables ("froze any of the chicken /
   bread?"). A reply moves that amount to the freezer; no reply changes nothing and the question
   expires.
 

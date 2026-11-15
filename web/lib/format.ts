@@ -52,7 +52,11 @@ export function amount(x: number, unit: string): string {
 export const money = (cents: number | null): string | null =>
   cents === null ? null : `$${(cents / 100).toFixed(2)}`;
 
-const VENDORS: Record<string, string> = { wholefoods: "Whole Foods", amazon: "Amazon" };
+const VENDORS: Record<string, string> = {
+  wholefoods: "Whole Foods",
+  amazon: "Amazon",
+  costco: "Costco",
+};
 export const vendorName = (v: string): string =>
   VENDORS[v] ?? v.replace(/[-_]/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 

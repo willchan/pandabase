@@ -77,5 +77,7 @@ export const MaintenanceResponse = named(
     merge_suggest_jobs: z.number().int(),
     /** Pending item reviews re-scored against the current cart plan (§4.6). */
     reprioritized_reviews: z.number().int(),
+    /** Planned Costco trips closed as `cancelled` / `expired` (§4.8 default outcome). */
+    expired_costco_trips: z.number().int(),
   }),
 );

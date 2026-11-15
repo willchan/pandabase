@@ -23,10 +23,11 @@ const SECTIONS = [
   "## 3. Receipt matching",
   "## 4. VLM",
   "## 5. Product choice",
-  "## 6. Cart injection",
-  "## 7. UX friction",
-  "## 8. Deploys",
-  "## 9. Data appendix",
+  "## 6. Store choice (Costco)",
+  "## 7. Cart injection",
+  "## 8. UX friction",
+  "## 9. Deploys",
+  "## 10. Data appendix",
 ];
 
 describe("weekly diagnostics", () => {
@@ -467,6 +468,7 @@ describe("weekly diagnostics", () => {
       "receipt_lines.jsonl",
       "vlm.jsonl",
       "product_choice.jsonl",
+      "store_choice.jsonl",
       "cart_injection.jsonl",
       "ux.jsonl",
       "data_quality.jsonl",
@@ -526,5 +528,86 @@ describe("weekly diagnostics", () => {
     const report = await renderWeekly(h.db, "2025-W01", ctx);
     expect(report.markdown).toContain("| Store split (this week) | no lines |");
     expect(report.markdown).not.toContain("check the importer's store tagging");
+  });
+});
+
+describe("store choice section (DESIGN §4.8)", () => {
+  const at = "2026-10-21T18:00:00.000Z";
+  const row = (metricType: string, payload: Record<string, unknown>) => ({
+    source: "state_engine",
+    metricType,
+    payload,
+    createdAt: at,
+  });
+
+  it("counts planned items by store / why / timing, trips, and pins; flags expiry", async () => {
+    const eggs = await h.itemId("Eggs");
+    const tp = await h.itemId("Toilet Paper");
+    const milk = await h.itemId("Whole Milk");
+    const choice = (itemId: string, o: Record<string, unknown>) =>
+      row("store_choice", { cycleId: "c", itemId, ...o });
+    await h.db.insert(systemTelemetry).values([
+      choice(eggs, { store: "costco", why: "cheaper", savingsRatio: 0.27, timing: "wait" }),
+      choice(tp, {
+        store: "costco",
+        why: "cheaper",
+        savingsRatio: 0.31,
+        timing: "bridge",
+        bridgeCause: "needed_now",
+      }),
+      choice(milk, {
+        store: "regular",
+        why: "no_costco_product",
+        savingsRatio: null,
+        timing: null,
+      }),
+      row("costco_trip_planned", { tripId: "t", plannedFor: "2026-10-24", created: true }),
+      {
+        ...row("costco_trip", {
+          tripId: "t",
+          plannedFor: "2026-10-12",
+          outcome: "expired",
+          listLines: 4,
+          bridged: 1,
+        }),
+        source: "cron",
+      },
+      row("store_override", {
+        itemId: eggs,
+        to: "regular",
+        kind: "store_override_to_regular",
+        thresholdBefore: 0.15,
+        thresholdAfter: 0.2,
+      }),
+    ]);
+    const { markdown: md, extracts } = await renderWeekly(h.db, "2026-W43", ctx);
+    const section = md.slice(md.indexOf("## 6. Store choice"), md.indexOf("## 7. Cart injection"));
+    expect(section).toContain("| costco | cheaper | wait | 1 |");
+    expect(section).toContain("| costco | cheaper | bridge (needed_now) | 1 |");
+    expect(section).toContain("| regular | no_costco_product | – | 1 |");
+    expect(section).toContain("median 27% over 2 planned item(s)");
+    expect(section).toContain(
+      "Trips: 1 planned / moved, 1 closed (expired 1). Store pins: 1, 1 moved the Costco threshold (0.15 → 0.2).",
+    );
+    expect(section).toContain("| 2026-10-12 | expired | 4 | 1 |");
+    expect(section).toContain("Eggs: pinned to regular (store_override_to_regular)");
+    expect(section).toContain("A trip expired unclosed");
+    expect(md).toContain('1 Costco trip(s) expired with nobody saying "back from Costco".');
+    const rows = extracts
+      .find((e) => e.name === "store_choice.jsonl")!
+      .jsonl.trim()
+      .split("\n");
+    expect(rows).toHaveLength(6);
+    expect(rows.map((r) => JSON.parse(r) as Record<string, unknown>)).toContainEqual(
+      expect.objectContaining({ metric: "store_choice", item: "Eggs", timing: "wait" }),
+    );
+  });
+
+  it("says why nothing goes to Costco before the receipt importer", async () => {
+    await h.db
+      .insert(systemTelemetry)
+      .values([row("store_choice", { itemId: "x", store: "regular", why: "no_costco_product" })]);
+    const { markdown } = await renderWeekly(h.db, "2026-W43", ctx);
+    expect(markdown).toContain("No planned item has a Costco product yet");
   });
 });

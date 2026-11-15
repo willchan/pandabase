@@ -19,7 +19,7 @@ import time
 from collections.abc import Callable, Sequence
 from contextlib import AbstractContextManager
 from dataclasses import asdict
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any, Literal, cast
 from zoneinfo import ZoneInfo
@@ -215,6 +215,70 @@ def cmd_cycle_nudge(env: Env) -> Any:
     checkin = env.api.call("GET", "/api/grocery/checkin")
     assert isinstance(checkin, contracts.CheckinResponse)
     return cycle_replies.nudge(cycle, checkin, env.cfg.web_url)
+
+
+WEEKDAYS = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
+
+
+def trip_date(when: str, today: date) -> date:
+    """`2026-11-21`, `today`, `tomorrow`, or a weekday (`saturday`, `sat`): the next one on or
+    after today, so "Saturday" said on a Saturday means today."""
+    w = when.strip().lower()
+    if w == "today":
+        return today
+    if w == "tomorrow":
+        return today + timedelta(days=1)
+    for i, name in enumerate(WEEKDAYS):
+        if len(w) >= 3 and name.startswith(w):
+            return today + timedelta(days=(i - today.weekday()) % 7)
+    try:
+        return date.fromisoformat(w)
+    except ValueError as err:
+        raise CliError(
+            {"error": f"--when {when!r}: use YYYY-MM-DD, today, tomorrow or a weekday"}, 2
+        ) from err
+
+
+def cmd_costco_plan(env: Env) -> Any:
+    """ "Going to Costco Saturday": plan (or move) the trip and print its list for Discord."""
+    a = env.args
+    body = contracts.CostcoTripPlanRequest(
+        planned_for=trip_date(a.when, env.household_today()),
+        actor_discord_id=a.actor,
+        discord_thread_id=a.thread_id,
+    )
+    res = env.api.call("POST", "/api/costco/trip", body=api_mod.dump(body), idempotency_key=a.key)
+    assert isinstance(res, contracts.CostcoTripPlanResponse)
+    return cycle_replies.costco_list(res)
+
+
+def _costco_close(env: Env, status: Literal["done", "cancelled"]) -> Any:
+    a = env.args
+    cur = env.api.call("GET", "/api/costco/trip")
+    assert isinstance(cur, contracts.CostcoTripResponse)
+    if cur.trip is None:
+        return "❓ No Costco trip is planned." + (
+            ' Say "going to Costco Saturday" to plan one.' if status == "done" else ""
+        )
+    body = contracts.CostcoTripStatusRequest(status=status, actor_discord_id=a.actor)
+    res = env.api.call(
+        "POST",
+        f"/api/costco/trip/{cur.trip.id}/status",
+        body=api_mod.dump(body),
+        idempotency_key=a.key,
+    )
+    assert isinstance(res, contracts.CostcoTripStatusResponse)
+    return cycle_replies.costco_closed(res)
+
+
+def cmd_costco_done(env: Env) -> Any:
+    """ "Back from Costco": close the planned trip (M10.3 will sweep its receipt here)."""
+    return _costco_close(env, "done")
+
+
+def cmd_costco_cancel(env: Env) -> Any:
+    """ "Not going to Costco after all": cancel the planned trip."""
+    return _costco_close(env, "cancelled")
 
 
 def cmd_cart_finish(env: Env) -> Any:
@@ -620,6 +684,19 @@ def build_parser() -> argparse.ArgumentParser:
     cyc = sub.add_parser("cycle").add_subparsers(dest="cmd", required=True)
     nu = cyc.add_parser("nudge", help="Friday: record the nudge, print the check-in (or NO_REPLY)")
     nu.set_defaults(fn=cmd_cycle_nudge)
+
+    co = sub.add_parser("costco").add_subparsers(dest="cmd", required=True)
+    cp = co.add_parser("plan", help="plan or move the Costco trip; prints its list for Discord")
+    cp.add_argument("--when", required=True, help="YYYY-MM-DD, today, tomorrow or a weekday")
+    cp.add_argument("--thread-id", help="the Discord message/thread the list is posted under")
+    cp.set_defaults(fn=cmd_costco_plan)
+    co.add_parser("done", help='"back from Costco": close the planned trip').set_defaults(
+        fn=cmd_costco_done
+    )
+    co.add_parser("cancel", help="cancel the planned trip").set_defaults(fn=cmd_costco_cancel)
+    for name in ("plan", "done", "cancel"):
+        co.choices[name].add_argument("--actor", metavar="DISCORD_ID")
+        co.choices[name].add_argument("--key", metavar="IDEMPOTENCY_KEY")
 
     rec = sub.add_parser("receipts").add_subparsers(dest="cmd", required=True)
     s = rec.add_parser("sweep", help="ingest final orders newer than the cursor (or --backfill)")
