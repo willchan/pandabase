@@ -63,7 +63,8 @@ pandabase-tools api get /api/grocery/cycle/current
   > Reply here anytime: `add birthday candles` · `skip bananas` · `3 milk` · `skip this week` · `shopping at Trader Joe's` · `away until Nov 3`
   > I'll check in Friday 6pm and fill the cart Saturday 10am.
 
-  Then record it (idempotent: if the cron already opened the cycle this fills in its thread):
+  Then record it (idempotent: if PandaBase already opened the cycle — it does when the last one
+  ends — this fills in its thread):
 
 ```sh
 pandabase-tools api post /api/grocery/cycle/open --json '{"discord_thread_id": "<thread id>"}' --key open:<thread id>

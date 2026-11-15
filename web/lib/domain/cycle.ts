@@ -142,6 +142,22 @@ export function weekLabelToOpen(
   return label;
 }
 
+/**
+ * The week label to open right after a cycle ends at `now`, or null to leave it to the Monday
+ * fallback. Opens at once only when that cycle's build is the next one (within 7 days): the
+ * Friday nudge and Saturday build act on whatever cycle is current, so a cycle opened early — a
+ * mid-week "skip" opening next week's — would be nudged and built this week.
+ */
+export function weekLabelToOpenAtOnce(
+  cycles: readonly Pick<CycleRow, "weekLabel" | "status">[],
+  now: string,
+  config: Config,
+): string | null {
+  const label = weekLabelToOpen(cycles, now, config);
+  if (label === null) return null;
+  return daysBetween(now, cycleSchedule(label, config).buildAt) <= 7 ? label : null;
+}
+
 /** "Monday 9am at the latest": the open deadline after a cycle ended at `endedAt`. */
 export function openDeadline(endedAt: string, config: Config): string {
   const tz = config.householdTz;

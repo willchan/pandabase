@@ -59,7 +59,8 @@ complete}`.
    cycle's thread (`target` = `channels.cycle_channel`, `threadId` =
    `ingested[].closed_cycle_thread_id`; if that is null, post in `cycle_channel` itself):
    "✅ Order picked up and in the pantry (N items). This week's list is closed."
-   Then open the next cycle (`grocery-cycle` §1). `receipts ingest` prints the same two fields.
+   PandaBase usually opens the next cycle itself; still run `grocery-cycle` §1 so it gets its
+   thread. `receipts ingest` prints the same two fields.
 3. **`errors`** containing `not_signed_in` → post once to `channels.ops_channel` (its id):
    "⚠️ Amazon is signed out in <member>'s browser on the Mac Mini — please sign in there. I'll
    pick up the receipts on the next run." Before posting, read the channel's recent messages

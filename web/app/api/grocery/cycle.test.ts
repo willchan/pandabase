@@ -257,37 +257,83 @@ describe("cycle lifecycle", () => {
     expect(receipt.body.closed_cycle_id).toBe(cycle.id);
     const [closed] = await h.db.select().from(groceryCycle).where(eq(groceryCycle.id, cycle.id));
     expect(closed).toMatchObject({ status: "closed", closeReason: "order_ingested" });
-    expect(await current()).toBeNull();
 
-    // Next cycle opens immediately for the next free week.
+    // The engine opens the next free week's cycle in the same ingest; the agent fills its thread.
+    const opened = (await current())!;
+    expect(opened).toMatchObject({
+      week_label: "2026-W44",
+      status: "open",
+      discord_thread_id: null,
+    });
     const next = await open("t-44");
     expect(next.body).toMatchObject({
-      created: true,
-      cycle: { week_label: "2026-W44", status: "open", discord_thread_id: "t-44" },
+      created: false,
+      cycle: { id: opened.id, week_label: "2026-W44", discord_thread_id: "t-44" },
     });
   });
 
-  // DESIGN §4.3 lapsed rule: an item that ran out over `lapsedAfterDays` ago and was never bought
-  // again stays out of the cart, and the build logs which ones (weekly report, Velocity).
-  it("a build months later leaves lapsed items out of the cart and logs them once", async () => {
-    const cycle = (await current())!;
-    h.advance(120 * 86_400_000);
-    expect((await status(cycle.id, "building")).body.cycle.status).toBe("building");
-    const logged = await h.db
+  // Regression (live, Nov 2026): W45's order was ingested on Wednesday Nov 11 and closed the cycle,
+  // but nothing opened W46 — the receipt sweep's model never ran "open the next cycle", and the
+  // cron fallback waits for the next Monday 9am. Friday's nudge found no cycle, Saturday built no
+  // cart: the household silently lost a week. Every cycle end now opens the next cycle at once.
+  it("an order ingested mid-week opens that week's cycle before its Friday nudge", async () => {
+    const w43 = (await current())!;
+    await status(w43.id, "building");
+    const tp = (await cart(w43.id)).find((l) => l.product?.vendor === "wholefoods")!;
+    await h.call(HANDLERS.cycleCartResult.POST, `/api/grocery/cycle/${w43.id}/cart-result`, {
+      params: { id: w43.id },
+      body: {
+        lines: [{ item_id: tp.item_id, product_id: tp.product!.id, quantity: 1, outcome: "tier1" }],
+      },
+    });
+    h.setNow("2026-10-28T19:00:00.000Z"); // Wednesday of W44, noon Pacific
+    const receipt = await h.call<{ closed_cycle_id: string | null }>(
+      HANDLERS.receiptsIngest.POST,
+      "/api/receipts/ingest",
+      {
+        body: {
+          actor_discord_id: ALEX,
+          source: "digital",
+          vendor: "wholefoods",
+          account: ALEX,
+          external_order_id: "WF-WED-1",
+          fulfillment: "delivery",
+          acquired_at: h.now(),
+          lines: [
+            {
+              raw_text: tp.product!.title,
+              qty: 1,
+              item_id: tp.item_id,
+              product_id: tp.product!.id,
+            },
+          ],
+        },
+      },
+    );
+    expect(receipt.body.closed_cycle_id).toBe(w43.id);
+    const w44 = (await current())!;
+    expect(w44).toMatchObject({ week_label: "2026-W44", status: "open" });
+
+    h.setNow("2026-10-31T01:00:00.000Z"); // Friday 6pm Pacific
+    expect((await status(w44.id, "nudged")).body.cycle.nudge_sent_at).toBe(h.now());
+    const opened = await h.db
       .select()
       .from(systemTelemetry)
-      .where(eq(systemTelemetry.metricType, "item_lapsed"));
-    expect(logged.length).toBeGreaterThan(0);
-    const lapsed = new Set(logged.map((r) => (r.payload as { itemId: string }).itemId));
-    expect(logged.every((r) => (r.payload as { cycleId: string }).cycleId === cycle.id)).toBe(true);
-    const planned = (await cart(cycle.id)).map((l) => l.item_id);
-    expect(planned.filter((id) => id && lapsed.has(id))).toEqual([]);
-    await status(cycle.id, "building"); // a retry (refused: already building) logs nothing
-    const again = await h.db
-      .select()
-      .from(systemTelemetry)
-      .where(eq(systemTelemetry.metricType, "item_lapsed"));
-    expect(again).toHaveLength(logged.length);
+      .where(eq(systemTelemetry.metricType, "cycle_opened"));
+    expect(opened.map((t) => t.payload)).toEqual([{ weekLabel: "2026-W44", openedBy: "engine" }]);
+  });
+
+  // The Friday nudge and Saturday build act on whatever cycle is current, so a skip before the
+  // build must not open next week's cycle (it would be nudged and built this week).
+  it("a mid-week skip leaves the next cycle to Monday; a skip after the build opens it", async () => {
+    const w43 = (await current())!; // Tuesday Oct 20
+    await status(w43.id, "skipped");
+    expect(await current()).toBeNull();
+
+    const w44 = (await open()).body.cycle;
+    h.setNow("2026-11-01T00:00:00.000Z"); // Saturday Oct 31, 5pm Pacific: after W44's build
+    await status(w44.id, "other_store");
+    expect((await current())!.week_label).toBe("2026-W45");
   });
 
   it("skip, other store and away", async () => {

@@ -621,7 +621,8 @@ their default (keep), so nothing changes if nobody looks; a second purchase with
            │                                                              │
            ├─ "skip"/away ──▶ skipped                                     ├─ order ingested (picked up/delivered) ──▶ closed
            └─ "other store" ──▶ other_store                               └─ "done" ──▶ closed
-closed/skipped/other_store ──▶ agent opens next cycle immediately, or at Monday 9am at the latest.
+closed/skipped/other_store ──▶ engine opens the next cycle at once if its build is the upcoming
+                               one (≤ 7 days), else the Monday 9am cron fallback opens it.
 ```
 
 Opening is idempotent per `week_label`. If an away period covers the build date, the build is a no-op
@@ -630,7 +631,12 @@ and the cycle becomes `skipped`.
 Details (`web/lib/domain/cycle.ts`): `building ──(cart filled)──▶ ready` is an explicit `built`
 event. "skip" and "other store" are accepted from any active state (a built cart can be abandoned —
 nothing is checked out). A repeated nudge is a no-op. The cycle to open is the current ISO week's,
-unless its build time has passed or its label is taken, then the next free week.
+unless its build time has passed or its label is taken, then the next free week. Whatever ends a
+cycle (an ingested order, or a `skipped` / `other_store` / `closed` status) opens the next one in
+the same transaction, without a Discord thread, when `weekLabelToOpenAtOnce` allows it (its build
+is within 7 days); telemetry `cycle_opened` with `openedBy: "engine"`. The agent's `cycle/open`
+then fills in the thread. A skip before the build doesn't open next week's cycle: the Friday nudge
+and Saturday build act on whichever cycle is current, so it would be nudged and built a week early.
 
 ## 5. Media pipeline
 
@@ -1282,3 +1288,4 @@ docker-compose.yml (+ docker-compose.build.yml), Makefile, CLAUDE.md, README.md,
 | 70 | Every worker job runs on the reply agents' model, `qwen3.8:27b`, at their `num_ctx` (32768) and `keep_alive` (30m), with `think: false` | With `OLLAMA_MAX_LOADED_MODELS=1` each 9B/4B job evicted the 27B reply model, so the next Discord reply cold-loaded. Synthetic checks on the Mac (2026-11-14): the 27B matched the 9B on receipts and Trash Cam, found 8/8 planted duplicates in a 40-item merge batch against the 4B's 1/8, and took 5–20 s warm (the 9B 4–12 s); at `think: "low"` the merge batch hit the 2048-token cap. The last request's `keep_alive` wins, so the worker sends OpenClaw's: a host `OLLAMA_KEEP_ALIVE` would be cleaner, but the Ollama app (0.40.14) doesn't pass it to its server (tried 2026-11-14) |
 | 71 | PandaBase works only in `#pandabase` and its threads: only the `pandabase` agent has PandaBase's skills, and the gateway's default (`main`) and members' personal agents don't (item lookups included) | One agent with PandaBase's token, local-only model and no web or browser tools keeps the household's data and automations in one place; a lookup from the store aisle goes to `#pandabase` instead of any channel |
 | 72 | The `pandabase` agent's `AGENTS.md` and `IDENTITY.md` are owned by this repo (`agent/workspace/`) and replaced on install; `USER.md` is only seeded | `openclaw agents add` writes a personal assistant's generic files: check email and calendar, reach out after 8 quiet hours, send messages freely, and ~10k characters in every turn's prompt (2026-11-14). A household channel needs its own rules, and repo ownership keeps them reviewed and the same after a rebuild. `USER.md` is where the agent records preferences it learns, so the installer never overwrites real directives |
+| 73 | The State Engine opens the next cycle itself when a cycle ends and the next build is within 7 days; the agent only gives it a Discord thread, and the Monday 9am cron stays the fallback | Live 2026-11-11: W45's order was ingested on a Wednesday by the 9pm receipt sweep, whose local model never ran "open the next cycle"; the cron waits for the Monday after a close, so W46 got no Friday check-in and no Saturday cart. Same lesson as #60: steps that need no judgment don't belong to the model. The 7-day limit keeps a mid-week skip from opening next week's cycle, which the Friday/Saturday automations would act on a week early |

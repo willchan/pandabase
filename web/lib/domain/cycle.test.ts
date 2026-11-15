@@ -10,6 +10,7 @@ import {
   receiptMatchesCycleOrder,
   transition,
   weekLabelToOpen,
+  weekLabelToOpenAtOnce,
   type CycleEvent,
   type CycleRow,
   type CycleStatus,
@@ -143,6 +144,42 @@ describe("opening the next cycle", () => {
     ],
   ] as const)("%s", (_, cycles, at, label) => {
     expect(weekLabelToOpen(cycles, at, config)).toBe(label);
+  });
+
+  // W44's build is Saturday Oct 31, 10am Pacific (17:00Z).
+  it.each([
+    [
+      "ordered mid-week → that week's cycle (regression: W45 → W46 was lost, Nov 2026)",
+      [{ weekLabel: "2026-W43", status: "closed" }],
+      "2026-10-28T19:00:00.000Z",
+      "2026-W44",
+    ],
+    [
+      "skipped Tuesday → next week's build is 11 days out: left to Monday",
+      [{ weekLabel: "2026-W43", status: "skipped" }],
+      "2026-10-20T16:00:00.000Z",
+      null,
+    ],
+    [
+      "skipped Saturday after the build → next week",
+      [{ weekLabel: "2026-W43", status: "skipped" }],
+      "2026-10-24T22:00:00.000Z",
+      "2026-W44",
+    ],
+    [
+      "exactly 7 days before the build → opens",
+      [{ weekLabel: "2026-W43", status: "closed" }],
+      "2026-10-24T17:00:00.000Z",
+      "2026-W44",
+    ],
+    [
+      "an active cycle → nothing",
+      [{ weekLabel: "2026-W43", status: "ready" }],
+      "2026-10-28T19:00:00.000Z",
+      null,
+    ],
+  ] as const)("weekLabelToOpenAtOnce: %s", (_, cycles, at, label) => {
+    expect(weekLabelToOpenAtOnce(cycles, at, config)).toBe(label);
   });
 
   it.each([
