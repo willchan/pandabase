@@ -87,6 +87,18 @@ SH
   ! called "curl"
 }
 
+# The workspace files (agent/workspace/*.md) are copied into the agent's workspace, not loaded
+# from the checkout like the skills, so a change to them needs the installers re-run.
+@test "re-runs the agent installers when the update changed a workspace file" {
+  agent_install_stub
+  history "$A" "$B"
+  publish "$B"
+  printf '%s\n' agent/workspace/AGENTS.md >"$STUB/changed"
+  update
+  [ "$status" -eq 0 ]
+  called "agent-install --installers-only"
+}
+
 @test "leaves the agent installers alone when the update didn't touch them" {
   agent_install_stub
   history "$A" "$B"

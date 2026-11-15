@@ -6,7 +6,7 @@
 # ran them by hand (and the hand-run cron step needed OPENCLAW_AGENT=main, 2026-11-07).
 #
 #   1. scripts/deploy/mac-update.sh   newest green main now (a no-op when already on it)
-#   2. install-agent-tools, install-agent-skills, install-agent-cron
+#   2. install-agent-tools, install-agent-skills, install-agent-cron, install-agent-workspace
 #   3. openclaw gateway restart       only when install-agent-skills changed the gateway env
 #   4. list the pandabase-* automations (schedule, on/off, agent, last run) to check the result
 #
@@ -36,6 +36,7 @@ skills_out="$("$ROOT/scripts/ops/install-agent-skills.sh" 2>&1)" || {
 }
 printf '%s\n' "$skills_out"
 "$ROOT/scripts/ops/install-agent-cron.sh"
+"$ROOT/scripts/ops/install-agent-workspace.sh"
 
 info "3/4 gateway"
 case "$skills_out" in

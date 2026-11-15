@@ -224,7 +224,14 @@ memory.
    make install-agent-skills   # adds agent/skills (gateway-wide); settings → ~/.config/pandabase/agent.env
    openclaw gateway restart    # only if it says so
    make install-agent-cron     # as OPENCLAW_AGENT
+   make install-agent-workspace   # its AGENTS.md, IDENTITY.md, USER.md from agent/workspace/
    ```
+
+   `agents add` wrote OpenClaw's generic workspace files, written for one person's assistant
+   (check email, reach out after 8 quiet hours, send messages freely). The last step replaces
+   `AGENTS.md` and `IDENTITY.md` with PandaBase's (old copies in the workspace's `.orig/`) and
+   seeds `USER.md` only over the placeholder; edit `USER.md` freely after that. They load on the
+   agent's next turn, no restart.
 
    Moving existing automations to another agent is the same command: with the new
    `OPENCLAW_AGENT`, `install-agent-cron` edits each job by name (`automations edit --agent`), so
