@@ -685,13 +685,35 @@ per vendor). Telemetry: `store_choice` per planned item (`why`, savings) and `co
 (list lines, bought, bridged, savings) → weekly report §2.
 
 **Costco receipts (M10.3):** `pandabase-tools receipts sweep --vendor costco` on the `pandabase`
-profile (Playwright over CDP, like Amazon; the agent itself has no browser, §10 #52): Orders &
-Purchases → Warehouse receipts and Online orders, run after "back from Costco" plus a weekly
-fallback (few page loads: Costco's bot checks). Lines resolve by item number
-(`vendor_alias(kind=item_number)`), then the paper-receipt fuzzy match (§4.5), else a new
-unverified item; instant-savings lines fold into their item's price; deposits/fees are ignored
-aliases; "Kirkland Signature" / "KS" join `itemNames.storeBrands`. Fulfillment `in_store` for
-warehouse receipts. Parsers are built from owner-saved pages scrubbed into synthetic fixtures.
+profile (Playwright over CDP, like Amazon; the agent itself has no browser, §10 #52). Page shapes
+are in `agent/tools/tests/fixtures/costco/README.md` (synthetic copies of owner-saved pages,
+2026-11).
+
+- **Pages:** one URL, `…/myaccount/#/app/<account id>/ordersandpurchases`, with an **Online** tab
+  (costco.com 2-Day Delivery orders, linked to `…/orderdetails/<order number>`) and a
+  **Warehouse** tab (in-store receipt cards; "View Receipt" opens the receipt as a dialog on the
+  same page). Both have a period picker ("Last 3 Months", then quarters), which the backfill walks.
+  Same-Day delivery is Instacart's, not on these pages, and out of scope (owner doesn't use it).
+- **Keys:** online `digital:{account}:{order number}`; warehouse the receipt's 23-digit barcode
+  (warehouse, register, transaction, date and time), `fulfillment` `in_store`, `acquired_at` from
+  the card's date. Online orders are ingested once "Delivered on" (`fulfillment` `delivery`).
+- **Timing:** warehouse receipts "appear within 24 hours", so "back from Costco" schedules the
+  sweep for the next morning with one retry, plus the weekly fallback (few page loads: Costco's
+  bot checks).
+- **Lines:** warehouse rows are item number, abbreviated text ("KS ORG EVOO") and
+  `"<line total> <tax flag>"`; a `"N @ unit"` row before a line gives its quantity. Online lines
+  have the full title, "Item N", unit price and quantity. Lines resolve by item number
+  (`vendor_alias(kind=item_number)`, `product.vendor_sku`), then the paper-receipt fuzzy match
+  (§4.5), else a new unverified item. Item numbers are shared between the two channels, so an
+  online title names the item a warehouse abbreviation can't; a new item from a warehouse line is
+  named from its text and renamed when an online order brings its title. Discount lines were not
+  seen yet (the first live sweep checks the format; until then an unknown negative line is
+  reported, not guessed). Deposits/fees are ignored aliases; "Kirkland Signature" / "KS" join
+  `itemNames.storeBrands`. Receipts check subtotal + tax = total (`totals_check`).
+- **Price by channel:** delivered prices run higher than the warehouse's (live: $34.99 vs $29.99
+  for the same item number), so store choice uses the latest **warehouse** price of a Costco
+  product and falls back to an online price only when there is none. The weekly report gets a
+  *delivery premium* row per item bought both ways.
 
 ## 5. Media pipeline
 

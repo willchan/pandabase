@@ -1274,6 +1274,11 @@ This Week with a planned trip; the prod copy for the store split of the real cat
 
 **Notes:**
 
+- *Costco pages (2026-11-15):* the owner saved the Online and Warehouse tabs, one warehouse receipt
+  and one online order. Synthetic copies with the same structure are in
+  `agent/tools/tests/fixtures/costco/` (README lists what the pages showed; the real HTML stays out
+  of the repo). M10.3 builds its parser and sweep against them; DESIGN §4.8 *Costco receipts* has
+  the resulting rules (barcode key, next-morning sweep, warehouse prices for store choice).
 - *M10.1:* the store functions are pure and uncalled, so they emit no telemetry yet; M10.2 adds
   `store_choice` when the cart plan calls them (CLAUDE.md *Diagnostics*). `costco.vendor` is a
   config string so the receipt importer and the products it creates agree on `costco`.
