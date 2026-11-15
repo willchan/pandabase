@@ -273,6 +273,18 @@ describe("costcoListLine — §4.8 trip list", () => {
       quantity: 3,
     });
   });
+  // Owner decision 2026-11-15: an item that's out with a trip within `lowWithinDays` was both
+  // bridged in the weekly cart (`costcoTiming` → needed now) and on the trip list, so it could be
+  // bought twice. The weekly cart buys it; the trip list leaves it off.
+  it.each(["critical", "consumed"] as const)(
+    "%s with a trip within lowWithinDays is left to the weekly cart (bought once)",
+    (status) => {
+      const out = { estimate: { onHand: 0, runoutAt: null, status } };
+      expect(line({ ...out, tripDate: "2026-11-18" })).toBeNull(); // today + 3
+      expect(line({ ...out, tripDate: "2026-11-15" })).toBeNull(); // today
+      expect(line({ ...out, tripDate: "2026-11-19" })).toEqual({ reason: status, quantity: 3 });
+    },
+  );
   it("caps perishables nobody freezes at the shelf life", () => {
     // Keeps 21 days: 42 eggs → 2 packs instead of 3.
     expect(line({ item: { ...eggsItem, shelfLifeDays: 21 } })).toEqual({

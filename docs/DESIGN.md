@@ -685,7 +685,10 @@ item does nothing. `cart_result` records `costco_bridged_item_ids` and `costco_w
 
 **Trip list** (`costcoListLine`, trip on local date `T`): items whose store is `costco` and that are
 critical / consumed, static at or below `reorder_threshold`, or velocity with a runout
-`≤ T + costco.tripGapDays` (35; the owner shops about monthly) and not lapsed (§4.3). Quantity:
+`≤ T + costco.tripGapDays` (35; the owner shops about monthly) and not lapsed (§4.3). A critical /
+consumed item is left off when `T ≤ today + lowWithinDays`: the weekly cart bridges it ("needed
+now"), and listing it too could buy it twice (owner, 2026-11-15); once restocked it is no longer
+critical and comes back on later trips by its runout. Quantity:
 static or no EMA → `staticCartUnits`; else `ceil((cover / ema − left_at_trip) / unit_quantity)`,
 min 1, where `left_at_trip = max(0, on_hand − days_to_trip / ema)` and `cover = tripGapDays`,
 capped at `shelf_life_days` for a perishable that isn't a freezer item or `freezesBulk`.
