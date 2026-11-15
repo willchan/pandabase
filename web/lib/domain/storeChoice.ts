@@ -195,8 +195,7 @@ export function costcoListLine(input: {
     // so the list leaves it off rather than buying it twice (owner decision 2026-11-15).
     if (tripDate <= addDays(localDate(now, tz), config.lowWithinDays)) return null;
     reason = estimate.status;
-  }
-  else if (item.trackingType === "velocity") {
+  } else if (item.trackingType === "velocity") {
     if (estimate.runoutAt !== null && !isLapsed(estimate.runoutAt, now, config)) {
       if (localDate(estimate.runoutAt, tz) <= addDays(tripDate, gap)) reason = "runout";
     }
