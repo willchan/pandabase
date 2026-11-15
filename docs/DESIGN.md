@@ -638,6 +638,61 @@ is within 7 days); telemetry `cycle_opened` with `openedBy: "engine"`. The agent
 then fills in the thread. A skip before the build doesn't open next week's cycle: the Friday nudge
 and Saturday build act on whichever cycle is current, so it would be nudged and built a week early.
 
+### 4.8 Store choice & Costco trips (M10)
+
+`web/lib/domain/storeChoice.ts`, tunables `costco.*` in `config.ts`. **M10.1 ships the pure
+functions only;** the cart plan, the trip list route and telemetry call them from M10.2 (PLAN §M10).
+
+**Store choice** (`chooseStore`), per item, `regular` = the weekly cart's vendors (`cartVendors`):
+
+1. No non-rejected `costco` product → `regular` (`no_costco_product`). Costco products are created
+   only from Costco receipts, so an item becomes a candidate after one Costco purchase.
+2. `item.store_pin` (`costco`|`regular`) wins (`pinned`).
+3. No regular candidate → `costco` (`costco_only`).
+4. Costco's product = `pickPreferred` among Costco candidates; regular = §4.4 `chooseProduct`.
+   Either unit price unknown → `regular` (`no_price`).
+5. `savings = (regular − costco) / regular` per base unit; `≤ costco.switchThreshold` (0.15) →
+   `regular` (`not_cheaper_enough`).
+6. Spoilage: velocity item with an EMA and a shelf life, not a freezer item, not `freezesBulk`, and
+   `costco.unit_quantity × ema_days > shelf_life_days` → `regular` (`spoils_first`).
+7. Else `costco` (`cheaper`). Reason strings name the saving or the blocker.
+
+`freezesBulk` is learned in M10.4 from the post-trip freezer answers (part of a Costco pack moved
+to the freezer); until then it is false.
+
+**Weekly cart** (`costcoTiming`): an item in the §4.3 plan whose store is `costco` is left out
+(`wait`) when a trip is planned on or before its runout date; otherwise it stays in the cart as
+usual (`bridge`, the regular product for `cartCoverDays`): no trip planned, the trip is after the
+runout, or the item is critical / out. An unknown runout waits for a planned trip.
+
+**Trip list** (`costcoListLine`, trip on local date `T`): items whose store is `costco` and that are
+critical / consumed, static at or below `reorder_threshold`, or velocity with a runout
+`≤ T + costco.tripGapDays` (35; the owner shops about monthly) and not lapsed (§4.3). Quantity:
+static or no EMA → `staticCartUnits`; else `ceil((cover / ema − left_at_trip) / unit_quantity)`,
+min 1, where `left_at_trip = max(0, on_hand − days_to_trip / ema)` and `cover = tripGapDays`,
+capped at `shelf_life_days` for a perishable that isn't a freezer item or `freezesBulk`.
+
+**Learning** (`learnStoreOverride`): "get X at Whole Foods / Costco" sets `item.store_pin`. When it
+contradicts a price-based choice (`cheaper` / `not_cheaper_enough`), the household
+`costco.switchThreshold` (a `setting` row) moves: away from Costco `+ thresholdStepUp` (0.05, cap
+0.6), toward it `− thresholdStepDown` (0.03, floor 0), on the 0.01 grid. Other choices only pin.
+
+**Planned schema (expand-only; M10.2–M10.3):** `item.store_pin` (nullable), `costco_trip`
+(`planned_for` local date, `status` `planned`|`done`|`cancelled`, `discord_thread_id`, `list`
+json snapshot, `receipt_id`, `closed_at`; at most one `planned`), `vendor_alias.kind` gains
+`item_number` (Costco's item number, matched like an ASIN), `product.vendor_sku` (nullable, unique
+per vendor). Telemetry: `store_choice` per planned item (`why`, savings) and `costco_trip`
+(list lines, bought, bridged, savings) → weekly report §2.
+
+**Costco receipts (M10.3):** `pandabase-tools receipts sweep --vendor costco` on the `pandabase`
+profile (Playwright over CDP, like Amazon; the agent itself has no browser, §10 #52): Orders &
+Purchases → Warehouse receipts and Online orders, run after "back from Costco" plus a weekly
+fallback (few page loads: Costco's bot checks). Lines resolve by item number
+(`vendor_alias(kind=item_number)`), then the paper-receipt fuzzy match (§4.5), else a new
+unverified item; instant-savings lines fold into their item's price; deposits/fees are ignored
+aliases; "Kirkland Signature" / "KS" join `itemNames.storeBrands`. Fulfillment `in_store` for
+warehouse receipts. Parsers are built from owner-saved pages scrubbed into synthetic fixtures.
+
 ## 5. Media pipeline
 
 1. User posts a photo in `#pandabase`. `discord-intake` classifies (`paper_receipt` | `trash_cam`)
@@ -1289,3 +1344,4 @@ docker-compose.yml (+ docker-compose.build.yml), Makefile, CLAUDE.md, README.md,
 | 71 | PandaBase works only in `#pandabase` and its threads: only the `pandabase` agent has PandaBase's skills, and the gateway's default (`main`) and members' personal agents don't (item lookups included) | One agent with PandaBase's token, local-only model and no web or browser tools keeps the household's data and automations in one place; a lookup from the store aisle goes to `#pandabase` instead of any channel |
 | 72 | The `pandabase` agent's `AGENTS.md` and `IDENTITY.md` are owned by this repo (`agent/workspace/`) and replaced on install; `USER.md` is only seeded | `openclaw agents add` writes a personal assistant's generic files: check email and calendar, reach out after 8 quiet hours, send messages freely, and ~10k characters in every turn's prompt (2026-11-14). A household channel needs its own rules, and repo ownership keeps them reviewed and the same after a rebuild. `USER.md` is where the agent records preferences it learns, so the installer never overwrites real directives |
 | 73 | The State Engine opens the next cycle itself when a cycle ends and the next build is within 7 days; the agent only gives it a Discord thread, and the Monday 9am cron stays the fallback | Live 2026-11-11: W45's order was ingested on a Wednesday by the 9pm receipt sweep, whose local model never ran "open the next cycle"; the cron waits for the Monday after a close, so W46 got no Friday check-in and no Saturday cart. Same lesson as #60: steps that need no judgment don't belong to the model. The 7-day limit keeps a mid-week skip from opening next week's cycle, which the Friday/Saturday automations would act on a week early |
+| 74 | Costco is a second store chosen per item by unit price, spoilage and trip timing, with a list instead of a cart, prices only from receipts, and overrides that pin the item | The household shops Costco in store about monthly: a cart would be automation against Costco's bot checks for a store we mostly walk. Bulk is only cheaper if it's used up, so the shelf-life check decides, and trip timing decides whether the weekly cart bridges. Prices from receipts cost no page loads; an item is a candidate once bought there. A pin is the predictable reading of "get X at Whole Foods"; the household threshold still learns from overrides that go against price |

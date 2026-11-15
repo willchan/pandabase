@@ -150,9 +150,36 @@ Weekly Markdown report + raw JSONL extracts written to `/diagnostics` on the Mac
 every learning component and UX friction. A documented Claude Code workflow ("review
 diagnostics") turns these into proposed improvements.
 
+### 4.8 Costco (M10, in progress)
+
+Costco is bought **in store, about once a month**, plus the odd delivery order. Bulk is cheaper only
+if we use it up, so PandaBase decides per item where it comes from and keeps a list for the next run.
+
+- **Which store:** an item becomes a Costco candidate once we've bought it there (prices come from
+  Costco receipts; nothing is looked up on costco.com). It goes to Costco when Costco's pack is
+  meaningfully cheaper per unit (15% by default) and one pack gets used up before it spoils (or
+  it's a freezer item, or we freeze part of it). Each item shows why ("Costco: 43% cheaper per egg
+  than Vital Farms"; "Costco's pack lasts ~40 days but keeps 21").
+- **Overrides stick:** "get eggs at Whole Foods" / "get eggs at Costco" pins that item to that
+  store. When the pin goes against a price-based choice, the household's Costco threshold moves a
+  little too (away from Costco → it needs a bigger saving next time).
+- **Costco list on demand:** "going to Costco Saturday" (or a planned date) posts the list for that
+  trip: Costco items that would run out before the trip after it (~35 days later), with pack counts
+  that cover until then (perishables nobody freezes: no more than keeps). No cart is filled for
+  Costco, delivery included.
+- **The weekly cart leaves Costco items out** when a trip is planned on or before they run out.
+  Otherwise (no trip planned, the trip is later, or the item is critical/out) the week's
+  Whole Foods/Amazon cart buys the usual amount and says it's bridging to Costco.
+- **Receipts:** Will's Costco account (warehouse receipts and online orders) is read by the
+  receipt sweep on the `pandabase` browser profile after "back from Costco", with a weekly
+  fallback; a trip's receipt ends that trip. Costco item numbers are remembered like ASINs.
+- **After a trip:** one Discord question about bulk perishables ("froze any of the chicken /
+  bread?"). A reply moves that amount to the freezer; no reply changes nothing and the question
+  expires.
+
 ## 5. Non-goals (v1)
 
-- Checking out / paying. Ever, without a separate explicit decision.
+- Checking out / paying. Ever, without a separate explicit decision. No Costco cart either.
 - Video audits of fridge/freezer (v1.1).
 - Chores & maintenance tasks (v2).
 - Standalone freezer monitor with recipe suggestions (v2).

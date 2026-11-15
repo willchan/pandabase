@@ -95,6 +95,25 @@ export const DEFAULT_CONFIG = {
     autoPromoteConsecutiveBuys: 3,
   },
 
+  /** §4.8 Costco: store choice, trip list and the household's store threshold. */
+  costco: {
+    /** `product.vendor` of Costco products. */
+    vendor: "costco",
+    /**
+     * Costco wins when it's more than this much cheaper per base unit than the weekly cart's
+     * choice (household-wide; overrides move it, stored as a `setting` row).
+     */
+    switchThreshold: 0.15,
+    /** Override away from Costco ("get it at Whole Foods"). */
+    thresholdStepUp: 0.05,
+    thresholdCap: 0.6,
+    /** Override toward Costco. */
+    thresholdStepDown: 0.03,
+    thresholdFloor: 0,
+    /** Days between Costco trips: a trip's list covers until the next one (owner: monthly). */
+    tripGapDays: 35,
+  },
+
   /** §4.5 Receipt matching. */
   matching: {
     /** Fuzzy (token-set ratio) score at or above which a paper line is applied provisionally. */

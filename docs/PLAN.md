@@ -43,6 +43,7 @@ contracts.
 | M7 Agent skill pack & tools | done | #9 |
 | M8 Ops, compose, README | done | #11 |
 | M9 Continuous deployment | done | #14 |
+| M10 Costco | in progress (M10.1 in review) | |
 
 ---
 
@@ -1235,3 +1236,44 @@ branch `claude/system-e2e`). Details, the bugs found and the security review are
     ingesting and print `closed_cycle_thread_id` (once the cycle closes, `cycle/current` is
     null); the skills give the form that worked (`action: "send"`, `target: "<channel id>"`,
     `threadId`), and say not to re-run a sweep or report a post that failed.
+
+---
+
+## M10 — Costco as a second store
+
+**Goal:** Costco items are bought on monthly in-store trips from a list PandaBase keeps, the weekly
+Whole Foods/Amazon cart leaves them out until a trip, and Costco receipts feed inventory (PRD §4.8).
+
+**Read:** PRD §4.1, §4.2, §4.8. DESIGN §2.2, §2.4, §4.3, §4.4, §4.8, §6, §10 #52, #74.
+
+Owner decisions (2026-11-15): list on demand, not a cadence or a cart; PandaBase suggests the
+store and overrides stick; Will's Costco account on the `pandabase` profile; no Costco cart
+(delivery orders are only imported); trips about monthly (35-day gap); Costco prices from receipts
+only; one freezer question per trip; the owner saves the Costco pages for fixtures.
+
+One PR each:
+
+1. **M10.1 Docs + store choice** — PRD §4.8, DESIGN §4.8 / #74, `storeChoice.ts` + tests,
+   `costco.*` config. No schema, no callers.
+2. **M10.2 Trips and the weekly cart** — migration (`item.store_pin`, `costco_trip`); routes to plan /
+   cancel a trip, read its list and pin a store (contracts regenerated); the cart plan runs
+   `chooseStore` + `costcoTiming` (bridge lines say so); `store_choice` / `costco_trip` telemetry and
+   a weekly-report section; `discord-intake` / `grocery-cycle` skill steps for "going to Costco
+   Saturday", "back from Costco", "get X at Whole Foods"; This Week shows the next trip's list;
+   tier-A step.
+3. **M10.3 Costco receipts** — `vendor_alias.kind = item_number`, `product.vendor_sku`; parser and
+   `receipts sweep --vendor costco` from synthetic fixtures built from the owner's saved pages
+   (list page, one warehouse receipt, one online order; real HTML stays in `.scratch/`, never
+   committed); instant-savings folding; Kirkland store brands; trip closes on its receipt; backfill
+   of past Costco receipts; `make smoke` gets an opt-in Costco check.
+4. **M10.4 Freezer question + `freezesBulk`** — one post-trip question with a default (no change)
+   and an expiry; answers move stock and teach `freezesBulk`; diagnostics rows.
+
+**Acceptance (each PR):** `make check`; M10.2–M10.4 also follow the verify skill (seeded shots of
+This Week with a planned trip; the prod copy for the store split of the real catalog).
+
+**Notes:**
+
+- *M10.1:* the store functions are pure and uncalled, so they emit no telemetry yet; M10.2 adds
+  `store_choice` when the cart plan calls them (CLAUDE.md *Diagnostics*). `costco.vendor` is a
+  config string so the receipt importer and the products it creates agree on `costco`.
