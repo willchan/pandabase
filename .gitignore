@@ -64,3 +64,6 @@ test-results/
 
 # make prod-copy: the local copy of production (real household data — never commit)
 /.scratch/
+
+# Claude Code session worktrees (nested checkouts)
+.claude/worktrees/
