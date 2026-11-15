@@ -21,6 +21,10 @@ Read only the sections your task needs.
 - **Driving a PR?** Follow `.claude/skills/steward/SKILL.md`: check mergeability before CI on every
   wake and after each push — GitHub runs no PR CI while a PR conflicts with `main`. After opening a
   PR, turn on its Auto-fix (the app's PR monitor) so CI failures and conflicts wake you.
+- **Merge when green.** Will doesn't review PRs here. Once a PR you opened (or were asked to drive)
+  is mergeable, every required check on its head commit has passed, and no review thread is
+  unresolved, merge it yourself (squash) without asking. Don't merge on red, pending or
+  conflicting; anything that needs `sudo` or touches production still needs asking first.
 - **Done means seen working.** Before finishing a UI, data, importer or prediction change, follow
   `.claude/skills/verify/SKILL.md` (seeded shots, the read-only prod copy, real page shapes).
 - **The docs are living.** Any PR that changes user-visible behavior updates `docs/PRD.md`; any PR

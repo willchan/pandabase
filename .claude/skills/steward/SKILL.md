@@ -22,6 +22,8 @@ commit), but those runs don't tell you whether the PR merges cleanly. Only check
    If it conflicts — or `main` has moved and touches files you changed — do the merge below *now*,
    before looking at CI or reviews. Never end a wake waiting on CI while the PR conflicts.
 2. Then CI on the latest head commit, then review threads (the harness rules apply).
+3. **Green → merge.** Mergeable, all required checks passed on the head commit, no unresolved
+   review threads: squash-merge it yourself without asking (CLAUDE.md *Merge when green*).
 
 ## Resolving conflicts
 
