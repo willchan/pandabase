@@ -349,6 +349,7 @@ rm ~/.openclaw/workspace-pandabase/BOOTSTRAP.md   # no onboarding chat in a shar
 make install-agent-skills   # skills.load.extraDirs += agent/skills; settings → ~/.config/pandabase/agent.env
 openclaw gateway restart    # if it said so
 make install-agent-cron     # the automations from agent/cron.example.json (idempotent)
+make install-agent-workspace   # the agent's AGENTS.md, IDENTITY.md (replaced), USER.md (seeded)
 ```
 
 The patch sets the `#pandabase` channel policy and local photo descriptions on Ollama (both

@@ -122,6 +122,7 @@ make install-update-timer    # launchd: make update every 15 min (GHCR image is 
 make install-agent-tools     # agent/tools venv, pandabase-tools on PATH, configs from examples
 make install-agent-skills    # skills.load.extraDirs += agent/skills; ~/.config/pandabase/agent.env
 make install-agent-cron      # OpenClaw automations (list, then edit or add)
+make install-agent-workspace # the pandabase agent's AGENTS.md + IDENTITY.md (replaced), USER.md (seeded)
 make mac-rollout             # by hand: green main + the agent installers (make update runs them itself when needed)
 make install-chromium        # per-member Chrome LaunchAgents (CHROMIUM_BIN; loopback-only CDP)
 make install-ollama-env      # OLLAMA_NUM_PARALLEL=1, OLLAMA_MAX_LOADED_MODELS=1, OLLAMA_NO_CLOUD=1 at login

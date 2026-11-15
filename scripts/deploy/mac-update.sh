@@ -94,7 +94,7 @@ rollback_to() {
 
 # Paths whose change needs the agent installers re-run (skills load from the checkout, so a
 # SKILL.md edit alone doesn't). Before 2026-11, someone ran them by hand after each such merge.
-AGENT_INSTALL_PATHS='^(agent/cron\.example\.json|agent/[^/]*\.example\.[^/]*|scripts/ops/(install-agent-[a-z]+|lib|mac-rollout)\.sh)$'
+AGENT_INSTALL_PATHS='^(agent/cron\.example\.json|agent/[^/]*\.example\.[^/]*|agent/workspace/[^/]+\.md|scripts/ops/(install-agent-[a-z]+|lib|mac-rollout)\.sh)$'
 
 # After a healthy update from PREV to TARGET: re-run the agent installers if that diff needs it.
 agent_installers() {
