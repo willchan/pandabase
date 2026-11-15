@@ -27,7 +27,13 @@ import type {
   ProductRef,
 } from "../contracts";
 import type { CartResultT } from "../contracts/cycle";
-import { transition, weekLabelToOpen, type CycleEvent } from "../domain/cycle";
+import {
+  isActive,
+  transition,
+  weekLabelToOpen,
+  weekLabelToOpenAtOnce,
+  type CycleEvent,
+} from "../domain/cycle";
 import {
   planCart,
   pleaseCheckList,
@@ -62,50 +68,72 @@ export async function currentCycle(q: Q): Promise<CycleT | null> {
   return c ? toCycle(c) : null;
 }
 
+export type OpenedBy = "agent" | "cron" | "session" | "engine";
+
 /**
  * Open the next cycle (§4.7). Idempotent: while a cycle is active it is returned unchanged (its
- * Discord thread is filled in if the cron opened it without one).
+ * Discord thread is filled in if the engine or cron opened it without one).
  */
 export async function openCycle(
   db: Db,
   discordThreadId: string | null,
   ctx: ServiceCtx,
-  openedBy: "agent" | "cron" | "session" = "agent",
+  openedBy: OpenedBy = "agent",
 ): Promise<{ cycle: CycleT; created: boolean }> {
-  return db.transaction(async (tx) => {
-    const active = await activeCycle(tx);
-    if (active) {
-      if (discordThreadId && !active.discordThreadId) {
-        await tx
-          .update(groceryCycle)
-          .set({ discordThreadId, updatedAt: ctx.now })
-          .where(eq(groceryCycle.id, active.id));
-        active.discordThreadId = discordThreadId;
-      }
-      return { cycle: toCycle(active), created: false };
+  return db.transaction((tx) => openCycleIn(tx, discordThreadId, ctx, openedBy));
+}
+
+/** `openCycle` within the caller's transaction. */
+export async function openCycleIn(
+  tx: Q,
+  discordThreadId: string | null,
+  ctx: Pick<ServiceCtx, "now" | "config">,
+  openedBy: OpenedBy,
+): Promise<{ cycle: CycleT; created: boolean }> {
+  const active = await activeCycle(tx);
+  if (active) {
+    if (discordThreadId && !active.discordThreadId) {
+      await tx
+        .update(groceryCycle)
+        .set({ discordThreadId, updatedAt: ctx.now })
+        .where(eq(groceryCycle.id, active.id));
+      active.discordThreadId = discordThreadId;
     }
-    const cycles = await tx
-      .select({ weekLabel: groceryCycle.weekLabel, status: groceryCycle.status })
-      .from(groceryCycle);
-    const weekLabel = weekLabelToOpen(cycles, ctx.now, ctx.config)!;
-    const row = {
-      id: newId(),
-      createdAt: ctx.now,
-      updatedAt: ctx.now,
-      weekLabel,
-      discordThreadId,
-      status: "open" as const,
-      openedAt: ctx.now,
-    };
-    await tx.insert(groceryCycle).values(row);
-    await emitTelemetry(
-      tx,
-      "state_engine",
-      [{ metric: "cycle_opened", weekLabel, openedBy }],
-      ctx.now,
-    );
-    return { cycle: toCycle(await getCycle(tx, row.id)), created: true };
-  });
+    return { cycle: toCycle(active), created: false };
+  }
+  const cycles = await tx
+    .select({ weekLabel: groceryCycle.weekLabel, status: groceryCycle.status })
+    .from(groceryCycle);
+  const weekLabel = weekLabelToOpen(cycles, ctx.now, ctx.config)!;
+  const row = {
+    id: newId(),
+    createdAt: ctx.now,
+    updatedAt: ctx.now,
+    weekLabel,
+    discordThreadId,
+    status: "open" as const,
+    openedAt: ctx.now,
+  };
+  await tx.insert(groceryCycle).values(row);
+  await emitTelemetry(
+    tx,
+    "state_engine",
+    [{ metric: "cycle_opened", weekLabel, openedBy }],
+    ctx.now,
+  );
+  return { cycle: toCycle(await getCycle(tx, row.id)), created: true };
+}
+
+/**
+ * §4.7: right after a cycle ends, open the next one if its build is the upcoming one, so no week
+ * waits on the agent; otherwise the Monday fallback opens it.
+ */
+export async function openNextCycleIn(tx: Q, ctx: Pick<ServiceCtx, "now" | "config">) {
+  const cycles = await tx
+    .select({ weekLabel: groceryCycle.weekLabel, status: groceryCycle.status })
+    .from(groceryCycle);
+  if (weekLabelToOpenAtOnce(cycles, ctx.now, ctx.config) === null) return null;
+  return openCycleIn(tx, null, ctx, "engine");
 }
 
 const STATUS_EVENTS: Record<z.infer<typeof CycleStatusRequest>["status"], CycleEvent["type"]> = {
@@ -162,6 +190,7 @@ export async function setCycleStatus(
           ctx.now,
         );
       }
+      if (!isActive(res.to)) await openNextCycleIn(tx, ctx);
     }
     return { cycle: toCycle(await getCycle(tx, cycleId)), changed: !res.noop };
   });

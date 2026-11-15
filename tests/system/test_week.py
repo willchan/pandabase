@@ -567,10 +567,15 @@ def test_12_digital_receipt_closes_the_cycle(stack: Stack) -> None:
 
 @preview
 def test_13_next_cycle_opens(stack: Stack) -> None:
-    assert stack.skill(GC, "api get /api/grocery/cycle/current")["cycle"] is None
+    # The ingest opened the next cycle itself when its build is the upcoming one (DESIGN §4.7);
+    # on the real clock that depends on the weekday. Either way the skill's open gives it a thread.
+    engine = stack.skill(GC, "api get /api/grocery/cycle/current")["cycle"]
     opened = stack.skill(GC, "/api/grocery/cycle/open", thread_id="400000000000000102")
     cyc = opened["cycle"]
-    assert opened["created"] is True and cyc["status"] == "open" and cyc["id"] != W["cycle"]
+    assert opened["created"] is (engine is None) and cyc["status"] == "open"
+    assert cyc["id"] != W["cycle"] and cyc["discord_thread_id"] == "400000000000000102"
+    if engine is not None:
+        assert cyc["id"] == engine["id"] and engine["discord_thread_id"] is None
     prev = stack.one("select week_label from grocery_cycle where id = ?", W["cycle"])
     assert cyc["week_label"] > prev["week_label"]
     W["next_cycle"] = cyc["id"]

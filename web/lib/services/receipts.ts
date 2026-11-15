@@ -25,6 +25,7 @@ import type { Q } from "../repo/db";
 import { refreshInventoryState } from "../repo/inventory";
 import { receiptRepository } from "../repo/receipts";
 import { emitTelemetry } from "../telemetry";
+import { openNextCycleIn } from "./cycles";
 import type { ServiceCtx } from "./types";
 
 export const newId = monotonicFactory();
@@ -264,6 +265,8 @@ export async function persistReceiptEffects(
       .update(groceryCycle)
       .set({ ...fx.cycle.patch, updatedAt: now })
       .where(eq(groceryCycle.id, fx.cycle.cycleId));
+    // §4.7: a mid-week order must not cost the household that week's cycle.
+    await openNextCycleIn(q, ctx);
   }
 
   await refreshInventoryState(

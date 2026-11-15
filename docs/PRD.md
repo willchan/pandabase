@@ -52,7 +52,9 @@ fulfillment, then in-store Whole Foods (linked via phone number), then delivery.
 A Discord **thread per cycle** in `#pandabase`, acting as a running grocery list.
 
 - **Opens** right after the previous cycle closes (its order was picked up/delivered and ingested,
-  or someone says "done"), or **Monday 9am** at the latest.
+  or someone says "done"), or **Monday 9am** at the latest. The app opens it itself, so a mid-week
+  delivery never costs the household that week's Friday check-in and Saturday cart. Skipping a week
+  (or shopping elsewhere) before its Saturday cart leaves the next list to Monday.
 - **Anytime:** either of us replies to add things — including one-off free text
   ("birthday candles, cake flour"), skip items ("skip bananas"), or set quantities.
 - **Friday 6pm nudge** in `#pandabase`, linking the week's thread (replies go in the thread):
