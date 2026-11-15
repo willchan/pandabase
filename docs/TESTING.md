@@ -67,7 +67,9 @@ test. Name resolution follows the skills' written rule (`matches[0].item_id` whe
 | 8 | Trash Cam photo | provisional `consumed` on Oat Milk, reply, back in the plan |
 | 9 | "bought chicken thighs and avocados" | one manual receipt, `manual`/`confirmed` lines, idempotent |
 | 10 | "froze the chicken thighs" | `moved` fridge → freezer with the bought quantity, freezer aging |
+| 10b | "going to Costco today", "get toilet paper at Amazon" | `costco plan` → trip + list (Costco products only), idempotent per message; counted-low blueberries wait (`costco_waiting`, not in the cart or *please check*); the pin drops toilet paper off the list and moves the household Costco threshold (`store_override`) |
 | 11 | Saturday build | `building`, price checks + quotes, tier 1 on Amazon lines from their product pages (the add form, never Buy Now), WF + free text → `needs_agent`, resume adds nothing twice, tier 2 via the skill's `cart search` → `cart add` (labelled-untrusted candidates, count rose, a repeat add is `already_in_cart`), a held lease makes `cart search` exit 3, `cart finish` → `ready`, `cart_result`, `cart_line_result` / `cart_tier1_line` / `cart_tier2_line`, only `no_asin` price failures, **no checkout URL ever opened** |
+| 11b | "back from Costco" | `cart_result.costco_waiting_item_ids` = what waited, the build summary named them, `costco done` → `done`, `costco_trip` telemetry with `bridged`, `store_choice` rows (wait for the blueberries) |
 | 12 | `receipts ingest` (synthetic order) | closes the cycle (`order_ingested`), ASIN matches, new unverified item, replay + `external_order_id` dedupe, cursor |
 | 13 | next cycle opens | new open cycle, later week |
 | 14 | merge suggestions round trip | `merge-suggestions/run` → worker (text model) → `merge_suggestion` review for the new item, telemetry |
