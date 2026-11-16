@@ -22,6 +22,7 @@ from dataclasses import asdict
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any, Literal, cast
+from urllib.parse import parse_qsl
 from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel, ValidationError
@@ -123,8 +124,12 @@ def _model_json(model: BaseModel) -> Any:
 
 def cmd_api(env: Env) -> Any:
     a = env.args
-    route, _ = api_mod.match_route(a.method, a.path)
-    query = dict(kv.split("=", 1) for kv in (a.query or []))
+    # `/api/x?week=2026-W46` is the same as `/api/x -q week=2026-W46` (the docs use both).
+    path, _, qs = a.path.partition("?")
+    route, _ = api_mod.match_route(a.method, path)
+    query = dict(parse_qsl(qs, keep_blank_values=True))
+    query.update(kv.split("=", 1) for kv in (a.query or []))
+    a.path = path
     body = _json_arg(a.json, a.input)
     if route.body is not None:
         body = dict(body or {})

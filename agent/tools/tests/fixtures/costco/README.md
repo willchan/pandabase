@@ -46,5 +46,9 @@ hashed MUI names (`css-1k9ek97`) that change between builds, so the parsers must
 - **Item numbers are shared:** the same product carries the same item number on warehouse
   receipts and online orders (live: a bath tissue at $29.99 in the warehouse, $34.99 delivered).
   In these fixtures `9000201` is on both, at $23.99 and $27.99.
+- **Cards render late.** The frame (`myOrderHistory`, the tabs, the period picker) is there before
+  a tab's cards: read the list only once `a#orderNumber_…` / `#viewRecieptBtn_…` has rendered
+  (first live sweep, 2026-11-15, read the frame alone). Card texts are inline, so a date can run
+  straight into the next text ("Delivered on 11/10/2026Order …"): no `\b` after a date.
 - Costco Same-Day delivery goes through Instacart and is not on these pages; the household doesn't
   use it.

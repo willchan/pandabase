@@ -1014,7 +1014,8 @@ JSON on stdout; exit 0 ok, 1 error, 2 usage, 3 profile locked, 4 refused URL):
   `returned`). Zero ASINs on a final order → `needs_agent_extraction` with page text, and
   `selector_error`; the skill ingests its own extraction with `receipts ingest`.
 - `costco_receipts.py` (`receipts sweep --vendor costco [--backfill | --due] [--reply]`, M10.3) —
-  Costco's Orders & Purchases on the cart member's (`pandabase`) profile: Online tab cards, then a
+  Costco's Orders & Purchases on the cart member's (`pandabase`) profile: Online tab cards (read
+  once a card has rendered, or after a bounded wait: the SPA draws each tab's frame first), then a
   click to Warehouse and each new receipt's dialog (oldest first), then one details page per new
   delivered online order; privacy filter, keys, lines, unknown lines, `receipts-costco.json`
   (done set, scheduled dates, last warning) and replies as in §4.8 *Costco receipts*. `costco

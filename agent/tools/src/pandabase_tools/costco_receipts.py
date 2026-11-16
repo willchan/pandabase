@@ -52,9 +52,10 @@ Mode = Literal["sweep", "backfill"]
 BARCODE = re.compile(r"^\d{23}$")
 WAREHOUSE_CARD_ID = re.compile(r"^viewRecieptBtn_(\d{23})$")
 ORDER_LINK_ID = re.compile(r"^orderNumber_(\d{6,20})$")
-CARD_DATE = re.compile(r"\b(\d{2})/(\d{2})/(\d{4})\s*-\s*(\d{1,2}):(\d{2})\s*([ap])m\b", re.I)
-MDY = re.compile(r"\b(\d{2})/(\d{2})/(\d{4})\b")
-DELIVERED = re.compile(r"\bdelivered on\s+(\d{2}/\d{2}/\d{4})\b", re.I)
+# Digit-only boundaries, not `\b`: the live cards run inline texts together ("…2026Order …").
+CARD_DATE = re.compile(r"(?<!\d)(\d{2})/(\d{2})/(\d{4})\s*-\s*(\d{1,2}):(\d{2})\s*([ap])m", re.I)
+MDY = re.compile(r"(?<!\d)(\d{2})/(\d{2})/(\d{4})(?!\d)")
+DELIVERED = re.compile(r"delivered on\s+(\d{2}/\d{2}/\d{4})(?!\d)", re.I)
 MONEY = re.compile(r"\$\s?(\d{1,6}(?:,\d{3})*)\.(\d{2})")
 AMOUNT = re.compile(r"^\s*(\d{1,6}(?:,\d{3})*)\.(\d{2})\s*(-)?\s*([A-Z])?\s*$")
 MULTI_BUY = re.compile(r"^\s*(\d{1,3})\s*@\s*(\d{1,6})\.(\d{2})\s*$")

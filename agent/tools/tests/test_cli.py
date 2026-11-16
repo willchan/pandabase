@@ -146,6 +146,17 @@ def test_api_error_exit_code(config: Path) -> None:
     assert api.requests[0].url.params["q"] == "milk"
 
 
+def test_api_get_query_string_in_path(config: Path) -> None:
+    # Regression: `api get "/api/diagnostics/weekly?week=2026-W46"` (the form CLAUDE.md gives)
+    # failed with "no agent route": the `?…` was matched as part of the path.
+    api = FakeApi(
+        {"GET /api/diagnostics/weekly": lambda _: {"extracts": [], "markdown": "", "week": "W"}}
+    )
+    code, out = run(config, ["api", "get", "/api/diagnostics/weekly?week=2026-W46"], api)
+    assert code == 0 and out["week"] == "W"
+    assert dict(api.requests[0].url.params) == {"week": "2026-W46"}
+
+
 def _cycle(status: str) -> dict[str, Any]:
     return {
         "id": "C1",
