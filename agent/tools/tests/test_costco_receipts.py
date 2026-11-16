@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Sequence
 from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
@@ -581,3 +582,135 @@ def test_cdp_an_empty_tab_still_returns(browser_page: Any, monkeypatch: pytest.M
     monkeypatch.setattr(browser, "WIDGET_SETTLE_MS", 300)
     snap = _late_list(browser_page, first="none").costco_ready("orders")
     assert cr.parse_online_list(snap) == [] and cr.page_problem(snap) is None
+
+
+# Costco's silent session refresh, as seen live (2026-11-16): an expired token sends /myaccount/
+# (by redirects, which the driver's route never sees) to signin.costco.com, whose page posts back
+# to /OAuthLogonCmd, which sends the browser to /myaccount/ again, signed in. Faked here without
+# 3xx responses: Playwright doesn't route a redirect's target, so a fake 302 would reach the real
+# costco.com. Every request must be one the fake served (`_no_network`).
+ORDERS_URL = "https://www.costco.com/myaccount/#/app/synthetic/ordersandpurchases"
+SIGNIN_URL = "https://signin.costco.com/synthetic/oauth2/v2.0/authorize?state=s"
+SIGNED_IN = '<html><body><div automation-id="myOrderHistory">Orders</div></body></html>'
+AUTO_POST = """<html><body><form id="f" method="post" action="https://www.costco.com/OAuthLogonCmd">
+<input type="hidden" name="state" value="synthetic"></form>
+<script>document.getElementById("f").submit()</script></body></html>"""
+BACK_TO_ACCOUNT = '<html><body><script>location.replace("/myaccount/")</script></body></html>'
+SIGNIN_FORM = '<html><body><form><input name="email"><input type="password"></form></body></html>'
+
+
+@pytest.fixture
+def costco_page(browser_page: Any) -> Any:
+    """A fresh page per test: a refresh chain left mid-navigation must not leak into the next."""
+    page_ = browser_page.context.browser.new_page()
+    yield page_
+    page_.close()
+
+
+def _costco_signin(page_: Any, *, loops: bool = False) -> tuple[Any, list[str], list[str]]:
+    """A fake costco.com whose session refreshes once (or, `loops`, never), and the driver.
+    Returns the driver, the requests the fake served and every request the page made."""
+    from pandabase_tools.browser import CdpDriver
+
+    served: list[str] = []
+    made: list[str] = []
+    state = {"fresh": False}
+
+    def server(route: Any) -> None:
+        req = route.request
+        url = req.url.split("#")[0].split("?")[0]
+        served.append(f"{req.method} {url}")
+        if url == "https://www.costco.com/myaccount/":
+            body = SIGNED_IN if state["fresh"] else AUTO_POST
+        elif url.startswith("https://signin.costco.com/"):
+            body = SIGNIN_FORM
+        elif url == "https://www.costco.com/OAuthLogonCmd":
+            state["fresh"] = not loops
+            body = BACK_TO_ACCOUNT
+        else:
+            route.fulfill(status=404, body="")
+            return
+        route.fulfill(body=body, content_type="text/html")
+
+    def log(req: Any) -> None:
+        made.append(f"{req.method} {req.url.split('#')[0].split('?')[0]}")
+
+    page_.on("request", log)
+    page_.route("**/*", server)
+    driver = CdpDriver("http://127.0.0.1:9222", timeout_ms=5_000)  # never entered
+    driver._page = page_
+    return driver, served, made
+
+
+def _no_network(served: list[str], made: list[str], blocked: Sequence[str] = ()) -> None:
+    aborted = {u.split("#")[0].split("?")[0] for u in blocked}
+    left = [m for m in made if m not in served and m.split(" ", 1)[1] not in aborted]
+    assert made and not left, left
+
+
+# Bug: the guard aborted the refresh post (`/OAuthLogonCmd`), so the sweep stopped with
+# `refused_host` although Costco was still signed in (live sweeps, 2026-11-16).
+def test_cdp_costco_silent_session_refresh_lands_on_the_orders_page(costco_page: Any) -> None:
+    driver, served, made = _costco_signin(costco_page)
+    costco_page.route("**/*", driver._route)  # registered last: it sees each request first
+    snap = driver.open(ORDERS_URL)
+    assert guard.costco_account_page(snap.url)
+    assert "myOrderHistory" in snap.html
+    assert driver.refreshes == 1 and driver.blocked == []
+    assert served.count("POST https://www.costco.com/OAuthLogonCmd") == 1
+    _no_network(served, made)
+
+
+def test_cdp_costco_refresh_that_never_signs_in_is_not_signed_in(costco_page: Any) -> None:
+    # Each refresh lands on a page that posts again: at most COSTCO_REFRESH_MAX posts go out
+    # (later ones are aborted), and the sweep's page check says signed out.
+    from pandabase_tools import browser
+
+    driver, served, made = _costco_signin(costco_page, loops=True)
+    costco_page.route("**/*", driver._route)
+    with pytest.raises(browser.NotSignedIn):
+        cr.check_page(driver.open(ORDERS_URL))
+    costco_page.wait_for_timeout(500)
+    posts = served.count("POST https://www.costco.com/OAuthLogonCmd")
+    assert 1 <= posts <= browser.COSTCO_REFRESH_MAX
+    assert any(guard.costco_session_refresh(u) for u in driver.blocked)
+    _no_network(served, made, driver.blocked)
+
+
+def test_cdp_costco_sign_in_form_waiting_for_a_person_is_not_signed_in(
+    costco_page: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Live, the redirects land the page on signin.costco.com; here the page is put there first.
+    from pandabase_tools import browser
+
+    monkeypatch.setattr(browser, "COSTCO_REFRESH_WAIT_MS", 1_000)
+    driver, served, made = _costco_signin(costco_page)
+    costco_page.goto(SIGNIN_URL)
+    costco_page.route("**/*", driver._route)
+    with pytest.raises(browser.NotSignedIn):
+        driver._await_costco_refresh(0)
+    assert driver.refreshes == 0
+    _no_network(served, made)
+
+
+def test_cdp_no_refresh_post_outside_a_costco_open(costco_page: Any) -> None:
+    # A page posting to /OAuthLogonCmd on its own (no `open` of a Costco account page) is aborted.
+    driver, served, made = _costco_signin(costco_page)
+    costco_page.route("**/*", driver._route)
+    costco_page.goto(ORDERS_URL)  # the auto-post page, not through `driver.open`
+    costco_page.wait_for_timeout(300)
+    assert driver.refreshes == 0
+    assert any(guard.costco_session_refresh(u) for u in driver.blocked)
+    _no_network(served, made, driver.blocked)
+
+
+def test_costco_refresh_page_is_never_opened_or_read() -> None:
+    # Only the browser's own post from the sign-in page goes through; no tool may open it.
+    url = "https://www.costco.com/OAuthLogonCmd"
+    assert guard.costco_session_refresh(url)
+    assert guard.classify_url(url) == "host"
+    with pytest.raises(guard.UnsafeUrl):
+        guard.check_url(url)
+    assert not guard.costco_session_refresh("https://www.costco.com.evil.test/OAuthLogonCmd")
+    assert not guard.costco_session_refresh("http://www.costco.com/OAuthLogonCmd")
+    assert not guard.costco_session_refresh("https://www.costco.com/OAuthLogonCmd/cart")

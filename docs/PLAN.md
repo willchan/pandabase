@@ -1363,5 +1363,11 @@ This Week with a planned trip; the prod copy for the store split of the real cat
     asleep, the headed Chrome in the agent account's background session stopped painting, so the
     click never saw a "stable" element. PandaBase's Chrome now runs headless (headed Chrome's user
     agent, a desktop screen size), and `HEADED=1 make install-chromium` gives a window for signing
-    in (DESIGN §10 #81). Costco's occasional silent session refresh (`/OAuthLogonCmd`), which the
-    guard refuses as `refused_host`, is still to do once its full redirect chain has been seen.
+    in (DESIGN §10 #81).
+  - **Costco's silent session refresh** stopped sweeps with `refused_host` while Costco was still
+    signed in: an expired token redirects `/myaccount/` → `/LogonForm` → `signin.costco.com`, whose
+    page posts back to `/OAuthLogonCmd`, and the route aborted that post. Observed in full on
+    2026-11-16 (redirects aren't routed; only the post is). The driver now lets that one post
+    through during an account-page `open` and waits for `/myaccount/` (DESIGN §4.8). Regression
+    tests: real Chromium on a fake costco.com with no 3xx responses (Playwright doesn't route a
+    redirect's target, so a fake 302 would reach the real site) and a no-network check.
