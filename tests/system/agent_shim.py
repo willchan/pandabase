@@ -184,11 +184,16 @@ class FakeAmazon:
     def _costco_today(self, html: str) -> str:
         """The first warehouse card dated today (household TZ), so it is the trip's receipt;
         the other two cards dropped (their receipts would re-stock the same items)."""
-        from datetime import datetime
+        from datetime import datetime, timedelta
         from zoneinfo import ZoneInfo
 
-        today = datetime.now(ZoneInfo("America/Los_Angeles")).strftime("%m/%d/%Y")
-        html = html.replace("11/07/2026 - 6:15pm", f"{today} - 6:15am")
+        # A minute ago, not a fixed time of day: "today 6:15am" was in the future before 06:15
+        # LA, so this receipt sorted after step 12's Amazon order (acquired now) and the receipt
+        # cursor check failed (main CI at 01:41 LA, 2026-11-16). Clamped to midnight: still today.
+        now = datetime.now(ZoneInfo("America/Los_Angeles"))
+        at = max(now - timedelta(minutes=1), now.replace(hour=0, minute=0, second=0, microsecond=0))
+        stamp = f"{at:%m/%d/%Y} - {at.hour % 12 or 12}:{at:%M}{'am' if at.hour < 12 else 'pm'}"
+        html = html.replace("11/07/2026 - 6:15pm", stamp)
         for other in ("21099920200172610240905", "21099920100082610031430"):
             html = html.replace(f"viewRecieptBtn_{other}", "gone")
         return html
