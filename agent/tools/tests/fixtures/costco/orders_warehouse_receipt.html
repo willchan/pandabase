@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="en-US"><head><meta charset="utf-8"><title>Orders &amp; Purchases | Costco</title></head>
+<body>
+<!-- Synthetic (CLAUDE.md privacy rule): structure of the live Warehouse tab with the first receipt opened ("View Receipt"), 2026-11; every value invented. -->
+<header class="q3v-hdr">
+  <ul class="q3v-links">
+    <li><a id="warehouse-locations-t" href="https://www.costco.com/warehouse-locations"><span>Warehouses</span></a></li>
+    <li><a href="https://www.costco.com/grocery-household.html">Grocery</a></li>
+    <li><a href="https://www.costco.com/same-day.html">Same-Day</a></li>
+  </ul>
+  <div class="q3v-mywh">My Warehouse <span>Synthville</span> Open until 7:00 PM</div>
+  <ul id="grocery-amts"><li><span>Current Order:</span><span id="grocery-left-to-go">Add $<span>75.00</span> More to Avoid a Delivery Fee</span></li></ul>
+</header>
+<div id="___gatsby"><div id="gatsby-focus-wrapper">
+  <div class="k1-x9">Hello, Alex!</div>
+  <div class="k1-x9">Gold Star Member</div>
+  <nav><a id="1" href="#"><div automation-id="titleMyOrders"><span>Orders &amp; Purchases</span></div></a></nav>
+  <div automation-id="reactPageHeaderTitle"><h1 class="t9-h">Orders and Purchases</h1></div>
+  <div automation-id="myOrderHistory">
+    <div role="tablist">
+      <button id="simple-tab-0" automation-id="myOnlineOrdersTab" role="tab" aria-selected="false">Online</button>
+      <button id="simple-tab-1" automation-id="myWarehouseOrdersTab" role="tab" aria-selected="true">Warehouse</button>
+      <button id="simple-tab-2" automation-id="homeImprovementTab" role="tab" aria-selected="false">Installation Services</button>
+    </div>
+    <div id="simple-tabpanel-1" role="tabpanel">
+      <div class="z4-a">Showing 1 - 3 of 3</div>
+      <div class="z4-b">Your receipts will appear within 24 hours of the transaction.</div>
+      <label for="Showing">Showing</label>
+      <select id="Showing">
+        <option selected>Last 3 Months</option>
+        <option>2026 June - August</option>
+        <option>2026 March - May</option>
+        <option>2026 December - February</option>
+        <option>2025 September - November</option>
+      </select>
+      <div class="z4-f">Filter <span>0</span></div>
+
+      <div class="r7-card"><div id="viewRecieptBtn_21099920100422611071815">
+        <div class="r7-l">
+          <div automation-id="In-Warehouse"><div><img alt=""></div>In-Warehouse</div>
+          <div class="r7-d">11/07/2026 - 6:15pm</div>
+          <div class="r7-w">SYNTHVILLE</div>
+          <div automation-id="totalPrice"><div automation-id="totalText">Total</div><div class="r7-t">$70.09</div></div>
+        </div>
+        <div class="r7-b"><button automation-id="ViewInWareHouseReciept" aria-describedby="viewRecieptBtn_21099920100422611071815" type="button">View Receipt</button></div>
+      </div></div>
+
+      <div class="r7-card"><div id="viewRecieptBtn_21099920200172610240905">
+        <div class="r7-l">
+          <div automation-id="In-Warehouse"><div><img alt=""></div>In-Warehouse</div>
+          <div class="r7-d">10/24/2026 - 9:05am</div>
+          <div class="r7-w">SYNTHVILLE</div>
+          <div automation-id="totalPrice"><div automation-id="totalText">Total</div><div class="r7-t">$54.10</div></div>
+        </div>
+        <div class="r7-b"><button automation-id="ViewInWareHouseReciept" aria-describedby="viewRecieptBtn_21099920200172610240905" type="button">View Receipt</button></div>
+      </div></div>
+
+      <div class="r7-card"><div id="viewRecieptBtn_21099920100082610031430">
+        <div class="r7-l">
+          <div automation-id="In-Warehouse"><div><img alt=""></div>In-Warehouse</div>
+          <div class="r7-d">10/03/2026 - 2:30pm</div>
+          <div class="r7-w">SYNTHVILLE</div>
+          <div automation-id="totalPrice"><div automation-id="totalText">Total</div><div class="r7-t">$88.60</div></div>
+        </div>
+        <div class="r7-b"><button automation-id="ViewInWareHouseReciept" aria-describedby="viewRecieptBtn_21099920100082610031430" type="button">View Receipt</button></div>
+      </div></div>
+
+      <div automation-id="BackToTop"><button automation-id="backToTop" type="button">Back to Top</button></div>
+    </div>
+  </div>
+</div></div>
+<!-- The live page always carries this hidden generic modal (also role="dialog"). -->
+<div id="costcoModal" tabindex="-1" style="display: none;" role="dialog" aria-hidden="true">
+  <div role="document"><div><button automation-id="closeButton" aria-label="Close" type="button"><span></span></button>
+  <h2 id="costcoModalTitle" automation-id="modalTitle"><label>title</label></h2></div>
+  <div id="costcoModalText"></div>
+  <div><button id="costcoModalBtn1" automation-id="cancelButton" type="button"><label>Cancel</label></button>
+  <button id="costcoModalBtn2" automation-id="confirmationButton" type="button"><label>Primary</label></button></div></div>
+</div>
+<div class="m5-root" role="presentation">
+  <div class="m5-backdrop"></div>
+  <div role="dialog" aria-describedby="alert-dialog-description" aria-labelledby="alert-dialog-title">
+    <div><button aria-label="Close" type="button"><svg role="presentation"></svg></button></div>
+    <h2 id="alert-dialog-title" automation-id="modalTitle">In-Warehouse Receipt</h2>
+    <div class="m5-content">
+      <div id="printReceipt"><button automation-id="printReceipt" type="button"><div>Print Receipt</div></button></div>
+      <iframe id="ifmcontentstoprint" data-testid="ifmcontentstoprint" title="print"></iframe>
+      <div id="dataToPrint">
+        <div data-private="true">
+          <div><img alt="logo"></div>
+          <div class="p8-a">SYNTHVILLE #999</div>
+          <div class="p8-a">1 EXAMPLE WAY</div>
+          <div class="p8-a">SYNTHVILLE, CA 90000</div>
+          <div class="p8-bc"><div><img alt="barcode"><canvas id="hidden_canvas" hidden></canvas></div><div>21099920100422611071815</div></div>
+        </div>
+        <div>
+          <table aria-label="spanning table" data-private="true">
+            <thead><tr><th scope="col" colspan="4">Member 000000000000</th></tr></thead>
+            <tbody>
+            <tr><td>E</td><td>9000101</td><td>KS ORG EGGS</td><td>9.49 N</td></tr>
+            <tr><td>E</td><td>9000102</td><td>BANANAS</td><td>1.99 N</td></tr>
+            <tr><td colspan="2">2 @ 6.99</td></tr>
+            <tr><td>E</td><td>9000103</td><td>KS ALMOND MLK</td><td>13.98 N</td></tr>
+            <tr><td>E</td><td>9000104</td><td>CHKN THIGHS</td><td>18.42 N</td></tr>
+            <tr><td></td><td>9000201</td><td>**KS BATH TISS**</td><td>23.99 Y</td></tr>
+            <tr><td colspan="2"></td><td>SUBTOTAL</td><td>67.87</td></tr>
+            <tr><td colspan="2"></td><td>TAX</td><td><span>2.22</span></td></tr>
+            <tr><td></td><td>****</td><td>Total</td><td><span>70.09</span></td></tr>
+            <tr><td colspan="4"><div></div></td></tr>
+            <tr><td colspan="3">XXXXXXXXXXXXX0000</td><td colspan="1">CHIP read</td></tr>
+            <tr><td colspan="3">APPROVED - PURCHASE</td><td colspan="1"></td></tr>
+            <tr><td colspan="3">AMOUNT: $70.09</td><td colspan="1"></td></tr>
+            <tr><td colspan="5"><span>11/07/2026</span> <span>18:15</span> <span>999</span> <span>201</span> <span>42</span> <span>101</span></td></tr>
+            <tr><td colspan="3">VISA</td><td colspan="1">70.09</td></tr>
+            <tr><td colspan="1">Change</td><td colspan="3">0</td></tr>
+            <tr><td colspan="4"><div></div></td></tr>
+            <tr><td></td><td colspan="2">(A) 9.25% TAX</td><td>2.22</td></tr>
+            <tr><td></td><td colspan="2">TOTAL TAX</td><td>2.22</td></tr>
+            <tr><td colspan="5">TOTAL NUMBER OF ITEMS SOLD = 6</td></tr>
+            <tr><td colspan="5"><span>11/07/2026</span> <span>18:15</span> <span><span>999</span> <span>201</span> <span>42</span> <span>101</span></span></td></tr>
+            <tr><td colspan="4"><div></div></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <hr>
+        <div>
+          <div><div>Thank You!</div></div>
+          <div><div>Please Come Again</div></div>
+          <div><div>Whse: 999</div><div>Trm: 201</div><div>Trn: 42</div><div>OPT: 101</div></div>
+          <div><div>Items Sold: 6</div></div>
+          <div><div>P7 11/07/2026 18:15</div></div>
+        </div>
+      </div>
+      <div><button automation-id="closePopup" data-testid="closePopup" type="button">Close</button></div>
+    </div>
+  </div>
+</div>
+<footer class="f2-x">
+  <a href="https://www.costco.com/warehouse-locations">Find a Warehouse</a>
+  <a href="https://www.costco.com/kirkland-signature.html">Kirkland Signature</a>
+  <a href="https://www.costco.com/grocery-by-instacart.html">Grocery by Instacart</a>
+</footer>
+</body></html>
