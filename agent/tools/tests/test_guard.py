@@ -141,6 +141,9 @@ class _Route:
     def continue_(self) -> None:
         self.continued = True
 
+    def fallback(self) -> None:  # the driver passes allowed requests on (to the network)
+        self.continued = True
+
 
 def test_cdp_route_aborts_checkout_documents_in_the_browser() -> None:
     driver = CdpDriver("http://127.0.0.1:9222")

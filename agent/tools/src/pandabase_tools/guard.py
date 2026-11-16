@@ -5,7 +5,8 @@ Anything that isn't plain Amazon `https`, or that looks like checkout, payment o
 refused before the request is made (Buy Now, 1-Click and Turbo checkout count as checkout).
 Costco (M10.3, DESIGN §4.8) is read-only: only its account pages (`/myaccount/…`: Orders &
 Purchases and order details) may load; its cart, checkout and every other page are refused, so no
-tool can ever reach a Costco cart.
+tool can ever reach a Costco cart. `CdpDriver` lets Costco's own session-refresh post
+(`costco_session_refresh`) through while it opens an account page; no tool opens or reads it.
 `CdpDriver` also installs this as a Playwright route so a redirect or script-initiated navigation to
 checkout is aborted in the browser itself.
 """
@@ -24,6 +25,11 @@ COSTCO_SIGNIN_PATHS = re.compile(r"^/(?:logonform|logon|signin|login)", re.I)
 # `/myaccount/`). Everything else on costco.com — cart, checkout, product pages — is refused.
 COSTCO_ALLOWED_PATH = re.compile(r"^/myaccount/?$")
 COSTCO_CHECKOUT = re.compile(r"cart|checkout|payment|placeorder|orderreview|buy", re.I)
+# Costco's silent session refresh (seen live 2026-11-16): with an expired token, `/myaccount/`
+# redirects through `/LogonForm` to signin.costco.com, whose page posts straight back here (no
+# typing), and this redirects to `/myaccount/` again, signed in. Still refused by `classify_url`
+# (no tool opens or reads it); `CdpDriver` lets only that post through (`costco_session_refresh`).
+COSTCO_REFRESH_PATH = re.compile(r"^/OAuthLogonCmd$", re.I)
 
 # Matched against the lower-cased, URL-decoded path + query.
 CHECKOUT_PATTERNS: tuple[re.Pattern[str], ...] = tuple(
@@ -110,6 +116,28 @@ def _classify_costco(host: str, path: str, query: str) -> str | None:
     if not COSTCO_ALLOWED_PATH.match(path):
         return "host"
     return None
+
+
+def costco_session_refresh(url: str) -> bool:
+    """Costco's sign-in page posting the refreshed session back (`COSTCO_REFRESH_PATH`)."""
+    parts = urlsplit(url)
+    return (
+        parts.scheme == "https"
+        and (parts.hostname or "").lower() in COSTCO_HOSTS
+        and bool(COSTCO_REFRESH_PATH.match(parts.path))
+        and not parts.fragment
+    )
+
+
+def costco_account_page(url: str) -> bool:
+    """An allowed costco.com page (`/myaccount/`), not its sign-in host."""
+    return (urlsplit(url).hostname or "").lower() in COSTCO_HOSTS and classify_url(url) is None
+
+
+def costco_signin_page(url: str) -> bool:
+    parts = urlsplit(url)
+    host = (parts.hostname or "").lower()
+    return (host in COSTCO_HOSTS or host in COSTCO_SIGNIN_HOSTS) and classify_url(url) == "signin"
 
 
 def check_url(url: str) -> str:

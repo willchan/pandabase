@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import contextlib
 import re
+import time
 from collections.abc import Mapping
 from dataclasses import dataclass
 from types import TracebackType
@@ -202,6 +203,13 @@ def checked(snapshot: Snapshot) -> Snapshot:
     return snapshot
 
 
+# Costco's silent session refresh (`guard.COSTCO_REFRESH_PATH`): how long `open` waits for it to
+# land back on an account page (live: ~6 s), and how many refresh posts one `open` lets through.
+COSTCO_REFRESH_WAIT_MS = 15_000
+COSTCO_REFRESH_MAX = 2
+COSTCO_REFRESH_POLL_MS = 200
+
+
 class CdpDriver:
     def __init__(self, cdp_url: str, *, timeout_ms: float = 30_000) -> None:
         self.cdp_url = cdp_url
@@ -210,6 +218,8 @@ class CdpDriver:
         self._browser: Browser | None = None
         self._page: Page | None = None
         self.blocked: list[str] = []
+        self.refreshes = 0  # Costco session-refresh posts let through (`_route`)
+        self._refresh_budget = 0
 
     def __enter__(self) -> Self:
         from playwright.sync_api import sync_playwright
@@ -241,10 +251,22 @@ class CdpDriver:
     def _route(self, route: Route) -> None:
         request = route.request
         if request.resource_type == "document" and guard.classify_url(request.url):
+            # Costco's sign-in page posting the refreshed session back: the main frame only, a
+            # POST, during an `open` that still has budget. Every other refused page is aborted.
+            if (
+                guard.costco_session_refresh(request.url)
+                and request.method == "POST"
+                and request.frame.parent_frame is None
+                and self._refresh_budget > 0
+            ):
+                self._refresh_budget -= 1
+                self.refreshes += 1
+                route.fallback()
+                return
             self.blocked.append(request.url)
             route.abort("blockedbyclient")
         else:
-            route.continue_()
+            route.fallback()  # = continue_() with no other handler (tests stack a fake server)
 
     @property
     def page(self) -> Page:
@@ -259,15 +281,49 @@ class CdpDriver:
         from playwright.sync_api import Error as PlaywrightError
 
         guard.check_url(url)
-        blocked = len(self.blocked)
+        blocked, refreshes = len(self.blocked), self.refreshes
+        self._refresh_budget = COSTCO_REFRESH_MAX if guard.costco_account_page(url) else 0
         try:
-            self.page.goto(url, wait_until="domcontentloaded")
-        except PlaywrightError:
-            # `_route` aborted a redirect (sign-in, bot check, checkout): say which.
-            if len(self.blocked) > blocked:
-                return checked(Snapshot(self.blocked[-1], ""))
-            raise
+            try:
+                self.page.goto(url, wait_until="domcontentloaded")
+            except PlaywrightError:
+                # `_route` aborted a redirect (sign-in, bot check, checkout): say which.
+                if len(self.blocked) > blocked:
+                    return self._blocked_page(self.blocked[-1])
+                # The refresh post interrupted the first navigation: wait for it below.
+                if self.refreshes == refreshes and not guard.costco_signin_page(self.page.url):
+                    raise
+            if self.refreshes > refreshes or guard.costco_signin_page(self.page.url):
+                self._await_costco_refresh(blocked)
+        finally:
+            self._refresh_budget = 0
         return self._snapshot()
+
+    @staticmethod
+    def _blocked_page(url: str) -> Snapshot:
+        """Raise for a page `_route` aborted. A Costco refresh post past its budget is a refresh
+        that loops: signed out, not an unsafe page."""
+        if guard.costco_session_refresh(url):
+            raise NotSignedIn(url)
+        return checked(Snapshot(url, ""))
+
+    def _await_costco_refresh(self, blocked: int) -> None:
+        """On Costco's sign-in pages after `open`: wait for its silent refresh to land back on an
+        account page. Nothing is read or clicked there. A sign-in form that waits for a person
+        (the session really expired) or a refresh that loops is `NotSignedIn`."""
+        from playwright.sync_api import Error as PlaywrightError
+
+        deadline = time.monotonic() + COSTCO_REFRESH_WAIT_MS / 1000
+        while time.monotonic() < deadline and len(self.blocked) == blocked:
+            if guard.costco_account_page(self.page.url):
+                with contextlib.suppress(PlaywrightError):
+                    self.page.wait_for_load_state("domcontentloaded")
+                break
+            self.page.wait_for_timeout(COSTCO_REFRESH_POLL_MS)
+        if len(self.blocked) > blocked:
+            self._blocked_page(self.blocked[-1])
+        if not guard.costco_account_page(self.page.url):
+            raise NotSignedIn(self.page.url)
 
     def click_confirm(self) -> Snapshot | None:
         """Click the first add-to-cart control that passes `control_allowed`; never Buy Now."""

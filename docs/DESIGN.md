@@ -758,7 +758,13 @@ CDP, like Amazon; the agent itself has no browser, §10 #52). Page shapes are in
   `receipts-costco.json` remembers what was ingested, so a repeat sweep opens nothing new (ingest
   dedupes anyway). The guard allows only `costco.com/myaccount/` (cart, checkout, "Buy Items
   Again", product pages and everything else on costco.com are refused) and treats
-  `signin.costco.com` / logon pages as signed out. A page without the order history is signed
+  `signin.costco.com` / logon pages as signed out. One exception, Costco's silent session refresh
+  (seen live 2026-11-16): with an expired token `/myaccount/` redirects through `/LogonForm` to
+  `signin.costco.com`, whose page posts straight back to `/OAuthLogonCmd`, which returns to
+  `/myaccount/` signed in (~6 s, no typing). During an `open` of an account page the CDP driver
+  lets that post through (main frame, POST, at most 2) and waits ≤ 15 s to be back on an account
+  page; it never reads or clicks on the sign-in pages, and a sign-in form that waits for a person,
+  or a refresh that never signs in, is `not_signed_in`. A page without the order history is signed
   out, or a bot challenge when it reads like one ("Access Denied"): the sweep stops at once and
   reports it, like Amazon's.
 - **Privacy:** parsers only see the page with every `data-private="true"` subtree removed; the
@@ -1026,7 +1032,8 @@ JSON on stdout; exit 0 ok, 1 error, 2 usage, 3 profile locked, 4 refused URL):
 - `guard.py` — every URL the tools open, and every page they land on, must be `https` on
   `www.amazon.com`/`amazon.com` — or, read-only, `www.costco.com/myaccount/` (no Costco cart,
   checkout, "buy again" route or any other Costco page, fragment included; `signin.costco.com` and
-  logon pages are sign-in) — and not match checkout/payment/slot/sign-in patterns (Buy Now's
+  logon pages are sign-in; the driver's route lets Costco's own session-refresh post to
+  `/OAuthLogonCmd` through during an account-page `open`, §4.8) — and not match checkout/payment/slot/sign-in patterns (Buy Now's
   `handle-buy-box`, `buy-now`, `/turbo…`, `/1-click` count as checkout); the CDP driver also
   installs it as a Playwright route that aborts such document requests (so a Buy Now POST to
   `handle-buy-box` never leaves the browser). The only control the driver ever clicks is an
