@@ -33,15 +33,20 @@ hashed MUI names (`css-1k9ek97`) that change between builds, so the parsers must
   whose amount is the line total. Then `SUBTOTAL`, `TAX`, `Total`, card/approval rows, tax
   breakdown, and `TOTAL NUMBER OF ITEMS SOLD = N` (counts units, so a 2 @ line counts 2).
   Close with `automation-id="closePopup"`.
-- **Not seen yet:** a warehouse discount line (instant savings / coupon). Check the first live
-  sweep before relying on any format for it.
+- **Instant savings** (first live sweep, 2026-11-16): a row under the item reading
+  `<coupon number> / <item number> <amount>-` (the tests build it into the receipt; no fixture
+  file carries one).
 - **Online cards:** `a#orderNumber_<n>` (`automation-id="OnlineOrdersViewOrchangeOrder"`) links to
   `…/orderdetails/<n>`; `#orderDate_<n>`, `#totalPrice_<n>`, "Delivered on MM/DD/YYYY", tracking,
   and product links `…/<slug>.product.<item number>.html`.
 - **Order details:** `automation-id` `orderNumber`, `orderDate`, `orderTotalOutput` (subtotal,
   shipping, `taxOutput`), `orderTotal`; "2-Day Delivery"; "Delivered on …"; per item a product
   link, `automation-id="itemNumber"` ("Item N"), the unit price, "Quantity N", then the line total.
-  Quantity > 1 is invented here (the saved order had only quantity 1). Everything under
+  Quantity > 1 is invented here (the saved order had only quantity 1). Live (2026-11-16), an
+  item's fee is printed inside the item's block after its total — "CA BEP FEE PERCENT", its price,
+  "Quantity N", "Total", its total — and `orderTotalOutput` can carry "Discount on Order"
+  (`automation-id="totalDiscountOutput"`, `-$x`); the tests add both to a one-item copy of the
+  order. Everything under
   `data-private="true"` (addresses, contact, payment, membership number) is never read.
 - **Item numbers are shared:** the same product carries the same item number on warehouse
   receipts and online orders (live: a bath tissue at $29.99 in the warehouse, $34.99 delivered).

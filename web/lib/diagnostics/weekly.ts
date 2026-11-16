@@ -831,7 +831,7 @@ export async function renderWeekly(
     });
   const costcoReceiptLines = [
     "",
-    `Costco receipts: ${costcoSweeps.length} sweep(s), ${sweepSum("warehouse")} warehouse receipt(s) and ${sweepSum("online")} online order(s) imported, ${sweepSum("pages")} page load(s) + ${sweepSum("clicks")} click(s), ${unread} unread line(s), ${sweepSum("totals_fail")} failed totals check(s)${sweepErrors.length ? `, errors: ${sweepErrors.join(", ")}` : ""}. Trip receipts linked: ${tripReceipts.length}; items renamed from online titles: ${renames.length}.`,
+    `Costco receipts: ${costcoSweeps.length} sweep(s), ${sweepSum("warehouse")} warehouse receipt(s) and ${sweepSum("online")} online order(s) imported, ${sweepSum("pages")} page load(s) + ${sweepSum("clicks")} click(s), ${unread} unread line(s), ${sweepSum("instant_savings")} instant saving(s) and ${sweepSum("item_fees")} item fee(s) applied to their item, ${sweepSum("totals_fail")} failed totals check(s)${sweepErrors.length ? `, errors: ${sweepErrors.join(", ")}` : ""}. Trip receipts linked: ${tripReceipts.length}; items renamed from online titles: ${renames.length}.`,
     ...(premiums.length
       ? [
           "",

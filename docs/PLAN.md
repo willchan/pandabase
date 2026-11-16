@@ -1371,3 +1371,13 @@ This Week with a planned trip; the prod copy for the store split of the real cat
     through during an account-page `open` and waits for `/myaccount/` (DESIGN §4.8). Regression
     tests: real Chromium on a fake costco.com with no 3xx responses (Playwright doesn't route a
     redirect's target, so a fake 302 would reach the real site) and a no-network check.
+  - **First importing sweep (2026-11-16):** 6 receipts (4 warehouse, 2 online), 2 failed totals
+    checks and 1 unread line. The unread line was a warehouse instant saving (`<coupon> / <item>
+    <amount>-`), so that item stayed at full price; it now comes off the item it names. The online
+    one was a one-item order: with no second item to bound it, the item's block grew to the whole
+    page, so its price was the summary's first amount and its total the item's fee ("CA BEP FEE");
+    and its "Discount on Order" broke subtotal + tax = total. Fixed: the block stops at the order
+    summary, the fee is added to its item's line, and tax isn't sent with an order discount
+    (DESIGN §10 #82). Ingest dedupes on the receipt id, so the six receipts already written keep
+    the old lines until they are reset and swept again (`db:reset-imports` resets every digital
+    import, Amazon's too).

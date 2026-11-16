@@ -736,7 +736,7 @@ done|cancelled|expired, listLines, bridged, receiptId}` on close (`bridged` = di
 on the receipt, when a receipt closes it); `costco_trip_receipt {tripId, plannedFor, receiptId,
 closedTrip, lines, bought, listLines}` when a receipt links; `costco_item_renamed {itemId,
 changed}`; `receipt_sweep {vendor: "costco", pages, clicks, warehouse, online, duplicates,
-pending, unknown_lines, totals_fail, trip_receipts, errors, error_kinds, complete}` (no URLs: they
+pending, unknown_lines, instant_savings, item_fees, totals_fail, trip_receipts, errors, error_kinds, complete}` (no URLs: they
 carry the account id); `store_override {itemId, from, to, kind, thresholdBefore, thresholdAfter, store, why}` →
 weekly report §6 *Store choice* and the `store_choice` extract.
 
@@ -808,9 +808,16 @@ CDP, like Amazon; the agent itself has no browser, §10 #52). Page shapes are in
   rule); `costco_item_renamed` telemetry. Pack sizes aren't re-derived: past events are already in
   base units.
 - **Totals:** `totals_check` also wants subtotal + tax = total when `tax_cents` is sent (warehouse
-  always; online only without shipping). **Unknown lines** — a negative amount (no discount line
-  has been seen live yet) or a row that isn't an item, multi-buy or total — are reported, not
-  guessed: the sweep lists them (`unknown_lines`, also "items sold" ≠ units) and doesn't send
+  always; online only without shipping or a "Discount on Order", which sits below the subtotal).
+  **Instant savings** (warehouse, seen live 2026-11-16: `<coupon number> / <item number>
+  <amount>-` under the item) come off the line with that item number — its line total, and its
+  unit price as net ÷ qty — so the line is what was paid and the lines add up to SUBTOTAL
+  (§10 #82). **Item fees** online (California's "CA BEP FEE PERCENT", printed inside the item's
+  block with its own price, quantity and total) are added to that item's line total; the unit
+  price stays the listed one. An order discount isn't spread over the lines. `receipt_sweep`
+  counts both (`instant_savings`, `item_fees`). **Unknown lines** — a negative amount naming no
+  item on the receipt (or more than that item's line) or a row that isn't an item, multi-buy,
+  instant saving or total — are reported, not guessed: the sweep lists them (`unknown_lines`, also "items sold" ≠ units) and doesn't send
   them, so the receipt's lines no longer add up to its subtotal and the totals check fails.
 - **Price by channel:** delivered prices run higher than the warehouse's (live: $34.99 vs $29.99
   for the same item number), so a Costco product's `last_price_cents` is its latest **warehouse**
@@ -1501,3 +1508,4 @@ docker-compose.yml (+ docker-compose.build.yml), Makefile, CLAUDE.md, README.md,
 | 79 | "Back from Costco" schedules the receipt sweep locally (next morning + one retry, `receipts-costco.json`), run by a daily command automation that loads nothing unless due, plus a weekly fallback; a warehouse receipt within 3 days after a trip links (and closes) it | Receipts "appear within 24 hours" and Costco has bot checks, so a sweep right away would find nothing and a daily sweep would load pages for nothing. A local schedule needs no new API or model reasoning (§10 #60). Linking by date covers going a day or two late and an unplanned run's receipt closing nothing |
 | 80 | The Costco sweep never reads `data-private` content except receipt rows, and an unreadable receipt line is reported (sweep reply, telemetry, failed totals check), never mapped to an item | Member and card numbers, address and contact details are on the same pages; the State Engine needs none of them. No discount line has been seen yet: guessing its format could subtract a saving from the wrong item or drop a purchase silently |
 | 81 | PandaBase's Chrome runs headless (`--headless`, headed Chrome's user agent for the installed major version, a 1920×1080 screen); `HEADED=1 make install-chromium` gives a window for signing in by hand | A headed window in the agent account's background login session stops painting once the display sleeps, so Playwright clicks wait forever for a "stable" element (first Costco sweep, 2026-11-16); pandaden's OpenClaw profile hit the same thing. Chrome 157 headless still says `HeadlessChrome` in its user agent and reports an 800×600 screen, both easy bot-check tells, while its client hints are the normal brands; the launcher reads the version at each start so the user agent keeps matching them after Chrome updates. Anti-backgrounding flags alone were the alternative, but a sleeping display stops frames regardless |
+| 82 | A Costco instant saving comes off the line of the item it names (line total and unit price); an online item's fee is added to its item's line total; an online "Discount on Order" isn't spread over the lines | The coupon row names its item number, so the paid price is known exactly: store choice then compares what the household paid, and the lines add up to SUBTOTAL. A receipt-level `discount_cents` (Amazon's way) would leave every Costco price high. A fee belongs to buying that item, but isn't its price per unit. An order discount names no item; with several items any split would be a guess, so it only switches off the subtotal + tax = total check |
