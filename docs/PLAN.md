@@ -1344,10 +1344,9 @@ This Week with a planned trip; the prod copy for the store split of the real cat
     synthetic warehouse receipt on a throwaway copy: 5/5 lines applied, totals pass, 0 fuzzy
     matches (real item names share few tokens with warehouse abbreviations), 5 new unverified
     items — so the first real backfill leans on merge suggestions and online titles.
-  - **Still for the owner (from M10.2):** an item that is out or critical bridges in the weekly
-    cart *and* is on the trip list as "needed now", so a trip within days can buy it twice;
-    unchanged here. A text purchase "got 2 milk at Costco" still creates no Costco product; the
-    receipt importer now covers real Costco buys.
+  - **M10.2 gaps:** both settled by #69 (owner, 2026-11-15) and left alone here: out items with
+    a trip days away go to the weekly cart only, and text purchases create no Costco product —
+    this importer is where Costco products and prices come from.
   - **First live run (owner, on the Mac):** sign in on the `pandabase` profile and set
     `orders_url` (SETUP-MAC *Costco*), one `receipts sweep --vendor costco`, then `--backfill`;
     save one warehouse receipt with a discount line if one turns up, for a new synthetic fixture.
