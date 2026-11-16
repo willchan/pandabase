@@ -1,7 +1,7 @@
 // Costco trips, the trip list and store pins (DESIGN §3.2, §4.8). Mutations follow §8 *Database
 // round trips*: read in one batch, decide with the pure domain functions, write in one batch.
 import { costcoTrip, groceryCycle, item, setting, type Db } from "@pandabase/db";
-import { eq, isNotNull } from "drizzle-orm";
+import { and, eq, isNotNull, isNull, ne } from "drizzle-orm";
 import type { z } from "zod";
 import type {
   CostcoListLine as CostcoListLineContract,
@@ -12,7 +12,12 @@ import type {
 } from "../contracts";
 import type { CostcoListLineT, CostcoTripT } from "../contracts/costco";
 import type { Config } from "../config";
-import { costcoTripList, isTripExpired, tripDateProblem } from "../domain/costcoTrip";
+import {
+  costcoTripList,
+  isTripExpired,
+  tripDateProblem,
+  tripForReceipt,
+} from "../domain/costcoTrip";
 import {
   chooseStore,
   learnStoreOverride,
@@ -24,7 +29,7 @@ import { productsByItem, toCandidate, type ProductRow } from "../repo/catalog";
 import { parseCartResult } from "../repo/cycles";
 import { batchThen, batchTransaction, type Q } from "../repo/db";
 import { loadEstimates, type ItemEstimate } from "../repo/inventory";
-import { telemetryWrites } from "../telemetry";
+import { emitTelemetry, telemetryWrites } from "../telemetry";
 import { planItems, plannedTrip, productRef } from "./cycles";
 import { toItemEstimate } from "./inventory";
 import { newId } from "./receipts";
@@ -177,14 +182,66 @@ const closeTelemetry = (trip: TripRow, outcome: string, bridged: number) => ({
   outcome,
   listLines: Array.isArray(trip.list) ? trip.list.length : 0,
   bridged,
-  // M10.3 adds `bought` and `savings` from the trip's receipt.
   receiptId: trip.receiptId,
 });
 
 /**
+ * M10.3: link a just-ingested Costco warehouse receipt to its trip (`tripForReceipt`): set
+ * `receipt_id`, and close the trip `done` (`close_reason` `receipt`) if it was still planned.
+ * Emits `costco_trip_receipt` (and `costco_trip` when it closes the trip). Runs inside the
+ * ingest's transaction. Returns the trip's id, or null.
+ */
+export async function linkCostcoReceiptIn(
+  q: Q,
+  input: { receiptId: string; acquiredAt: string; lines: number; bought: number },
+  ctx: Pick<ServiceCtx, "now" | "config">,
+): Promise<string | null> {
+  const candidates = await q
+    .select()
+    .from(costcoTrip)
+    .where(and(ne(costcoTrip.status, "cancelled"), isNull(costcoTrip.receiptId)));
+  const hit = tripForReceipt(candidates, input.acquiredAt, ctx.config);
+  if (!hit) return null;
+  const trip = candidates.find((t) => t.id === hit.id)!;
+  const closes = trip.status === "planned";
+  await q
+    .update(costcoTrip)
+    .set({
+      receiptId: input.receiptId,
+      ...(closes ? { status: "done" as const, closedAt: ctx.now, closeReason: "receipt" } : {}),
+      updatedAt: ctx.now,
+    })
+    .where(eq(costcoTrip.id, trip.id));
+  const listIds = new Set(
+    (Array.isArray(trip.list) ? (trip.list as CostcoListLineT[]) : []).map((l) => l.item_id),
+  );
+  const entries: { metric: string; [k: string]: unknown }[] = [
+    {
+      metric: "costco_trip_receipt",
+      tripId: trip.id,
+      plannedFor: trip.plannedFor,
+      receiptId: input.receiptId,
+      closedTrip: closes,
+      lines: input.lines,
+      bought: input.bought,
+      listLines: listIds.size,
+    },
+  ];
+  if (closes) {
+    const cycles = (await builtCycles(q)).filter((c) => c.builtAt! >= trip.createdAt);
+    entries.push({
+      ...closeTelemetry({ ...trip, receiptId: input.receiptId }, "done", bridgedSince(cycles)),
+      bought: input.bought,
+    });
+  }
+  await emitTelemetry(q, "state_engine", entries, ctx.now);
+  return trip.id;
+}
+
+/**
  * "Back from Costco" (`done`) or "not going" (`cancelled`). Repeating the trip's status is a
- * no-op; changing a closed trip is a 409. TODO(M10.3): a Costco receipt sweep follows "back from
- * Costco" and links the receipt (`receipt_id`) — until then `done` closes it without one.
+ * no-op; changing a closed trip is a 409. `done` closes the trip without a receipt; the Costco
+ * receipt sweep the agent schedules for the next morning links it (`linkCostcoReceiptIn`, M10.3).
  */
 export async function setCostcoTripStatus(
   db: Db,

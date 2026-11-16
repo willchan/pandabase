@@ -1,6 +1,6 @@
 ---
 name: digital-receipt-scraper
-description: "PandaBase digital receipts — sweep a household member's Amazon / Whole Foods order history (delivery, pickup, in-store) in PandaBase's browser profile and ingest finished orders; one-time 12-month backfill on request."
+description: "PandaBase digital receipts — sweep a household member's Amazon / Whole Foods order history (delivery, pickup, in-store) in PandaBase's browser profile and ingest finished orders; one-time 12-month backfill on request; Costco warehouse receipts and costco.com orders (backfill on request)."
 metadata:
   {
     "openclaw":
@@ -97,3 +97,28 @@ It is idempotent (`skipped: "already_queued"` if a run is still waiting) and its
 in the web app's Cleanup → Merges tab; nobody has to answer them. Finish with one message:
 "✅ Imported N orders from the last 12 months." (plus "⚠️ M couldn't be read" if any, and "Suggested
 merges will appear in Cleanup → Merges." if the call returned `created: true`).
+
+## Costco (warehouse receipts and costco.com orders)
+
+The Costco account is signed in on the same `pandabase` browser profile. Two automations sweep it
+by themselves, as commands (no model turn): the morning after someone says "back from Costco"
+(`grocery-cycle` schedules it, with one retry the next day) and a weekly fallback. They post to the
+ops channel only when there is something to say. You never run those.
+
+**Read-only on Costco.** The tool reads the Orders & Purchases page (Warehouse and Online tabs) and
+online order details only; it can't open a Costco cart, product page or checkout, and never reads
+member, card or contact details.
+
+"Backfill Costco receipts" → reply "🧾 Importing past Costco receipts — I'll post when it's done."
+Then run once:
+
+```sh
+pandabase-tools receipts sweep --vendor costco --backfill
+```
+
+It walks the period picker (about two years) on both tabs and ingests what's new; a run that is
+interrupted picks up where it stopped when run again (ingested receipts are remembered). Finish
+with one message: "✅ Imported N Costco receipts." (N = `ingested` length; add "⚠️ M lines I
+couldn't read" when `unknown_lines` isn't empty). `errors` with `not_signed_in` or
+`costco_challenge` → post the matching warning from the Amazon section above, with "Costco"
+instead of "Amazon", and stop. Then ask for merge suggestions once, as after an Amazon backfill.

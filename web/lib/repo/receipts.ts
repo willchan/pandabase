@@ -36,6 +36,16 @@ export function receiptRepository(q: Q): ReceiptRepository {
         .from(product)
         .where(and(eq(product.vendor, vendor), inArray(product.asin, keys)));
     },
+    productsBySku: async (vendor, skus) =>
+      q
+        .select({
+          id: product.id,
+          itemId: product.itemId,
+          vendor: product.vendor,
+          vendorSku: product.vendorSku,
+        })
+        .from(product)
+        .where(and(eq(product.vendor, vendor), inArray(product.vendorSku, [...skus]))),
     item: async (id) => {
       const i = await getItem(q, id);
       return {
@@ -50,6 +60,8 @@ export function receiptRepository(q: Q): ReceiptRepository {
         reorderThreshold: i.reorderThreshold,
         shelfLifeDays: i.shelfLifeDays,
         switchThreshold: i.switchThreshold,
+        trust: i.trust,
+        mergedIntoItemId: i.mergedIntoItemId,
       };
     },
     products: async (itemId) =>
@@ -60,6 +72,8 @@ export function receiptRepository(q: Q): ReceiptRepository {
         itemId: p.itemId,
         vendor: p.vendor,
         asin: p.asin,
+        vendorSku: p.vendorSku,
+        lastPriceFulfillment: p.lastPriceFulfillment,
         title: p.title,
         unitQuantity: p.unitQuantity,
         stance: p.stance,

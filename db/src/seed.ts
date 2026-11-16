@@ -858,6 +858,8 @@ export function buildSeed(opts: SeedOptions = {}): Rows {
       lastBoughtAt: iso(costcoMs),
       lastPriceCents: spec.costco.priceCents,
       lastPriceAt: iso(costcoMs),
+      lastPriceFulfillment: "in_store",
+      vendorSku: spec.costco.sku,
     });
   }
 

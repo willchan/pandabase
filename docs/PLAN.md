@@ -43,7 +43,7 @@ contracts.
 | M7 Agent skill pack & tools | done | #9 |
 | M8 Ops, compose, README | done | #11 |
 | M9 Continuous deployment | done | #14 |
-| M10 Costco | in progress (M10.1 done, M10.2 in review) | #66, #67 |
+| M10 Costco | in progress (M10.1, M10.2 done; M10.3 in review) | #66, #67, #68, M10.3 PR |
 
 ---
 
@@ -1316,3 +1316,37 @@ This Week with a planned trip; the prod copy for the store split of the real cat
   - **Prod copy (counts only, 2026-11-15):** 471 items, 0 Costco products (amazon 120, wholefoods
     351), so all 471 are `regular` / `no_costco_product`; 48 plan lines, 0 waiting, an empty trip
     list. Nothing changes for the household until M10.3 imports Costco receipts.
+- *M10.3:* as planned (DESIGN §4.8 *Costco receipts*, §10 #76–#80), plus:
+  - **`vendor_alias` rebuilt.** Widening `kind`'s CHECK makes drizzle-kit rebuild the table; the
+    owner agreed (2026-11-15), so migration `0003_costco_receipts` is a marked contract migration
+    (every column copied, nothing references `vendor_alias`). Upgrade-tested on a seeded DB and the
+    prod copy. `receipt_line.match_method` stays `asin` for item-number matches (no second rebuild).
+    New columns: `product.vendor_sku` (unique per vendor), `product.last_price_fulfillment`,
+    `receipt_line.vendor_sku`. Contracts: `ReceiptLineIn.vendor_sku`, `ReceiptIngestRequest.tax_cents`,
+    `ReceiptIngestResponse.costco_trip_id`.
+  - **Online lines skip the text match** (DESIGN §10 #77): token-set scoring would match any
+    one-word item a long title contains. Warehouse text still uses it; a fuzzy match gets a Costco
+    product only after the receipt review answer (an `item_number` alias).
+  - **Scheduling is local**: `costco done` writes the next two dates to `receipts-costco.json`;
+    the daily 09:10 command job (`--due`) loads nothing otherwise. "Back from Costco" with no trip
+    planned still schedules the sweep. `receipts.costco.orders_url` (Mac config, never committed)
+    names the orders page, since its URL carries the account id.
+  - **Seed:** the six synthetic Costco products have item numbers (eggs `9000101` and toilet
+    paper `9000201` match the fixtures) and `in_store` prices. Tier A step 11c runs the `--due`
+    sweep against the fixtures through the agent shim.
+  - **Not done here:** `make smoke`'s opt-in Costco check (it would load costco.com: the first live
+    run is the owner's, below); savings per trip in `costco_trip` telemetry (`bought` is there);
+    re-deriving a renamed product's pack size (past events are already in base units); bot-check
+    detection is a guess ("Access Denied" and similar) until a live page shows Costco's.
+  - **Prod copy (counts only, 2026-11-16):** migration applied cleanly (471 products, 0 aliases,
+    471 items unchanged); main vs branch give the identical cart plan (50 lines) and W43–W46 weekly
+    reports apart from the new Costco line, and identical data-quality output. Replaying the
+    synthetic warehouse receipt on a throwaway copy: 5/5 lines applied, totals pass, 0 fuzzy
+    matches (real item names share few tokens with warehouse abbreviations), 5 new unverified
+    items — so the first real backfill leans on merge suggestions and online titles.
+  - **M10.2 gaps:** both settled by #69 (owner, 2026-11-15) and left alone here: out items with
+    a trip days away go to the weekly cart only, and text purchases create no Costco product —
+    this importer is where Costco products and prices come from.
+  - **First live run (owner, on the Mac):** sign in on the `pandabase` profile and set
+    `orders_url` (SETUP-MAC *Costco*), one `receipts sweep --vendor costco`, then `--backfill`;
+    save one warehouse receipt with a discount line if one turns up, for a new synthetic fixture.

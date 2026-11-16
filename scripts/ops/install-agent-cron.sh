@@ -3,8 +3,10 @@
 # Idempotent: lists the existing automations and edits the ones with a matching name, adds the
 # rest. Needs a running gateway and operator.admin (OpenClaw's own requirement).
 #
-# Receipt sweeps come from the members in pandabase.config.json (`receipt_sweep`: daily → every
-# day 21:00, weekly → Sunday 21:00, off → none) rather than the example's fixed names.
+# Amazon receipt sweeps come from the members in pandabase.config.json (`receipt_sweep`: daily →
+# every day 21:00, weekly → Sunday 21:00, off → none) rather than the example's fixed names. The
+# Costco sweeps (M10.3: the morning after "back from Costco", and a weekly fallback) are fixed
+# command jobs from the example.
 #
 #   OPENCLAW_AGENT=<id>        run the jobs as that agent: the `pandabase` agent, the one bound to
 #                              #pandabase (env, else .env, else `main`). The gateway hosts other
@@ -65,8 +67,9 @@ upsert() {
   fi
 }
 
-# Fixed jobs from the example, i.e. everything but the per-member receipt sweeps. ("-" marks an
-# empty field: `read` merges adjacent tabs.)
+# Fixed jobs from the example, i.e. everything but the per-member Amazon receipt sweeps (the
+# Costco sweeps are command jobs and stay). ("-" marks an empty field: `read` merges adjacent
+# tabs.)
 while IFS=$'\t' read -r name cron skill command message deliver_to timeout; do
   if [ "$command" != - ]; then
     # Command payloads (job replies, the Friday nudge, the Saturday build, the weekly cart probe):
@@ -77,7 +80,7 @@ while IFS=$'\t' read -r name cron skill command message deliver_to timeout; do
   else
     upsert "$name" "$cron" agent "$(skill_message "$skill" "$message")"
   fi
-done < <(jq -r '.jobs[] | select(.skill != "digital-receipt-scraper")
+done < <(jq -r '.jobs[] | select(.skill != "digital-receipt-scraper" or .command)
   | [.name, .cron, .skill, (.command // "-"), (.message // "-"), (.deliver_to // "intake_channel"),
      (.timeout_seconds // "-" | tostring)] | @tsv' "$CRON_FILE")
 

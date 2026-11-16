@@ -118,10 +118,15 @@ UI can edit. Code defaults live in `web/lib/config.ts`; a row overrides.
 - `unit_quantity` (real, base units per purchase unit), `unit_quantity_trust`
 - `stance` (`preferred`|`acceptable`|`rejected`), `preference_score` (real)
 - `times_bought`, `consecutive_buys`, `last_bought_at`, `last_price_cents`, `last_price_at`
-- unique (`vendor`, `asin`) where asin not null
+- `vendor_sku` (nullable; Costco's item number, M10.3), `last_price_fulfillment` (the receipt
+  `fulfillment` the price came from; no CHECK — §4.8 *Price by channel*)
+- unique (`vendor`, `asin`) where asin not null; unique (`vendor`, `vendor_sku`) where not null
 
 **vendor_alias** — maps external strings to products/items.
-- `vendor`, `kind` (`receipt_text`|`asin`), `vendor_string` (normalized), unique (vendor, kind, vendor_string)
+- `vendor`, `kind` (`receipt_text`|`asin`|`item_number`), `vendor_string` (normalized), unique
+  (vendor, kind, vendor_string). `item_number` (Costco, M10.3) is written by receipt-review
+  answers on Costco lines; widening the CHECK rebuilt the table (migration 0003, a marked
+  contract migration: every column survives and no table references `vendor_alias`)
 - `item_id` (nullable only when `ignored`), `product_id` (nullable), `confidence_score` (0–1; 1.0
   when human-confirmed)
 - `trust`, `ignored` (bool — the ignore list for ASINs and store fee lines)
@@ -152,15 +157,17 @@ naive fold; since M3 it calls `projectInventory` from `web/lib/domain/inventory.
 ### 2.4 Receipts
 
 **receipt** — `source` (`digital`|`paper`|`manual`), `vendor`, `account_member_id` (nullable),
-`external_order_id` (nullable), `dedupe_key` (unique: `digital:{account}:{order_id}` /
+`external_order_id` (nullable; Costco: the online order number, or the warehouse receipt's
+23-digit barcode), `dedupe_key` (unique: `digital:{account}:{order_id}` /
 `paper:{vendor}:{date}:{total}` / `manual:{idempotency key}`), `fulfillment`
 (`delivery`|`pickup`|`in_store`|`unknown`), `ordered_at`, `acquired_at`, `subtotal_cents`,
 `total_cents`, `totals_check` (`pass`|`fail`|`n/a`), `job_id`, `status` (`applied`|`pending_review`|`partial`).
 `acquired_at` is required (it feeds the paper dedupe key and the EMA); `ordered_at` is nullable.
 
-**receipt_line** — `receipt_id`, `raw_text`, `asin`, `product_id`, `item_id`, `qty` (purchase
-units), `unit_price_cents`, `line_total_cents`, `match_method`
-(`asin`|`alias_exact`|`fuzzy`|`manual`|`none`), `match_score`, `trust`, `ignored`.
+**receipt_line** — `receipt_id`, `raw_text`, `asin`, `vendor_sku` (Costco item number, M10.3),
+`product_id`, `item_id`, `qty` (purchase units), `unit_price_cents`, `line_total_cents`,
+`match_method` (`asin`|`alias_exact`|`fuzzy`|`manual`|`none`; `asin` also means "by Costco item
+number": widening its CHECK would rebuild `receipt_line`), `match_score`, `trust`, `ignored`.
 
 ### 2.5 Jobs, review, labels
 
@@ -651,7 +658,8 @@ and Saturday build act on whichever cycle is current, so it would be nudged and 
 
 `web/lib/domain/storeChoice.ts` and `costcoTrip.ts`, tunables `costco.*` in `config.ts`, service
 `web/lib/services/costco.ts`. M10.1 shipped the pure functions; M10.2 calls them from the cart
-plan, the trip routes, the item page and telemetry; receipts are M10.3 and `freezesBulk` M10.4.
+plan, the trip routes, the item page and telemetry; M10.3 imports Costco receipts (below);
+`freezesBulk` is M10.4.
 
 **Store choice** (`chooseStore`), per item, `regular` = the weekly cart's vendors (`cartVendors`):
 
@@ -716,46 +724,97 @@ past would keep Costco items out of the weekly cart, and nothing says the trip h
 would make *without* a pin; a threshold change is upserted as the `setting` row
 `costco.switchThreshold`; `null` clears the pin and teaches nothing. A Costco pin on an item with
 no Costco product is stored but doesn't apply until one exists (rule 1).
-**Still planned (M10.3):** `vendor_alias.kind` gains `item_number` (Costco's item number, matched
-like an ASIN), `product.vendor_sku` (nullable, unique per vendor).
+**Receipt link (M10.3):** a Costco warehouse receipt dated on a planned or done trip's date or up
+to `costco.tripReceiptWindowDays` (3) after it, on a trip without a receipt, is that trip's
+(`tripForReceipt`, latest trip wins): ingest sets `receipt_id` and closes a planned trip `done`
+(`close_reason` `receipt`). Online orders never link.
 **Telemetry:** `store_choice {cycleId, itemId, store, why, savingsRatio, timing, bridgeCause}`
 once per restock-flagged item when the cycle moves to `building`; `costco_trip_planned {tripId,
 plannedFor, movedFrom, created, listLines}`; `costco_trip {tripId, plannedFor, outcome:
 done|cancelled|expired, listLines, bridged, receiptId}` on close (`bridged` = distinct
-`costco_bridged_item_ids` of carts built since the trip was planned; `bought` / savings come with
-M10.3); `store_override {itemId, from, to, kind, thresholdBefore, thresholdAfter, store, why}` →
+`costco_bridged_item_ids` of carts built since the trip was planned; with `bought`, distinct items
+on the receipt, when a receipt closes it); `costco_trip_receipt {tripId, plannedFor, receiptId,
+closedTrip, lines, bought, listLines}` when a receipt links; `costco_item_renamed {itemId,
+changed}`; `receipt_sweep {vendor: "costco", pages, clicks, warehouse, online, duplicates,
+pending, unknown_lines, totals_fail, trip_receipts, errors, error_kinds, complete}` (no URLs: they
+carry the account id); `store_override {itemId, from, to, kind, thresholdBefore, thresholdAfter, store, why}` →
 weekly report §6 *Store choice* and the `store_choice` extract.
 
-**Costco receipts (M10.3):** `pandabase-tools receipts sweep --vendor costco` on the `pandabase`
-profile (Playwright over CDP, like Amazon; the agent itself has no browser, §10 #52). Page shapes
-are in `agent/tools/tests/fixtures/costco/README.md` (synthetic copies of owner-saved pages,
-2026-11).
+**Costco receipts (M10.3):** `pandabase-tools receipts sweep --vendor costco [--backfill]`
+(`agent/tools/src/pandabase_tools/costco_receipts.py`) on the `pandabase` profile (Playwright over
+CDP, like Amazon; the agent itself has no browser, §10 #52). Page shapes are in
+`agent/tools/tests/fixtures/costco/README.md` (synthetic copies of owner-saved pages, 2026-11).
 
-- **Pages:** one URL, `…/myaccount/#/app/<account id>/ordersandpurchases`, with an **Online** tab
-  (costco.com 2-Day Delivery orders, linked to `…/orderdetails/<order number>`) and a
-  **Warehouse** tab (in-store receipt cards; "View Receipt" opens the receipt as a dialog on the
-  same page). Both have a period picker ("Last 3 Months", then quarters), which the backfill walks.
-  Same-Day delivery is Instacart's, not on these pages, and out of scope (owner doesn't use it).
+- **Pages:** one URL, `…/myaccount/#/app/<account id>/ordersandpurchases`
+  (`receipts.costco.orders_url` in the Mac's `pandabase.config.json`, never committed), with an
+  **Online** tab (costco.com 2-Day Delivery orders, linked to `…/orderdetails/<order number>`) and
+  a **Warehouse** tab (in-store receipt cards; "View Receipt" opens the receipt as a dialog on the
+  same page). Both have a period picker ("Last 3 Months", then quarters); a sweep reads the first
+  entry, a backfill `receipts.costco.backfill_periods` (9, ~2 years) on both tabs. Same-Day
+  delivery is Instacart's, not on these pages, and out of scope (owner doesn't use it).
+- **Page loads:** one load of the orders page, then clicks (`CdpDriver.costco_tab`,
+  `costco_period`, `costco_open_receipt`, `costco_close_receipt`, located by `automation-id` /
+  `id`), and one load per new delivered online order, `throttle_seconds` (4) apart. A local
+  `receipts-costco.json` remembers what was ingested, so a repeat sweep opens nothing new (ingest
+  dedupes anyway). The guard allows only `costco.com/myaccount/` (cart, checkout, "Buy Items
+  Again", product pages and everything else on costco.com are refused) and treats
+  `signin.costco.com` / logon pages as signed out. A page without the order history is signed
+  out, or a bot challenge when it reads like one ("Access Denied"): the sweep stops at once and
+  reports it, like Amazon's.
+- **Privacy:** parsers only see the page with every `data-private="true"` subtree removed; the
+  receipt table (marked private too) keeps only item, multi-buy, total and item-count rows (no
+  member number, card digits or approval rows). Nothing but receipt data goes to the API, and
+  telemetry carries no URLs (they hold the account id).
 - **Keys:** online `digital:{account}:{order number}`; warehouse the receipt's 23-digit barcode
-  (warehouse, register, transaction, date and time), `fulfillment` `in_store`, `acquired_at` from
-  the card's date. Online orders are ingested once "Delivered on" (`fulfillment` `delivery`).
-- **Timing:** warehouse receipts "appear within 24 hours", so "back from Costco" schedules the
-  sweep for the next morning with one retry, plus the weekly fallback (few page loads: Costco's
-  bot checks).
-- **Lines:** warehouse rows are item number, abbreviated text ("KS ORG EVOO") and
-  `"<line total> <tax flag>"`; a `"N @ unit"` row before a line gives its quantity. Online lines
-  have the full title, "Item N", unit price and quantity. Lines resolve by item number
-  (`vendor_alias(kind=item_number)`, `product.vendor_sku`), then the paper-receipt fuzzy match
-  (§4.5), else a new unverified item. Item numbers are shared between the two channels, so an
-  online title names the item a warehouse abbreviation can't; a new item from a warehouse line is
-  named from its text and renamed when an online order brings its title. Discount lines were not
-  seen yet (the first live sweep checks the format; until then an unknown negative line is
-  reported, not guessed). Deposits/fees are ignored aliases; "Kirkland Signature" / "KS" join
-  `itemNames.storeBrands`. Receipts check subtotal + tax = total (`totals_check`).
+  (from the card's id, not the private receipt header) as the order id, `fulfillment`
+  `in_store`, `acquired_at` the card's local date and time. Online orders are ingested once
+  "Delivered on" (`fulfillment` `delivery`, `acquired_at` that date at local noon); others wait.
+- **Timing:** warehouse receipts "appear within 24 hours". `costco done` ("back from Costco", and
+  also with no trip planned) writes the next two household dates into `receipts-costco.json`;
+  the daily 09:10 command automation `receipts sweep --vendor costco --due --reply` loads nothing
+  unless a date is due, drops the dates once its receipt links a trip (else today's), and on the
+  last try without one says the weekly sweep will look again. The weekly fallback (Sunday 19:40,
+  clear of the 21:00 Amazon sweep on the same profile) sweeps without `--due`. Both are command
+  payloads (§10 #60) that print one ops-channel line or `NO_REPLY`; a sign-in / bot-check warning
+  repeats at most weekly.
+- **Lines:** warehouse rows are item number, abbreviated text ("KS ORG EGGS", `**…**` stripped)
+  and `"<line total> <tax flag>"`; a `"N @ unit"` row before a line gives its quantity and unit
+  price. Online lines have the full title (product link), "Item N", unit price, quantity and line
+  total. The request carries the item number as `vendor_sku` (`ReceiptLineIn.vendor_sku`, digits)
+  and `tax_cents`. In `applyReceipt` (`resolveSkuLine`) a Costco line resolves:
+  1. by item number — `vendor_alias(kind=item_number)` (an ignore, or a human's answer; leading
+     zeros don't count), then `product.vendor_sku` — confirmed, `match_method` `asin`. An alias
+     with no product makes that item number the item's new Costco product;
+  2. warehouse text only: the paper-receipt match (§4.5). An exact confirmed alias joins that
+     item as its new Costco product (confirmed); a fuzzy match applies provisionally with **no**
+     product until the receipt review is answered — the answer writes an `item_number` alias
+     (confirm / correct → that item, ignore → ignored), so the next receipt resolves by number.
+     Online titles skip this step: token-set scoring would put "…Peanut Butter, 28 oz" on an item
+     named "Butter", so, like an unknown ASIN, they create an item and merge suggestions find
+     duplicates;
+  3. else a new unverified item + Costco product (`vendor_sku`, title = online title or warehouse
+     text, pack size parsed from it) and a `new_product` review (`item_number` in its payload).
+  "Kirkland Signature" / "KS" are in `itemNames.storeBrands`.
+- **Renames:** item numbers are shared between the two channels. When an online line resolves to
+  an existing product by number and brings a different title, the item is renamed
+  (`deriveItemName` of the title) and the product's title replaced — only while the item is
+  unverified, unmerged and still has exactly the name its old title gave it (the `db:rename-items`
+  rule); `costco_item_renamed` telemetry. Pack sizes aren't re-derived: past events are already in
+  base units.
+- **Totals:** `totals_check` also wants subtotal + tax = total when `tax_cents` is sent (warehouse
+  always; online only without shipping). **Unknown lines** — a negative amount (no discount line
+  has been seen live yet) or a row that isn't an item, multi-buy or total — are reported, not
+  guessed: the sweep lists them (`unknown_lines`, also "items sold" ≠ units) and doesn't send
+  them, so the receipt's lines no longer add up to its subtotal and the totals check fails.
 - **Price by channel:** delivered prices run higher than the warehouse's (live: $34.99 vs $29.99
-  for the same item number), so store choice uses the latest **warehouse** price of a Costco
-  product and falls back to an online price only when there is none. The weekly report gets a
-  *delivery premium* row per item bought both ways.
+  for the same item number), so a Costco product's `last_price_cents` is its latest **warehouse**
+  price: a delivery line's price is written only while `last_price_fulfillment` isn't `in_store`
+  (its stats — times bought, last bought — still update). `chooseStore` reads `last_price_cents`
+  as before, so it gets warehouse prices without a change. The weekly report's §6 lists the
+  *delivery premium* (latest unit price each way, `deliveryPremiums` in `dataQuality.ts`) per item
+  number bought both ways, with the sweep's counts.
+- **Trips:** see *Receipt link* above. "Back from Costco" still closes the trip at once (the weekly
+  cart stops waiting); its receipt links the next morning.
 
 ## 5. Media pipeline
 
@@ -840,7 +899,7 @@ API with `PANDABASE_AGENT_API_TOKEN` (the engine's `AGENT_API_TOKEN`), read from
 |---|---|---|
 | `grocery-cycle` | automations Fri 18:00, Sat 10:00, Mon 09:00; replies in the cycle thread; Costco trip messages | Costco trips as one command each that prints the reply (`costco plan --when <day>`, `costco done` — M10.3's receipt sweep hooks in there —, `costco cancel`; a Costco run is never `other_store`). Open cycles (thread per cycle), record list edits/skips/away/other-store, Friday nudge (incl. freezer), Saturday build (`cart build` → a `layout_alert` goes once to the ops channel → tier-2 fallback with `cart search` / `cart add`, never the browser tool → `cart finish` → summary). The Fri 15:00 add-button check is a **command automation** (`pandabase-tools cart probe --reply` → ops channel, `NO_REPLY` when fine) |
 | `discord-intake` | photo or inventory text in `#pandabase` | Photos: `photo submit` (classify, upload, create job); text purchases, "we're out", "froze X", "never buy X" → inventory events / product reject; "get X at Costco / Whole Foods" → store pin. Job results are posted by a **command automation** (`pandabase-tools jobs replies` every 5 min, no model call; an API failure is `NO_REPLY` until it has lasted `jobs.outage_alert_minutes`, then one ⚠️ and a ✅ on recovery, §10 #68) |
-| `digital-receipt-scraper` | automations daily 21:00 (cart member), Sun 21:00 (other member); backfill on request | `receipts sweep` per member profile → `/api/receipts/ingest`; agent extracts zero-ASIN pages; a finished backfill ends with `POST /api/catalog/merge-suggestions/run` |
+| `digital-receipt-scraper` | automations daily 21:00 (cart member), Sun 21:00 (other member); backfill on request. Costco: command automations daily 09:10 (`--due`: only after "back from Costco") and Sun 19:40, backfill on request | `receipts sweep` per member profile → `/api/receipts/ingest`; agent extracts zero-ASIN pages; a finished backfill ends with `POST /api/catalog/merge-suggestions/run`. `receipts sweep --vendor costco` (no model turn for the scheduled ones) |
 | `item-lookup` | "do we have X?" in `#pandabase` or its threads | `/api/items/lookup` → `matches[0].text` |
 | `telemetry-aggregator` | automation Sun 23:00 | `diagnostics write` → `/diagnostics` → 3-line summary |
 
@@ -954,11 +1013,19 @@ JSON on stdout; exit 0 ok, 1 error, 2 usage, 3 profile locked, 4 refused URL):
   cancellation), and so are orders refunded in full ("Refund Total" ≥ the grand total; reason
   `returned`). Zero ASINs on a final order → `needs_agent_extraction` with page text, and
   `selector_error`; the skill ingests its own extraction with `receipts ingest`.
+- `costco_receipts.py` (`receipts sweep --vendor costco [--backfill | --due] [--reply]`, M10.3) —
+  Costco's Orders & Purchases on the cart member's (`pandabase`) profile: Online tab cards, then a
+  click to Warehouse and each new receipt's dialog (oldest first), then one details page per new
+  delivered online order; privacy filter, keys, lines, unknown lines, `receipts-costco.json`
+  (done set, scheduled dates, last warning) and replies as in §4.8 *Costco receipts*. `costco
+  done` schedules it (`schedule_after_trip`).
 - `photos.py` (`photo submit`) — classify (caption keywords when unambiguous → the local image
   description → default `paper_receipt`), presigned upload, `POST /api/jobs`;
   `--media-key --job-type` re-files a photo a human corrected.
 - `guard.py` — every URL the tools open, and every page they land on, must be `https` on
-  `www.amazon.com`/`amazon.com` and not match checkout/payment/slot/sign-in patterns (Buy Now's
+  `www.amazon.com`/`amazon.com` — or, read-only, `www.costco.com/myaccount/` (no Costco cart,
+  checkout, "buy again" route or any other Costco page, fragment included; `signin.costco.com` and
+  logon pages are sign-in) — and not match checkout/payment/slot/sign-in patterns (Buy Now's
   `handle-buy-box`, `buy-now`, `/turbo…`, `/1-click` count as checkout); the CDP driver also
   installs it as a Playwright route that aborts such document requests (so a Buy Now POST to
   `handle-buy-box` never leaves the browser). The only control the driver ever clicks is an
@@ -1077,7 +1144,8 @@ sha, outcome, previous_sha?, reason?, run_url?, host?}` — posted with the agen
    the week's store split — flagged when one store has ≥ `dataQuality.storeSplitShare` (95%) of
    ≥ `storeSplitMinLines` (20) non-ignored lines, the shape of an importer tagging every order with
    one store; catalog items whose name contains a `dataQuality.adLikeNames` phrase ("business
-   card", "purchase subscription", …: page text imported as groceries); and, as of `now`, cart-plan
+   card", "purchase subscription", Costco's "instacart" / "same-day", …: page text imported as
+   groceries); and, as of `now`, cart-plan
    lines whose runout is more than `lapsedAfterDays` in the past — `data_quality` extract)
 4. VLM (latency p50/p95, totals-check failures, human-correction rate per model × prompt version;
    worker health: last heartbeat, version and models, `ollama_ok`, heartbeats with Ollama down,
@@ -1087,7 +1155,12 @@ sha, outcome, previous_sha?, reason?, run_url?, host?}` — posted with the agen
 5. Product choice (switches, overrides, threshold drift)
 6. Store choice (Costco, §4.8): planned items by store × why × wait/bridge, median Costco saving,
    trips planned / closed by outcome (list lines, bridged), store pins and the Costco threshold;
-   findings for an expired trip and ≥ 3 pins in a week
+   Costco receipts (M10.3: sweeps, warehouse / online imported, page loads + clicks, unread lines,
+   failed totals checks, sweep errors, trip receipts linked, renames) and the *delivery premium*
+   table (latest warehouse vs delivered unit price per item number bought both ways, up to the
+   week's end); findings for an expired trip, ≥ 3 pins in a week, unread Costco lines and a
+   signed-out / challenged Costco sweep; `receipt_sweep` (Costco), `costco_trip_receipt` and
+   `costco_item_renamed` rows join the `store_choice` extract
 7. Cart injection (tier-1 success, tier-2 fallbacks, failures with selector/error, layout alerts
    and the weekly add-button check)
 8. UX friction (expired items, answered reviews by kind/outcome with median age, clarifying
@@ -1413,3 +1486,8 @@ docker-compose.yml (+ docker-compose.build.yml), Makefile, CLAUDE.md, README.md,
 | 73 | The State Engine opens the next cycle itself when a cycle ends and the next build is within 7 days; the agent only gives it a Discord thread, and the Monday 9am cron stays the fallback | Live 2026-11-11: W45's order was ingested on a Wednesday by the 9pm receipt sweep, whose local model never ran "open the next cycle"; the cron waits for the Monday after a close, so W46 got no Friday check-in and no Saturday cart. Same lesson as #60: steps that need no judgment don't belong to the model. The 7-day limit keeps a mid-week skip from opening next week's cycle, which the Friday/Saturday automations would act on a week early |
 | 74 | Costco is a second store chosen per item by unit price, spoilage and trip timing, with a list instead of a cart, prices only from receipts, and overrides that pin the item | The household shops Costco in store about monthly: a cart would be automation against Costco's bot checks for a store we mostly walk. Bulk is only cheaper if it's used up, so the shelf-life check decides, and trip timing decides whether the weekly cart bridges. Prices from receipts cost no page loads; an item is a candidate once bought there. A pin is the predictable reading of "get X at Whole Foods"; the household threshold still learns from overrides that go against price |
 | 75 | A Costco trip nobody closes is cancelled (`expired`) by the daily cron a week after its date; "back from Costco" closes it `done` even before receipts are read; store pins have no CHECK constraint | CLAUDE.md: nothing blocks on a human. An open trip in the past would keep Costco items out of the weekly cart forever, and without a receipt nothing says the trip happened, so the safe default is to stop waiting (the cart then bridges). A week leaves room for the receipt sweep's weekly fallback. A CHECK on the new `item` column would make drizzle-kit rebuild the table, which the expand-only rule refuses; the API's enum is its only writer |
+| 76 | Costco item numbers get their own `vendor_alias.kind` (`item_number`), which rebuilt `vendor_alias` in a marked contract migration; products carry `vendor_sku`; `receipt_line.match_method` stays `asin` for item-number matches | Reusing kind `asin` or keeping item numbers only on products would have avoided the rebuild, but an alias is where a human's answer ("this number is bananas", "ignore this number") lives, as for ASINs. The rebuild is safe here: every column is copied, no table references `vendor_alias`, and the previous release reads the same columns (owner agreed, 2026-11-15). `match_method` would need a `receipt_line` rebuild for a word |
+| 77 | Costco lines resolve by item number, then (warehouse abbreviations only) the paper-receipt text match, else a new item; a fuzzy match gets no Costco product until a person answers the receipt review | Item numbers are stable across both channels. Warehouse text is paper-receipt-like, but an online title fuzzy-matched by token set lands on any one-word item it contains ("Peanut Butter" → "Butter"), so online lines behave like unknown ASINs. A product created from a guess would make store choice trust a price for the wrong item |
+| 78 | A Costco product's price for store choice is its latest warehouse price (`last_price_fulfillment`); a delivered price is used only while there is no warehouse one | The owner buys in store; delivered prices run higher (live $34.99 vs $29.99), so comparing them with Whole Foods would understate Costco. Keeping one `last_price_cents` means `chooseStore` is unchanged; the delivery premium is reported instead |
+| 79 | "Back from Costco" schedules the receipt sweep locally (next morning + one retry, `receipts-costco.json`), run by a daily command automation that loads nothing unless due, plus a weekly fallback; a warehouse receipt within 3 days after a trip links (and closes) it | Receipts "appear within 24 hours" and Costco has bot checks, so a sweep right away would find nothing and a daily sweep would load pages for nothing. A local schedule needs no new API or model reasoning (§10 #60). Linking by date covers going a day or two late and an unplanned run's receipt closing nothing |
+| 80 | The Costco sweep never reads `data-private` content except receipt rows, and an unreadable receipt line is reported (sweep reply, telemetry, failed totals check), never mapped to an item | Member and card numbers, address and contact details are on the same pages; the State Engine needs none of them. No discount line has been seen yet: guessing its format could subtract a saving from the wrong item or drop a purchase silently |

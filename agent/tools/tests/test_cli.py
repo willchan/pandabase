@@ -13,7 +13,7 @@ import pytest
 from conftest import REPO, FakeApi, FakeDriver, FakeShop
 from test_cart_injector import VIEW, line, product
 
-from pandabase_tools import cli
+from pandabase_tools import cli, costco_receipts
 from pandabase_tools.config import load
 
 
@@ -70,6 +70,8 @@ def test_cron_example_schedule() -> None:
         "pandabase-job-replies": "*/5 * * * *",
         "pandabase-cart-probe": "0 15 * * 5",  # Friday afternoon, before Saturday's build
         "pandabase-data-check": "20 8 * * 1",  # Monday morning, after Sunday's diagnostics
+        "pandabase-costco-receipts": "10 9 * * *",  # only runs when "back from Costco" scheduled
+        "pandabase-costco-receipts-weekly": "40 19 * * 0",  # before the 21:00 Amazon sweep
     }
     by_name = {j["name"]: j for j in cron["jobs"]}
     # No model turn for these two (live 2026-11-07: the model posted a made-up cart).
@@ -82,6 +84,13 @@ def test_cron_example_schedule() -> None:
     probe = next(j for j in cron["jobs"] if j["name"] == "pandabase-cart-probe")
     assert probe["command"] == "pandabase-tools cart probe --reply"
     assert probe["deliver_to"] == "ops_channel"
+    # Costco receipts (M10.3): command payloads, no model turn.
+    assert by_name["pandabase-costco-receipts"]["command"] == (
+        "pandabase-tools receipts sweep --vendor costco --due --reply"
+    )
+    assert by_name["pandabase-costco-receipts-weekly"]["command"] == (
+        "pandabase-tools receipts sweep --vendor costco --reply"
+    )
 
 
 def test_human_writes_need_an_actor(config: Path) -> None:
@@ -951,6 +960,10 @@ def test_costco_done_closes_the_planned_trip(config: Path) -> None:
     )
     code, out = run(config, ["costco", "done", "--actor", "42", "--key", "discord:10"], api)
     assert code == 0 and out.startswith("✅ Welcome back — trip closed.")
+    assert "tomorrow morning" in out
+    # The receipt sweep is scheduled for the next morning, with one retry (M10.3).
+    state = costco_receipts.CostcoState.load(config.parent / "state" / "receipts-costco.json")
+    assert state.due == ["2026-10-25", "2026-10-26"]
     assert api.bodies("POST /api/costco/trip/T1/status") == [
         {"status": "done", "actor_discord_id": "42"}
     ]
@@ -961,5 +974,80 @@ def test_costco_done_closes_the_planned_trip(config: Path) -> None:
 def test_costco_done_without_a_trip_posts_nothing(config: Path) -> None:
     api = FakeApi({"GET /api/costco/trip": lambda _: {"trip": None, "lines": []}})
     code, out = run(config, ["costco", "done"], api)
-    assert code == 0 and out.startswith("❓ No Costco trip is planned.")
+    assert code == 0 and "No Costco trip was planned" in out
     assert api.bodies("POST /api/costco/trip/T1/status") == []
+    # An unplanned run still gets its receipt imported.
+    state = costco_receipts.CostcoState.load(config.parent / "state" / "receipts-costco.json")
+    assert state.due == ["2026-10-25", "2026-10-26"]
+    code, out = run(config, ["costco", "cancel"], api)
+    assert out == "❓ No Costco trip is planned."
+
+
+class _CostcoDriver:
+    """Context manager driver for `receipts sweep --vendor costco` (a signed-out page here)."""
+
+    def __init__(self) -> None:
+        self.opened: list[str] = []
+
+    def __enter__(self) -> _CostcoDriver:
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        return None
+
+    def open(self, url: str) -> Any:
+        self.opened.append(url)
+        from pandabase_tools.browser import Snapshot
+
+        return Snapshot(url, "<html><body>Sign In</body></html>")
+
+    def costco_ready(self, page: str) -> Any:
+        from pandabase_tools.browser import Snapshot
+
+        return Snapshot(self.opened[-1], "<html><body>Sign In</body></html>")
+
+
+def _costco_config(config: Path) -> None:
+    data = json.loads(config.read_text())
+    data.setdefault("receipts", {})["costco"] = {
+        "orders_url": "https://www.costco.com/myaccount/#/app/x/ordersandpurchases",
+        "throttle_seconds": 0,
+    }
+    config.write_text(json.dumps(data))
+
+
+def test_costco_due_sweep_loads_nothing_unless_scheduled(config: Path) -> None:
+    _costco_config(config)
+    driver = _CostcoDriver()
+    code, out = run(
+        config,
+        ["receipts", "sweep", "--vendor", "costco", "--due", "--reply"],
+        FakeApi({}),
+        driver,  # type: ignore[arg-type]
+    )
+    assert (code, out, driver.opened) == (0, "NO_REPLY", [])
+
+
+def test_costco_due_sweep_runs_when_scheduled_and_warns_once(config: Path) -> None:
+    _costco_config(config)
+    state_dir = config.parent / "state"
+    state_dir.mkdir()
+    costco_receipts.schedule_after_trip(state_dir, date(2026, 10, 23), "2026-10-23")
+    api = FakeApi({"POST /api/telemetry": lambda b: {"accepted": len(b["events"])}})
+    driver = _CostcoDriver()
+    argv = ["receipts", "sweep", "--vendor", "costco", "--due", "--reply"]
+    code, out = run(config, argv, api, driver)  # type: ignore[arg-type]
+    assert code == 0 and out.startswith("⚠️ Costco is signed out"), out
+    assert len(driver.opened) == 1
+    # Still due (the sweep failed), and the warning isn't repeated within the week.
+    state = costco_receipts.CostcoState.load(state_dir / "receipts-costco.json")
+    assert state.due == ["2026-10-24", "2026-10-25"]
+    code, out = run(config, argv, api, driver)  # type: ignore[arg-type]
+    assert out == "NO_REPLY"
+
+
+def test_amazon_sweep_still_needs_a_member(config: Path) -> None:
+    code, out = run(config, ["receipts", "sweep"], FakeApi({}))
+    assert code == 2 and "--member" in out["error"]
+    code, out = run(config, ["receipts", "sweep", "--member", "will", "--due"], FakeApi({}))
+    assert code == 2

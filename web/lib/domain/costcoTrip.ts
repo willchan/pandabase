@@ -27,6 +27,37 @@ export function isTripExpired(plannedFor: string, now: string, config: Config): 
   return today > addDays(plannedFor, config.costco.tripExpireAfterDays);
 }
 
+/** A trip a Costco receipt may belong to (planned or done, no receipt yet). */
+export interface ReceiptTripCandidate {
+  id: string;
+  plannedFor: string;
+  status: "planned" | "done" | "cancelled";
+  receiptId: string | null;
+}
+
+/**
+ * M10.3: the trip a Costco **warehouse** receipt acquired at `acquiredAt` belongs to: a planned or
+ * done trip without a receipt whose date is on or up to `costco.tripReceiptWindowDays` before the
+ * receipt's household-local date; the latest such trip if several. Null when none fits (an
+ * unplanned Costco run is just a receipt).
+ */
+export function tripForReceipt(
+  trips: readonly ReceiptTripCandidate[],
+  acquiredAt: string,
+  config: Config,
+): ReceiptTripCandidate | null {
+  const day = localDate(acquiredAt, config.householdTz);
+  const earliest = addDays(day, -config.costco.tripReceiptWindowDays);
+  const fits = trips.filter(
+    (t) =>
+      t.status !== "cancelled" &&
+      t.receiptId === null &&
+      t.plannedFor <= day &&
+      t.plannedFor >= earliest,
+  );
+  return fits.sort((a, b) => b.plannedFor.localeCompare(a.plannedFor))[0] ?? null;
+}
+
 export interface TripListEntry extends CostcoListLine {
   itemId: string;
   product: ProductCandidate;

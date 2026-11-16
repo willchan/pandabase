@@ -22,11 +22,14 @@ import {
   deriveItemName,
   matchDigitalLine,
   matchPaperLine,
+  matchSkuLine,
+  normalizeSku,
   parseUnitQuantity,
   toBaseUnits,
   type Alias,
   type AsinProduct,
   type CanonicalItem,
+  type SkuProduct,
 } from "./matching";
 import {
   learnFromOverride,
@@ -53,6 +56,11 @@ import {
 export interface ReceiptLineInput {
   rawText: string;
   asin: string | null;
+  /**
+   * The vendor's item number when it isn't an ASIN (Costco, §4.8): resolves like an ASIN through
+   * `vendor_alias(kind=item_number)` and `product.vendor_sku`.
+   */
+  vendorSku?: string | null;
   /** Product title (digital receipts) — names auto-created items. */
   title?: string | null;
   /**
@@ -79,6 +87,8 @@ export interface ReceiptInput {
   totalCents: number | null;
   /** Paper: discount/coupon lines read but not posted (positive cents; the totals check adds them). */
   discountCents?: number | null;
+  /** Sales tax, when the receipt prints it (Costco): the totals check also wants subtotal + tax = total. */
+  taxCents?: number | null;
   /** Required for `manual` receipts (dedupe key). */
   idempotencyKey?: string | null;
   lines: readonly ReceiptLineInput[];
@@ -89,11 +99,17 @@ export interface ItemRecord extends InventoryItem, VelocityState {
   id: string;
   canonicalName: string;
   switchThreshold: number;
+  /** Absent in older fakes: treated as confirmed (never auto-renamed). */
+  trust?: "confirmed" | "unverified";
+  mergedIntoItemId?: string | null;
 }
 
 export interface ProductRecord extends ProductCandidate {
   itemId: string;
   asin: string | null;
+  vendorSku?: string | null;
+  /** Receipt fulfillment `lastPriceCents` came from (§4.8 *Price by channel*). */
+  lastPriceFulfillment?: string | null;
 }
 
 /** The last built cycle's cart, for implicit swaps and closure. */
@@ -110,6 +126,8 @@ export interface ReceiptRepository {
   /** Active (unmerged) items for fuzzy matching on canonical names. */
   canonicalItems(): Promise<CanonicalItem[]>;
   productsByAsin(vendor: string, asins: readonly string[]): Promise<AsinProduct[]>;
+  /** Products of `vendor` with one of these item numbers (`product.vendor_sku`). */
+  productsBySku(vendor: string, skus: readonly string[]): Promise<SkuProduct[]>;
   item(itemId: string): Promise<ItemRecord>;
   products(itemId: string): Promise<ProductRecord[]>;
   inventory(itemId: string): Promise<InventoryState[]>;
@@ -159,7 +177,9 @@ export interface NewProduct {
   id: string;
   itemId: string;
   vendor: string;
-  asin: string;
+  asin: string | null;
+  /** Costco item number (§4.8); null for ASIN products. */
+  vendorSku: string | null;
   title: string;
   unitQuantity: number;
   unitQuantityTrust: "confirmed" | "unverified";
@@ -188,7 +208,21 @@ export type ReceiptTelemetry =
       pending: boolean;
       ignored: boolean;
     }
-  | (PreferenceEvent & { metric: "preference_event"; itemId: string });
+  | (PreferenceEvent & { metric: "preference_event"; itemId: string })
+  | { metric: "costco_item_renamed"; itemId: string; changed: boolean };
+
+/**
+ * §4.8: an item auto-named from a Costco warehouse abbreviation gets the full title an online order
+ * brings for the same item number — only while it is unverified, unmerged and still has the name
+ * the abbreviation gave it (the `db:rename-items` rule: a name a person gave is never touched).
+ */
+export interface RenameEffect {
+  itemId: string;
+  from: string;
+  to: string;
+  productId: string;
+  title: string;
+}
 
 export interface ReviewEffect {
   kind: "receipt" | "new_product";
@@ -210,6 +244,7 @@ export interface ReceiptEffects {
   lines: ResolvedLine[];
   newItems: NewItem[];
   newProducts: NewProduct[];
+  renames: RenameEffect[];
   inventoryEvents: AcquiredEvent[];
   itemPatches: {
     id: string;
@@ -240,12 +275,18 @@ export function receiptDedupeKey(r: ReceiptInput, tz: string): string {
 
 /**
  * Line totals (fee lines included, unposted discounts subtracted) vs the subtotal, to the cent;
- * n/a when any total is missing.
+ * n/a when any total is missing. With a tax amount (Costco), subtotal + tax must also equal the
+ * total.
  */
 export function totalsCheck(
-  r: Pick<ReceiptInput, "subtotalCents" | "lines" | "discountCents">,
+  r: Pick<ReceiptInput, "subtotalCents" | "lines" | "discountCents" | "taxCents"> & {
+    totalCents?: number | null;
+  },
 ): "pass" | "fail" | "n/a" {
   if (r.subtotalCents === null || r.lines.some((l) => l.lineTotalCents === null)) return "n/a";
+  const tax = r.taxCents ?? null;
+  const total = r.totalCents ?? null;
+  if (tax !== null && total !== null && r.subtotalCents + tax !== total) return "fail";
   const sum = r.lines.reduce((s, l) => s + l.lineTotalCents!, 0) - (r.discountCents ?? 0);
   return sum === r.subtotalCents ? "pass" : "fail";
 }
@@ -293,6 +334,7 @@ export async function applyReceipt(
     lines: [],
     newItems: [],
     newProducts: [],
+    renames: [],
     inventoryEvents: [],
     itemPatches: [],
     productPatches: [],
@@ -303,14 +345,75 @@ export async function applyReceipt(
   };
 
   // 1. Resolve lines to items/products.
+  const pendingRenames: { itemId: string; productId: string; title: string }[] = [];
   const aliases = await repo.aliases(input.vendor);
   const asins = input.lines.map((l) => l.asin).filter((a): a is string => !!a);
   const asinProducts = asins.length ? await repo.productsByAsin(input.vendor, asins) : [];
+  const skus = input.lines.map((l) => l.vendorSku).filter((x): x is string => !!x);
+  const skuProducts = skus.length
+    ? await repo.productsBySku(input.vendor, [...new Set(skus.map(normalizeSku))])
+    : [];
   let canonical: CanonicalItem[] | null = null;
   const createdByAsin = new Map<
     string,
     { itemId: string; productId: string; unitQuantity: number }
   >();
+  /** Item number → the Costco product this receipt created for it (on a new or existing item). */
+  const createdBySku = new Map<string, { itemId: string; productId: string }>();
+  const titleOf = (line: ReceiptLineInput) => line.title?.trim() || line.rawText.trim();
+  /** A new unverified item + product for an unknown ASIN / item number (§4.5, §4.8). */
+  const createItem = (
+    line: ReceiptLineInput,
+    ids: { asin: string | null; vendorSku: string | null },
+  ) => {
+    const title = titleOf(line);
+    const parsed = parseUnitQuantity(title);
+    const created = { itemId: ctx.newId(), productId: ctx.newId(), unitQuantity: parsed ?? 1 };
+    fx.newItems.push({
+      id: created.itemId,
+      canonicalName: deriveItemName(title, config.itemNames.storeBrands),
+      ...NEW_ITEM_DEFAULTS,
+      trackingType: "static",
+      trust: "unverified",
+    });
+    fx.newProducts.push({
+      id: created.productId,
+      itemId: created.itemId,
+      vendor: input.vendor,
+      ...ids,
+      title,
+      unitQuantity: created.unitQuantity,
+      // Catalog trust has no "provisional": parsed or defaulted, it's machine-made.
+      unitQuantityTrust: "unverified",
+      stance: NEW_PRODUCT_STANCE,
+    });
+    fx.reviews.push(
+      review("new_product", created.itemId, {
+        ...(ids.asin ? { asin: ids.asin } : { item_number: ids.vendorSku }),
+        title,
+        unitQuantityParsed: parsed !== null,
+      }),
+    );
+    return created;
+  };
+  /** A Costco product for an item number seen on an item that has none yet (confirmed match). */
+  const addSkuProduct = (line: ReceiptLineInput, sku: string, itemId: string): string => {
+    const title = titleOf(line);
+    const productId = ctx.newId();
+    fx.newProducts.push({
+      id: productId,
+      itemId,
+      vendor: input.vendor,
+      asin: null,
+      vendorSku: sku,
+      title,
+      unitQuantity: parseUnitQuantity(title) ?? 1,
+      unitQuantityTrust: "unverified",
+      stance: NEW_PRODUCT_STANCE,
+    });
+    createdBySku.set(sku, { itemId, productId });
+    return productId;
+  };
 
   for (const line of input.lines) {
     const base: ResolvedLine = {
@@ -336,6 +439,10 @@ export async function applyReceipt(
       });
       continue;
     }
+    if (line.vendorSku && !line.asin) {
+      fx.lines.push(await resolveSkuLine(line, normalizeSku(line.vendorSku), base));
+      continue;
+    }
     if (line.asin) {
       const m = matchDigitalLine({
         asin: line.asin,
@@ -358,35 +465,14 @@ export async function applyReceipt(
         const key = line.asin.trim().toUpperCase();
         let created = createdByAsin.get(key);
         if (!created) {
-          const title = line.title?.trim() || line.rawText;
-          const parsed = parseUnitQuantity(title);
-          created = { itemId: ctx.newId(), productId: ctx.newId(), unitQuantity: parsed ?? 1 };
-          createdByAsin.set(key, created);
-          fx.newItems.push({
-            id: created.itemId,
-            canonicalName: deriveItemName(title, config.itemNames.storeBrands),
-            ...NEW_ITEM_DEFAULTS,
-            trackingType: "static",
-            trust: "unverified",
-          });
-          fx.newProducts.push({
-            id: created.productId,
-            itemId: created.itemId,
-            vendor: input.vendor,
-            asin: key,
-            title,
-            unitQuantity: created.unitQuantity,
-            // Catalog trust has no "provisional": parsed or defaulted, it's machine-made.
-            unitQuantityTrust: "unverified",
-            stance: NEW_PRODUCT_STANCE,
-          });
-          fx.reviews.push(
-            review("new_product", created.itemId, {
+          created = createItem(
+            { ...line, title: line.title?.trim() || line.rawText },
+            {
               asin: key,
-              title,
-              unitQuantityParsed: parsed !== null,
-            }),
+              vendorSku: null,
+            },
           );
+          createdByAsin.set(key, created);
         }
         fx.lines.push({
           ...base,
@@ -432,6 +518,28 @@ export async function applyReceipt(
     }
   }
 
+  // 1b. Renames (§4.8): reads the item and product the online line resolved to.
+  for (const r of pendingRenames) {
+    if (fx.renames.some((x) => x.itemId === r.itemId)) continue;
+    const it = await repo.item(r.itemId);
+    const p = (await repo.products(r.itemId)).find((x) => x.id === r.productId);
+    if (!p || p.title === r.title || it.trust !== "unverified" || it.mergedIntoItemId) continue;
+    if (it.canonicalName !== deriveItemName(p.title, config.itemNames.storeBrands)) continue;
+    const to = deriveItemName(r.title, config.itemNames.storeBrands);
+    fx.renames.push({
+      itemId: r.itemId,
+      from: it.canonicalName,
+      to,
+      productId: p.id,
+      title: r.title,
+    });
+    fx.telemetry.push({
+      metric: "costco_item_renamed",
+      itemId: r.itemId,
+      changed: to !== it.canonicalName,
+    });
+  }
+
   // 2. Per item: inventory, overbuy, EMA, product stats, implicit swaps.
   const away = await repo.awayPeriods();
   const cycle = await repo.lastBuiltCycle();
@@ -450,9 +558,9 @@ export async function applyReceipt(
           config,
         )
       : await repo.item(itemId);
-    const products: ProductRecord[] = isNew
-      ? fx.newProducts.filter((p) => p.itemId === itemId).map(newProductRecord)
-      : await repo.products(itemId);
+    // An existing item may also get a new Costco product on this receipt (§4.8).
+    const added = fx.newProducts.filter((p) => p.itemId === itemId).map(newProductRecord);
+    const products: ProductRecord[] = isNew ? added : [...(await repo.products(itemId)), ...added];
 
     for (const l of lines) {
       if (l.baseQty > 0) continue;
@@ -539,14 +647,25 @@ export async function applyReceipt(
     for (const boughtId of boughtIds) {
       if (!current.some((p) => p.id === boughtId)) continue;
       const priced = lines.find((l) => l.productId === boughtId && l.unitPriceCents !== null);
+      const bought = current.find((p) => p.id === boughtId)!;
+      // §4.8 Price by channel: a Costco delivery price never replaces a warehouse one.
+      const keepWarehousePrice =
+        input.vendor === config.costco.vendor &&
+        input.fulfillment !== "in_store" &&
+        bought.lastPriceFulfillment === "in_store";
+      const price = keepWarehousePrice ? null : (priced?.unitPriceCents ?? null);
       const learned = recordPurchase({
         products: current,
         boughtId,
         at: input.acquiredAt,
-        unitPriceCents: priced?.unitPriceCents ?? null,
+        unitPriceCents: price,
         switchThreshold: threshold,
         config,
       });
+      if (price !== null && input.vendor === config.costco.vendor) {
+        const patch = learned.productPatches.find((x) => x.id === boughtId)!;
+        patch.lastPriceFulfillment = input.fulfillment;
+      }
       applyLearning(learned.productPatches, learned.events, null);
     }
     const cartProductId = orderCycle?.lines.find((l) => l.itemId === itemId)?.productId;
@@ -610,6 +729,84 @@ export async function applyReceipt(
   }
   return fx;
 
+  /**
+   * §4.8 Costco line: item number (alias, then `product.vendor_sku`), then — warehouse text only —
+   * the paper-receipt text match, else a new unverified item. Online lines carry the full title
+   * and skip the text match (token-set scoring would put "…Peanut Butter, 28 oz" on "Butter"):
+   * like an unknown ASIN, they create an item and merge suggestions find duplicates.
+   */
+  async function resolveSkuLine(
+    line: ReceiptLineInput,
+    sku: string,
+    base: ResolvedLine,
+  ): Promise<ResolvedLine> {
+    const done = (r: Partial<ResolvedLine>): ResolvedLine => ({ ...base, vendorSku: sku, ...r });
+    const byNumber = {
+      matchMethod: "asin" as const,
+      matchScore: 1,
+      trust: "confirmed" as const,
+    };
+    const created = createdBySku.get(sku);
+    if (created) return done({ ...byNumber, ...created });
+    const m = matchSkuLine({ sku, vendor: input.vendor, aliases, products: skuProducts });
+    if (m.kind === "ignored") return done({ ...byNumber, ignored: true });
+    if (m.kind === "known") {
+      const productId = m.productId ?? addSkuProduct(line, sku, m.itemId);
+      if (m.productId) renameFromTitle(line, m.itemId, m.productId);
+      return done({ ...byNumber, itemId: m.itemId, productId });
+    }
+    if (input.fulfillment === "in_store") {
+      canonical ??= await repo.canonicalItems();
+      const t = matchPaperLine({
+        rawText: line.rawText,
+        vendor: input.vendor,
+        aliases,
+        items: canonical,
+        config,
+      });
+      if (t.kind === "ignored") {
+        return done({
+          ...byNumber,
+          normalized: t.normalized,
+          matchMethod: "alias_exact",
+          ignored: true,
+        });
+      }
+      if (t.kind === "exact") {
+        // A person confirmed this text: the item number joins that item as its Costco product.
+        return done({
+          normalized: t.normalized,
+          itemId: t.itemId,
+          productId: addSkuProduct(line, sku, t.itemId),
+          matchMethod: "alias_exact",
+          matchScore: 1,
+          trust: "confirmed",
+        });
+      }
+      if (t.kind === "fuzzy") {
+        // Provisional: no product until the receipt review confirms it (an item_number alias).
+        return done({
+          normalized: t.normalized,
+          itemId: t.itemId,
+          productId: t.productId,
+          matchMethod: "fuzzy",
+          matchScore: t.score,
+          trust: "unverified",
+        });
+      }
+    }
+    const c = createItem(line, { asin: null, vendorSku: sku });
+    createdBySku.set(sku, { itemId: c.itemId, productId: c.productId });
+    return done({ ...byNumber, itemId: c.itemId, productId: c.productId });
+  }
+
+  /** Queue a §4.8 rename when an online title arrives for an auto-named warehouse item. */
+  function renameFromTitle(line: ReceiptLineInput, itemId: string, productId: string): void {
+    const title = line.title?.trim();
+    if (!title || input.fulfillment === "in_store") return;
+    pendingRenames.push({ itemId, productId, title });
+  }
+
   function review(
     kind: "receipt" | "new_product",
     itemId: string | null,
@@ -642,6 +839,7 @@ function newProductRecord(p: NewProduct): ProductRecord {
     itemId: p.itemId,
     vendor: p.vendor,
     asin: p.asin,
+    vendorSku: p.vendorSku,
     title: p.title,
     unitQuantity: p.unitQuantity,
     stance: p.stance,
@@ -672,6 +870,8 @@ export interface ReviewedLine {
   lineId: string;
   /** Normalized paper text (alias key); null for digital lines. */
   normalized: string | null;
+  /** Costco item number (§4.8): answers also write a `kind=item_number` alias. */
+  vendorSku?: string | null;
   /** What the system matched (null for pending lines). */
   itemId: string | null;
   productId: string | null;
@@ -803,6 +1003,25 @@ export function resolveReceiptReview(input: {
         });
       }
       out.labels.push({ lineId: l.lineId, modelOutput, humanLabel: { ignored: true } });
+    }
+    if (l.vendorSku) {
+      // §4.8: the item number now resolves without text matching next time (or stays ignored).
+      const target =
+        d.kind === "correct"
+          ? { itemId: d.itemId, productId: d.productId }
+          : d.kind === "confirm"
+            ? { itemId: l.itemId, productId: l.productId }
+            : null;
+      out.aliases.push({
+        vendor: input.vendor,
+        kind: "item_number",
+        vendorString: normalizeSku(l.vendorSku),
+        itemId: target?.itemId ?? null,
+        productId: target?.productId ?? null,
+        confidenceScore: 1,
+        ignored: target === null,
+        trust: "confirmed",
+      });
     }
   }
   return out;

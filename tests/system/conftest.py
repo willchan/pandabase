@@ -353,6 +353,10 @@ def agent_config(base_url: str, web_url: str, tmp: Path) -> Path:
         diagnostics_dir=str(tmp / "diagnostics"),
     )
     cfg["cart"]["page_delay_seconds"] = 0
+    cfg.setdefault("receipts", {})["costco"] = {
+        "orders_url": "https://www.costco.com/myaccount/#/app/system/ordersandpurchases",
+        "throttle_seconds": 0,
+    }
     cfg["members"] = [
         {"name": "alex", "discord_id": ALEX, "profile": "alex", "cart_member": True,
          "receipt_sweep": "daily"},

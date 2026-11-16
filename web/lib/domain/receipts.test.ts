@@ -162,6 +162,10 @@ function repo(w: World): ReceiptRepository {
       w.products
         .filter((p) => p.vendor === vendor && p.asin !== null && asins.includes(p.asin))
         .map((p) => ({ id: p.id, itemId: p.itemId, vendor: p.vendor, asin: p.asin })),
+    productsBySku: async (vendor, skus) =>
+      w.products
+        .filter((p) => p.vendor === vendor && p.vendorSku && skus.includes(p.vendorSku))
+        .map((p) => ({ id: p.id, itemId: p.itemId, vendor: p.vendor, vendorSku: p.vendorSku! })),
     item: async (id) =>
       find(
         w.items.find((i) => i.id === id),
@@ -318,6 +322,7 @@ describe("applyReceipt — digital", () => {
         itemId: "new1",
         vendor: "amazon",
         asin: "B0NEW",
+        vendorSku: null,
         title: "Brand Kombucha - Ginger, Pack of 6",
         unitQuantity: 6,
         unitQuantityTrust: "unverified",
@@ -821,5 +826,271 @@ describe("reconcileReceiptEvents", () => {
         ],
       ),
     ).toEqual({ trust: [], expire: ["e2"], insert: [] });
+  });
+});
+
+// --- Costco (DESIGN §4.8, M10.3) ----------------------------------------------------------------
+
+describe("applyReceipt — Costco item numbers", () => {
+  const costcoWorld = (): World => {
+    const w = world();
+    w.items.push(
+      item("butter", { canonicalName: "Butter" }),
+      item("tiss", {
+        canonicalName: "Bath Tiss",
+        trust: "unverified",
+        trackingType: "static",
+        emaDays: null,
+        defaultLocation: "bathroom",
+      }),
+    );
+    w.products.push(
+      product("tiss-p", "tiss", {
+        vendor: "costco",
+        vendorSku: "9000201",
+        title: "BATH TISS",
+        lastPriceCents: 2399,
+        lastPriceFulfillment: "in_store",
+      }),
+    );
+    w.aliases.push(
+      alias("costco", "receipt_text", "BANANAS", { itemId: "eggs", productId: null }),
+      alias("costco", "item_number", "9999999", { ignored: true }),
+    );
+    w.cycle = null;
+    return w;
+  };
+  const warehouse = (lines: ReceiptLineInput[], o: Partial<ReceiptInput> = {}) =>
+    receipt({
+      vendor: "costco",
+      fulfillment: "in_store",
+      externalOrderId: "21099920100422611071815",
+      lines,
+      ...o,
+    });
+  const online = (lines: ReceiptLineInput[]) =>
+    receipt({ vendor: "costco", fulfillment: "delivery", externalOrderId: "1000000001", lines });
+
+  it("an unknown warehouse item number creates an unverified item named without KS, and its product", async () => {
+    const fx = await applyReceipt(
+      warehouse([
+        line("KS ALMOND MLK", {
+          vendorSku: "9000103",
+          qty: 2,
+          unitPriceCents: 699,
+          lineTotalCents: 1398,
+        }),
+      ]),
+      repo(costcoWorld()),
+      { config, newId: ids(), now: NOW },
+    );
+    expect(fx.newItems).toEqual([
+      expect.objectContaining({ canonicalName: "Almond MLK", trust: "unverified" }),
+    ]);
+    expect(fx.newProducts).toEqual([
+      expect.objectContaining({ vendor: "costco", vendorSku: "9000103", asin: null }),
+    ]);
+    expect(fx.reviews[0]).toMatchObject({
+      kind: "new_product",
+      payload: { item_number: "9000103", title: "KS ALMOND MLK" },
+    });
+    expect(fx.lines[0]).toMatchObject({ matchMethod: "asin", trust: "confirmed", baseQty: 2 });
+    expect(fx.inventoryEvents[0]).toMatchObject({ quantity: 2, trust: "confirmed" });
+    expect(fx.productPatches[0]).toMatchObject({
+      lastPriceCents: 699,
+      lastPriceFulfillment: "in_store",
+    });
+  });
+
+  it("a known item number resolves without text matching; an ignored one is skipped", async () => {
+    const fx = await applyReceipt(
+      warehouse([
+        line("**KS BATH TISS**", { vendorSku: "9000201", unitPriceCents: 2299 }),
+        line("DEPOSIT", { vendorSku: "9999999" }),
+      ]),
+      repo(costcoWorld()),
+      { config, newId: ids(), now: NOW },
+    );
+    expect(fx.newItems).toEqual([]);
+    expect(fx.lines.map((l) => [l.itemId, l.productId, l.ignored])).toEqual([
+      ["tiss", "tiss-p", false],
+      [null, null, true],
+    ]);
+    expect(fx.productPatches[0]).toMatchObject({ id: "tiss-p", lastPriceCents: 2299 });
+  });
+
+  it("leading zeros don't make a new item number", async () => {
+    const fx = await applyReceipt(
+      warehouse([line("BATH TISS", { vendorSku: "09000201" })]),
+      repo(costcoWorld()),
+      { config, newId: ids(), now: NOW },
+    );
+    expect(fx.lines[0]?.itemId).toBe("tiss");
+  });
+
+  it("warehouse text with a confirmed alias joins that item as its new Costco product", async () => {
+    const fx = await applyReceipt(
+      warehouse([line("BANANAS", { vendorSku: "9000102", unitPriceCents: 199 })]),
+      repo(costcoWorld()),
+      { config, newId: ids(), now: NOW },
+    );
+    expect(fx.newItems).toEqual([]);
+    expect(fx.newProducts).toEqual([
+      expect.objectContaining({ itemId: "eggs", vendor: "costco", vendorSku: "9000102" }),
+    ]);
+    expect(fx.lines[0]).toMatchObject({
+      itemId: "eggs",
+      productId: fx.newProducts[0]!.id,
+      matchMethod: "alias_exact",
+      trust: "confirmed",
+    });
+    // The new product is the bought one: its stats and warehouse price are recorded.
+    expect(fx.productPatches[0]).toMatchObject({ id: fx.newProducts[0]!.id, timesBought: 1 });
+  });
+
+  it("warehouse text that only fuzzy-matches applies provisionally with no product", async () => {
+    const fx = await applyReceipt(
+      warehouse([line("KS SALTED BUTTER", { vendorSku: "9000777" })]),
+      repo(costcoWorld()),
+      { config, newId: ids(), now: NOW },
+    );
+    expect(fx.newProducts).toEqual([]);
+    expect(fx.lines[0]).toMatchObject({
+      itemId: "butter",
+      productId: null,
+      matchMethod: "fuzzy",
+      trust: "unverified",
+      vendorSku: "9000777",
+    });
+    expect(fx.reviews.map((r) => r.kind)).toEqual(["receipt"]);
+  });
+
+  it("online titles skip the text match (no 'Peanut Butter' on Butter): a new item", async () => {
+    const fx = await applyReceipt(
+      online([
+        line("Synthetic Organic Peanut Butter, 28 oz, 2-pack", {
+          title: "Synthetic Organic Peanut Butter, 28 oz, 2-pack",
+          vendorSku: "9000301",
+          qty: 2,
+          unitPriceCents: 1249,
+        }),
+      ]),
+      repo(costcoWorld()),
+      { config, newId: ids(), now: NOW },
+    );
+    expect(fx.newItems[0]?.canonicalName).toBe("Synthetic Organic Peanut Butter");
+    expect(fx.lines[0]?.itemId).toBe(fx.newItems[0]!.id);
+  });
+
+  it("an online price never replaces a warehouse one, but the purchase still counts", async () => {
+    const fx = await applyReceipt(
+      online([
+        line("Kirkland Signature Bath Tissue, 2-Ply, 380 Sheets, 30 Rolls", {
+          title: "Kirkland Signature Bath Tissue, 2-Ply, 380 Sheets, 30 Rolls",
+          vendorSku: "9000201",
+          unitPriceCents: 2799,
+        }),
+      ]),
+      repo(costcoWorld()),
+      { config, newId: ids(), now: NOW },
+    );
+    const patch = fx.productPatches.find((p) => p.id === "tiss-p")!;
+    expect(patch.timesBought).toBe(1);
+    expect(patch.lastPriceCents).toBeUndefined();
+    expect(patch.lastPriceFulfillment).toBeUndefined();
+  });
+
+  it("an online price is used while there is no warehouse price", async () => {
+    const w = costcoWorld();
+    w.products.find((p) => p.id === "tiss-p")!.lastPriceFulfillment = "delivery";
+    const fx = await applyReceipt(
+      online([
+        line("Bath Tissue", { title: "Bath Tissue", vendorSku: "9000201", unitPriceCents: 2799 }),
+      ]),
+      repo(w),
+      { config, newId: ids(), now: NOW },
+    );
+    expect(fx.productPatches[0]).toMatchObject({
+      lastPriceCents: 2799,
+      lastPriceFulfillment: "delivery",
+    });
+  });
+
+  it("an online title renames an auto-named warehouse item (unverified, name unchanged)", async () => {
+    const title = "Kirkland Signature Bath Tissue, 2-Ply, 380 Sheets, 30 Rolls";
+    const fx = await applyReceipt(
+      online([line(title, { title, vendorSku: "9000201" })]),
+      repo(costcoWorld()),
+      { config, newId: ids(), now: NOW },
+    );
+    expect(fx.renames).toEqual([
+      { itemId: "tiss", from: "Bath Tiss", to: "Bath Tissue", productId: "tiss-p", title },
+    ]);
+    expect(fx.telemetry).toContainEqual({
+      metric: "costco_item_renamed",
+      itemId: "tiss",
+      changed: true,
+    });
+  });
+
+  it("never renames a confirmed item, one a person renamed, or from a warehouse line", async () => {
+    const title = "Kirkland Signature Bath Tissue, 30 Rolls";
+    const run = async (w: World, fulfillment: ReceiptInput["fulfillment"] = "delivery") =>
+      (
+        await applyReceipt(
+          receipt({
+            vendor: "costco",
+            fulfillment,
+            externalOrderId: "x",
+            lines: [line(title, { title, vendorSku: "9000201" })],
+          }),
+          repo(w),
+          { config, newId: ids(), now: NOW },
+        )
+      ).renames;
+    const confirmed = costcoWorld();
+    confirmed.items.find((i) => i.id === "tiss")!.trust = "confirmed";
+    const renamed = costcoWorld();
+    renamed.items.find((i) => i.id === "tiss")!.canonicalName = "Toilet roll";
+    expect(await run(confirmed)).toEqual([]);
+    expect(await run(renamed)).toEqual([]);
+    expect(await run(costcoWorld(), "in_store")).toEqual([]);
+  });
+
+  it("totals: subtotal + tax must equal the total when tax is given", () => {
+    const lines = [line("A", { lineTotalCents: 1000 })];
+    expect(totalsCheck({ subtotalCents: 1000, taxCents: 93, totalCents: 1093, lines })).toBe(
+      "pass",
+    );
+    expect(totalsCheck({ subtotalCents: 1000, taxCents: 93, totalCents: 1100, lines })).toBe(
+      "fail",
+    );
+    // An unreported discount row: the lines no longer add up to the subtotal.
+    expect(totalsCheck({ subtotalCents: 900, taxCents: 0, totalCents: 900, lines })).toBe("fail");
+  });
+
+  it("review answers on an item-number line write item_number aliases", () => {
+    const base = {
+      normalized: null,
+      itemId: "butter",
+      productId: null,
+      matchScore: 0.9,
+      eventId: "e1",
+      vendorSku: "09000777",
+    };
+    const res = resolveReceiptReview({
+      vendor: "costco",
+      existingAliases: [],
+      lines: [
+        { ...base, lineId: "l1", decision: { kind: "confirm" } },
+        { ...base, lineId: "l2", decision: { kind: "correct", itemId: "eggs", productId: null } },
+        { ...base, lineId: "l3", decision: { kind: "ignore" } },
+      ],
+    });
+    expect(res.aliases.map((a) => [a.kind, a.vendorString, a.itemId, a.ignored])).toEqual([
+      ["item_number", "9000777", "butter", false],
+      ["item_number", "9000777", "eggs", false],
+      ["item_number", "9000777", null, true],
+    ]);
   });
 });

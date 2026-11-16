@@ -97,6 +97,17 @@ DESCRIBE_JS = """e => ({
   form_action: e.form ? (e.form.getAttribute("action") || "") : ""
 })"""
 _DESC_TEXT = ("id", "name", "value", "aria-label", "title", "text")
+# Costco (M10.3): the page's own hooks for the tabs, the order history and order details.
+COSTCO_TABS = {
+    "online": "[automation-id='myOnlineOrdersTab']",
+    "warehouse": "[automation-id='myWarehouseOrdersTab']",
+}
+COSTCO_READY = {
+    "orders": "[automation-id='myOrderHistory']",
+    "details": "[automation-id='orderNumber']",
+}
+COSTCO_BARCODE = re.compile(r"^\d{23}$")
+COSTCO_WAIT_MS = 15_000
 
 
 def buy_box_bound(
@@ -355,6 +366,56 @@ class CdpDriver:
             self._settle()
             return self._snapshot()
         return None
+
+    # Costco Orders & Purchases (M10.3, `costco_receipts`): four clicks on one read-only page.
+    # Located by `automation-id` / `id` (the live page's own hooks; its class names are hashed),
+    # never by text a model chose. None of them can navigate anywhere: the guard route still
+    # aborts any document request off `costco.com/myaccount`.
+
+    def _costco_wait(self, selector: str) -> Snapshot:
+        from playwright.sync_api import TimeoutError as PlaywrightTimeout
+
+        with contextlib.suppress(PlaywrightTimeout):  # the snapshot decides what's there
+            self.page.wait_for_selector(selector, timeout=COSTCO_WAIT_MS)
+        return self._snapshot()
+
+    def _costco_click(self, selector: str) -> None:
+        control = self.page.locator(selector).first
+        if not control_allowed(control.evaluate(DESCRIBE_JS)):
+            raise guard.UnsafeUrl(self.page.url, "checkout")
+        control.click()
+
+    def costco_ready(self, page: str) -> Snapshot:
+        """After `open`: wait (bounded) for the SPA to render `orders` (Orders & Purchases) or
+        `details` (an order's details; a hash route on the same document)."""
+        return self._costco_wait(COSTCO_READY[page])
+
+    def costco_tab(self, tab: str) -> Snapshot:
+        self._costco_click(COSTCO_TABS[tab])
+        return self._costco_wait(f"{COSTCO_TABS[tab]}[aria-selected='true']")
+
+    def costco_period(self, label: str) -> Snapshot:
+        self.page.locator("select#Showing").first.select_option(label=label)
+        self._settle()
+        return self._snapshot()
+
+    def costco_open_receipt(self, barcode: str) -> Snapshot:
+        if not COSTCO_BARCODE.match(barcode):  # it goes into a selector below
+            raise ValueError(f"not a Costco receipt barcode: {barcode!r}")
+        self._costco_click(
+            f"[id='viewRecieptBtn_{barcode}'] [automation-id='ViewInWareHouseReciept']"
+        )
+        return self._costco_wait("table[aria-label='spanning table'] tbody tr")
+
+    def costco_close_receipt(self) -> Snapshot:
+        self._costco_click("[automation-id='closePopup']")
+        from playwright.sync_api import TimeoutError as PlaywrightTimeout
+
+        with contextlib.suppress(PlaywrightTimeout):
+            self.page.wait_for_selector(
+                "table[aria-label='spanning table']", state="detached", timeout=COSTCO_WAIT_MS
+            )
+        return self._snapshot()
 
     def _settle(self) -> None:
         from playwright.sync_api import TimeoutError as PlaywrightTimeout

@@ -11,10 +11,10 @@ import {
   reviewItem,
   systemTelemetry,
 } from "@pandabase/db";
-import { and, asc, gte, inArray, lt } from "drizzle-orm";
+import { and, asc, eq, gte, inArray, isNotNull, lt } from "drizzle-orm";
 import type { SQLiteColumn } from "drizzle-orm/sqlite-core";
 import type { Config } from "../config";
-import { adLikePhrase, staleRunoutDays, storeSplit } from "../domain/dataQuality";
+import { adLikePhrase, deliveryPremiums, staleRunoutDays, storeSplit } from "../domain/dataQuality";
 import { addDays, dateInIsoWeek, isoWeekLabel, localDate, zonedToUtc } from "../domain/time";
 import { activeCycle } from "../repo/cycles";
 import { asRecord, type Q } from "../repo/db";
@@ -775,6 +775,83 @@ export async function renderWeekly(
     (t) => n(t.p.thresholdBefore) !== n(t.p.thresholdAfter),
   );
   const expiredTrips = closedTrips.filter((t) => t.p.outcome === "expired");
+  // Costco receipts (M10.3): the sweep, trip receipts, renames, and the delivery premium.
+  const costcoSweeps = metric("receipt_sweep").filter((t) => t.p.vendor === "costco");
+  const tripReceipts = metric("costco_trip_receipt");
+  const renames = metric("costco_item_renamed");
+  extracts["store_choice.jsonl"]!.push(
+    ...[...costcoSweeps, ...tripReceipts, ...renames].map((t) => ({
+      at: t.at,
+      metric: t.metric,
+      ...(s(t.p.itemId) ? { item: itemName(t.p) } : {}),
+      ...t.p,
+    })),
+  );
+  const sweepSum = (k: string) => costcoSweeps.reduce((acc, t) => acc + n(t.p[k]), 0);
+  const sweepErrors = [
+    ...new Set(
+      costcoSweeps.flatMap((t) => (Array.isArray(t.p.error_kinds) ? t.p.error_kinds : [])),
+    ),
+  ].map(String);
+  // Prices up to the end of the week, any time before it: an item bought both ways may have been
+  // delivered months after its last warehouse run.
+  const premiums = deliveryPremiums(
+    (
+      await q
+        .select({
+          sku: receiptLine.vendorSku,
+          itemId: receiptLine.itemId,
+          fulfillment: receipt.fulfillment,
+          at: receipt.acquiredAt,
+          unitPriceCents: receiptLine.unitPriceCents,
+        })
+        .from(receiptLine)
+        .innerJoin(receipt, eq(receipt.id, receiptLine.receiptId))
+        .where(
+          and(
+            eq(receipt.vendor, config.costco.vendor),
+            isNotNull(receiptLine.vendorSku),
+            isNotNull(receiptLine.unitPriceCents),
+            lt(receipt.acquiredAt, end),
+          ),
+        )
+        .orderBy(asc(receiptLine.id))
+    ).map((r) => ({ ...r, sku: r.sku!, unitPriceCents: r.unitPriceCents! })),
+  );
+  const unread = sweepSum("unknown_lines");
+  if (unread > 0)
+    findings.push({
+      score: 3,
+      text: `${unread} Costco receipt line(s) weren't read (a discount format not seen yet?).`,
+    });
+  if (sweepErrors.some((e) => e === "not_signed_in" || e === "costco_challenge"))
+    findings.push({
+      score: 3,
+      text: `The Costco receipt sweep stopped: ${sweepErrors.join(", ")}.`,
+    });
+  const costcoReceiptLines = [
+    "",
+    `Costco receipts: ${costcoSweeps.length} sweep(s), ${sweepSum("warehouse")} warehouse receipt(s) and ${sweepSum("online")} online order(s) imported, ${sweepSum("pages")} page load(s) + ${sweepSum("clicks")} click(s), ${unread} unread line(s), ${sweepSum("totals_fail")} failed totals check(s)${sweepErrors.length ? `, errors: ${sweepErrors.join(", ")}` : ""}. Trip receipts linked: ${tripReceipts.length}; items renamed from online titles: ${renames.length}.`,
+    ...(premiums.length
+      ? [
+          "",
+          "Delivery premium (latest price each way, per item number bought both ways):",
+          "",
+          table(
+            ["Item", "Item number", "Warehouse", "Delivered", "Premium"],
+            premiums
+              .slice(0, 10)
+              .map((x) => [
+                x.itemId ? (items.get(x.itemId) ?? x.itemId) : "?",
+                x.sku,
+                `$${num(x.warehouseCents / 100)}`,
+                `$${num(x.deliveredCents / 100)}`,
+                `${Math.round(x.premium * 100)}%`,
+              ]),
+          ),
+        ]
+      : []),
+  ];
   const lateBridges = storeChoices.filter((t) => t.p.bridgeCause === "trip_after_runout");
   if (expiredTrips.length)
     findings.push({
@@ -824,6 +901,7 @@ export async function renderWeekly(
             ),
           ]
         : []),
+      ...costcoReceiptLines,
     ].join("\n"),
     bullets(
       storeOverrides
@@ -842,6 +920,11 @@ export async function renderWeekly(
       ...(expiredTrips.length
         ? [
             'A trip expired unclosed: check the agent heard "back from Costco", or whether the trip happened.',
+          ]
+        : []),
+      ...(unread > 0
+        ? [
+            "Unread Costco lines: open the receipt on costco.com and teach the parser that row's format (a new synthetic fixture in `agent/tools/tests/fixtures/costco` first).",
           ]
         : []),
       ...(lateBridges.length >= 3

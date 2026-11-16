@@ -25,6 +25,7 @@ import type { Q } from "../repo/db";
 import { refreshInventoryState } from "../repo/inventory";
 import { receiptRepository } from "../repo/receipts";
 import { emitTelemetry } from "../telemetry";
+import { linkCostcoReceiptIn } from "./costco";
 import { openNextCycleIn } from "./cycles";
 import type { ServiceCtx } from "./types";
 
@@ -111,6 +112,7 @@ async function existingReceipt(q: Q, key: string): Promise<ReceiptIngestResponse
     new_item_ids: [],
     review_ids: reviews.map((x) => x.id),
     closed_cycle_id: null,
+    costco_trip_id: null,
   };
 }
 
@@ -175,6 +177,7 @@ export async function persistReceiptEffects(
         receiptId,
         rawText: l.rawText,
         asin: l.asin,
+        vendorSku: l.vendorSku ?? null,
         productId: l.productId,
         itemId: l.itemId,
         qty: l.qty,
@@ -219,6 +222,13 @@ export async function persistReceiptEffects(
         ...(patch.switchThreshold !== undefined ? { switchThreshold: patch.switchThreshold } : {}),
       })
       .where(eq(item.id, id));
+  }
+  for (const r of fx.renames) {
+    await q.update(item).set({ canonicalName: r.to, updatedAt: now }).where(eq(item.id, r.itemId));
+    await q
+      .update(product)
+      .set({ title: r.title, updatedAt: now })
+      .where(eq(product.id, r.productId));
   }
   for (const { id, ...patch } of fx.productPatches) {
     await q
@@ -269,6 +279,23 @@ export async function persistReceiptEffects(
     await openNextCycleIn(q, ctx);
   }
 
+  // §4.8 / M10.3: a Costco warehouse receipt closes (or completes) its trip.
+  const costcoTripId =
+    input.vendor === ctx.config.costco.vendor && input.fulfillment === "in_store"
+      ? await linkCostcoReceiptIn(
+          q,
+          {
+            receiptId,
+            acquiredAt: input.acquiredAt,
+            lines: fx.lines.length,
+            bought: new Set(
+              fx.lines.filter((l) => l.itemId && !l.ignored && !l.pending).map((l) => l.itemId),
+            ).size,
+          },
+          ctx,
+        )
+      : null;
+
   await refreshInventoryState(
     q,
     fx.inventoryEvents.map((e) => e.itemId),
@@ -296,5 +323,6 @@ export async function persistReceiptEffects(
     new_item_ids: fx.newItems.map((i) => i.id),
     review_ids: reviewIds,
     closed_cycle_id: fx.cycle?.cycleId ?? null,
+    costco_trip_id: costcoTripId,
   };
 }

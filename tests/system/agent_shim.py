@@ -22,6 +22,11 @@ from urllib.parse import parse_qsl, urlsplit
 from pandabase_tools import cli, guard
 from pandabase_tools.browser import Snapshot, checked
 
+# Synthetic Costco (M10.3): the committed fixtures, one receipt dated today and one online order.
+COSTCO_FIXTURES = Path(__file__).resolve().parents[2] / "agent" / "tools" / "tests" / "fixtures"
+COSTCO_FIXTURES = COSTCO_FIXTURES / "costco"
+COSTCO_BARCODE = "21099920100422611071815"
+
 ADD_PATH = "/gp/aws/cart/add.html"
 VIEW = "https://www.amazon.com/gp/cart/view.html"
 # Where the fake writes the URLs it served (`FAKE_AMAZON_LOG`, JSON lines).
@@ -41,6 +46,7 @@ class FakeAmazon:
         self.cart_file = log.with_suffix(".cart.json") if log else None
         self.pending: list[tuple[str, str]] = []
         self.current: str | None = None
+        self.costco_tab_name = "online"
 
     def _cart(self) -> dict[str, int]:
         if self.cart_file and self.cart_file.exists():
@@ -135,6 +141,10 @@ class FakeAmazon:
             return self._land(url, html)
         if parts.path in ("/gp/cart/view.html", "/cart/localmarket"):  # one cart in the fake
             return self._land(url, self._cart_html())
+        if parts.hostname == "www.costco.com":
+            self.costco_tab_name = "online"
+            self.current = url
+            return Snapshot(url, "<html><body>loading</body></html>")
         if parts.path == "/s":
             return self._land(url, self._search_html(dict(parse_qsl(parts.query))["k"]))
         raise AssertionError(f"fake Amazon has no page for {url}")
@@ -165,6 +175,54 @@ class FakeAmazon:
         if self.cart_file:
             self.cart_file.write_text(json.dumps(cart))
         return self._land(self.current, "<html><body><h1>Added to cart</h1></body></html>")
+
+    # Costco Orders & Purchases (`costco_receipts.CostcoDriver`) ------------------------------
+
+    def _costco(self, name: str) -> str:
+        return (COSTCO_FIXTURES / name).read_text()
+
+    def _costco_today(self, html: str) -> str:
+        """The first warehouse card dated today (household TZ), so it is the trip's receipt;
+        the other two cards dropped (their receipts would re-stock the same items)."""
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+
+        today = datetime.now(ZoneInfo("America/Los_Angeles")).strftime("%m/%d/%Y")
+        html = html.replace("11/07/2026 - 6:15pm", f"{today} - 6:15am")
+        for other in ("21099920200172610240905", "21099920100082610031430"):
+            html = html.replace(f"viewRecieptBtn_{other}", "gone")
+        return html
+
+    def _costco_list(self) -> Snapshot:
+        if self.costco_tab_name == "warehouse":
+            html = self._costco_today(self._costco("orders_warehouse.html"))
+        else:  # the online tab: only the grocery order (the glue gun stays out)
+            html = self._costco("orders_online.html").replace("orderNumber_1000000002", "gone")
+        return self._land(self.current or "", html)
+
+    def costco_ready(self, page: str) -> Snapshot:
+        assert self.current is not None
+        if page == "details":
+            return self._land(self.current, self._costco("order_details_delivered.html"))
+        return self._costco_list()
+
+    def costco_tab(self, tab: str) -> Snapshot:
+        self._record("clicked", f"costco:tab:{tab}")
+        self.costco_tab_name = tab
+        return self._costco_list()
+
+    def costco_period(self, label: str) -> Snapshot:
+        raise AssertionError("a sweep only reads the current period")
+
+    def costco_open_receipt(self, barcode: str) -> Snapshot:
+        assert barcode == COSTCO_BARCODE, barcode
+        self._record("clicked", "costco:receipt")
+        html = self._costco_today(self._costco("orders_warehouse_receipt.html"))
+        return self._land(self.current or "", html)
+
+    def costco_close_receipt(self) -> Snapshot:
+        self._record("clicked", "costco:close")
+        return self._costco_list()
 
     def __enter__(self) -> FakeAmazon:
         return self

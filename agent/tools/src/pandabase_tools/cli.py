@@ -31,6 +31,7 @@ from . import (
     cart_injector,
     cart_tier2,
     contracts,
+    costco_receipts,
     cycle_replies,
     guard,
     layout_watch,
@@ -257,9 +258,15 @@ def _costco_close(env: Env, status: Literal["done", "cancelled"]) -> Any:
     cur = env.api.call("GET", "/api/costco/trip")
     assert isinstance(cur, contracts.CostcoTripResponse)
     if cur.trip is None:
-        return "❓ No Costco trip is planned." + (
-            ' Say "going to Costco Saturday" to plan one.' if status == "done" else ""
-        )
+        if status == "done":
+            # An unplanned run still has a receipt to import.
+            today = env.household_today()
+            costco_receipts.schedule_after_trip(env.loaded.state_dir(), today, today.isoformat())
+            return (
+                "✅ Welcome back. No Costco trip was planned, but I'll import the receipt "
+                "tomorrow morning."
+            )
+        return "❓ No Costco trip is planned."
     body = contracts.CostcoTripStatusRequest(status=status, actor_discord_id=a.actor)
     res = env.api.call(
         "POST",
@@ -268,11 +275,17 @@ def _costco_close(env: Env, status: Literal["done", "cancelled"]) -> Any:
         idempotency_key=a.key,
     )
     assert isinstance(res, contracts.CostcoTripStatusResponse)
+    if status == "done" and res.changed:
+        # Receipts "appear within 24 hours": the next morning's sweep, plus one retry (M10.3).
+        costco_receipts.schedule_after_trip(
+            env.loaded.state_dir(), env.household_today(), res.trip.planned_for.isoformat()
+        )
     return cycle_replies.costco_closed(res)
 
 
 def cmd_costco_done(env: Env) -> Any:
-    """ "Back from Costco": close the planned trip (M10.3 will sweep its receipt here)."""
+    """ "Back from Costco": close the planned trip and schedule the receipt sweep for the next
+    morning, with one retry the day after (`receipts sweep --vendor costco --due`)."""
     return _costco_close(env, "done")
 
 
@@ -355,6 +368,12 @@ def cmd_cart_url(env: Env) -> Any:
 
 def cmd_receipts_sweep(env: Env) -> Any:
     a = env.args
+    if a.vendor == "costco":
+        return _costco_sweep(env)
+    if a.due or a.reply:
+        raise CliError({"error": "--due and --reply are for --vendor costco"}, 2)
+    if not a.member:
+        raise CliError({"error": "--member is required for Amazon / Whole Foods"}, 2)
     member = _member(env, a.member)
     profile = env.loaded.profile(member)
     tz = env.cfg.household_tz
@@ -376,6 +395,55 @@ def cmd_receipts_sweep(env: Env) -> Any:
         )
         result = sweeper.run("backfill" if a.backfill else "sweep", max_orders=a.max_orders)
     return asdict(result)
+
+
+def _costco_sweep(env: Env) -> Any:
+    """Costco Orders & Purchases (M10.3). `--due`: only when "back from Costco" scheduled a sweep
+    for today or earlier (the daily morning automation); otherwise nothing is loaded. `--reply`:
+    one line for the ops channel, or NO_REPLY (a command payload, DESIGN §10 #60)."""
+    a = env.args
+    member = env.cfg.member(a.member) if a.member else env.cfg.cart_member()
+    profile = env.loaded.profile(member)
+    state_dir = env.loaded.state_dir()
+    path = costco_receipts.state_path(state_dir)
+    today = env.household_today().isoformat()
+    if a.due:
+        state = costco_receipts.CostcoState.load(path)
+        if not any(d <= today for d in state.due):
+            return costco_receipts.NO_REPLY if a.reply else {"status": "not_due"}
+    owner = f"costco receipts {'backfill' if a.backfill else 'sweep'}"
+    try:
+        with (
+            env.lock().held(member.profile_name(), owner),
+            env.driver_factory(profile.cdp_url) as driver,
+        ):
+            sweeper = costco_receipts.CostcoSweeper(
+                env.api,
+                cast(costco_receipts.CostcoDriver, driver),
+                env.cfg.receipts.costco,
+                member,
+                env.cfg.household_tz,
+                state_dir,
+                env.tel,
+            )
+            result = sweeper.run("backfill" if a.backfill else "sweep")
+    except ProfileLocked:
+        if not a.reply:
+            raise
+        return costco_receipts.NO_REPLY  # a scheduled sweep stays due; the next run takes it
+    state = costco_receipts.CostcoState.load(path)
+    last_try = False
+    if a.due:
+        if result.trip_receipts():
+            state.due = []
+        elif not result.errors:
+            state.due = [d for d in state.due if d > today]
+        last_try = not state.due and not result.trip_receipts() and not result.errors
+    reply = costco_receipts.sweep_reply(result, state, env.now(), last_try=last_try)
+    if a.due and not state.due:
+        state.due_trip = None
+    state.save(path)
+    return reply if a.reply else asdict(result)
 
 
 def cmd_receipts_ingest(env: Env) -> Any:
@@ -700,8 +768,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     rec = sub.add_parser("receipts").add_subparsers(dest="cmd", required=True)
     s = rec.add_parser("sweep", help="ingest final orders newer than the cursor (or --backfill)")
-    s.add_argument("--member", required=True)
+    s.add_argument("--vendor", choices=["amazon", "costco"], default="amazon")
+    s.add_argument("--member", help="required for amazon; costco: default the cart member")
     s.add_argument("--backfill", action="store_true")
+    s.add_argument("--due", action="store_true", help="costco: only if a sweep is scheduled")
+    s.add_argument("--reply", action="store_true", help="costco: ops-channel text or NO_REPLY")
     s.add_argument("--max-orders", type=int)
     s.set_defaults(fn=cmd_receipts_sweep)
     i = rec.add_parser("ingest", help="ingest a receipt the agent extracted from page text")

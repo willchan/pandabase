@@ -192,9 +192,8 @@ def costco_closed(res: c.CostcoTripStatusResponse) -> str:
             f"✅ Costco trip on {_day(trip.planned_for)} cancelled — the weekly cart buys those "
             "items again."
         )
-    # TODO(M10.3): the Costco receipt sweep runs here and links the trip's receipt; until then
-    # what was bought only reaches PandaBase as text or a receipt photo.
+    # The CLI has scheduled the Costco receipt sweep (next morning, one retry; M10.3).
     return (
-        '✅ Welcome back — trip closed. Tell me what you bought ("got 2 eggs at Costco") or post '
-        "the receipt photo, so the pantry knows."
+        "✅ Welcome back — trip closed. I'll import the Costco receipt tomorrow morning (it "
+        "shows up on costco.com within a day), so there's nothing to type in."
     )
