@@ -1350,3 +1350,12 @@ This Week with a planned trip; the prod copy for the store split of the real cat
   - **First live run (owner, on the Mac):** sign in on the `pandabase` profile and set
     `orders_url` (SETUP-MAC *Costco*), one `receipts sweep --vendor costco`, then `--backfill`;
     save one warehouse receipt with a discount line if one turns up, for a new synthetic fixture.
+  - **First live sweep (2026-11-15) read nothing:** 1 page, 1 click, 0 orders and 0 receipts
+    while the Online tab showed delivered orders. The SPA renders each tab's frame
+    (`myOrderHistory`, the tabs) before its cards, and the sweep read the frame alone; and the live
+    cards run inline texts together ("Delivered on 11/10/2026Order …"), so `\b` after a date never
+    matched and a delivered order would have looked pending. Fixed: the driver waits (≤ 8 s, then a
+    network settle) for a card on the orders page and after the tab click, and the date patterns
+    use digit-only boundaries. Regression tests: real Chromium with late-rendered cards, and the
+    inline texts. Also `pandabase-tools api get '/path?k=v'` now takes the query from the path
+    (CLAUDE.md's form for `/api/diagnostics/weekly?week=…` failed with "no agent route").

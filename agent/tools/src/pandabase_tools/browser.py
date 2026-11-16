@@ -108,6 +108,13 @@ COSTCO_READY = {
 }
 COSTCO_BARCODE = re.compile(r"^\d{23}$")
 COSTCO_WAIT_MS = 15_000
+# Each tab's cards render after its frame (live, 2026-11): wait for one before reading the list.
+# An empty period has none, so this is also how long an empty tab costs (then a network settle).
+COSTCO_CARDS = {
+    "online": "a[id^='orderNumber_']",
+    "warehouse": "[id^='viewRecieptBtn_']",
+}
+COSTCO_LIST_WAIT_MS = 8_000
 
 
 def buy_box_bound(
@@ -387,12 +394,26 @@ class CdpDriver:
 
     def costco_ready(self, page: str) -> Snapshot:
         """After `open`: wait (bounded) for the SPA to render `orders` (Orders & Purchases) or
-        `details` (an order's details; a hash route on the same document)."""
-        return self._costco_wait(COSTCO_READY[page])
+        `details` (an order's details; a hash route on the same document). `orders` opens on the
+        Online tab, whose cards are waited for too."""
+        snap = self._costco_wait(COSTCO_READY[page])
+        return self._costco_list("online") if page == "orders" else snap
 
     def costco_tab(self, tab: str) -> Snapshot:
         self._costco_click(COSTCO_TABS[tab])
-        return self._costco_wait(f"{COSTCO_TABS[tab]}[aria-selected='true']")
+        self._costco_wait(f"{COSTCO_TABS[tab]}[aria-selected='true']")
+        return self._costco_list(tab)
+
+    def _costco_list(self, tab: str) -> Snapshot:
+        """The tab's list once a card has rendered; an empty list after a bounded wait and a
+        network settle (the snapshot decides what's there)."""
+        from playwright.sync_api import TimeoutError as PlaywrightTimeout
+
+        try:
+            self.page.wait_for_selector(COSTCO_CARDS[tab], timeout=COSTCO_LIST_WAIT_MS)
+        except PlaywrightTimeout:
+            self._settle()
+        return self._snapshot()
 
     def costco_period(self, label: str) -> Snapshot:
         self.page.locator("select#Showing").first.select_option(label=label)

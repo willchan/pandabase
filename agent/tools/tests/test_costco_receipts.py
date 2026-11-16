@@ -149,6 +149,26 @@ def test_online_cards() -> None:
     assert guard.classify_url(cards[1].details_url) is None
 
 
+def test_delivered_date_run_into_the_next_inline_text() -> None:
+    # Regression (first live sweep, 2026-11): the live card's status is inline, so its text read
+    # "Delivered on 11/10/2026Order 1000000002"; `\b` after the year never matched and every
+    # delivered order looked undelivered (pending forever).
+    html = re.sub(
+        r'<div class="o3-st">(Delivered on [\d/]+)</div>\s*<span>',
+        r"<span>\1</span><span>",
+        page("orders_online.html"),
+    )
+    assert "2026</span><span>Order" in html
+    cards = cr.parse_online_list(Snapshot(ORDERS_URL, html))
+    assert [c.delivered_on for c in cards] == ["2026-10-22", "2026-10-07"]
+
+
+def test_warehouse_card_date_run_into_inline_text() -> None:
+    # Same live pattern as above on a warehouse card: "11/07/2026 - 6:15pmWarehouse…" and
+    # "Receipt11/07/2026" both lost their `\b`, so the card was skipped.
+    assert cr._card_datetime("Receipt11/07/2026 - 6:15pmSynthetic Warehouse") == "2026-11-07T18:15"
+
+
 def test_order_details() -> None:
     o = cr.parse_order_details(page("order_details_delivered.html"))
     assert o is not None
@@ -487,3 +507,77 @@ def test_reply_on_the_last_try_without_a_receipt() -> None:
     assert cr.sweep_reply(res, state, now, last_try=True) == (
         "🧾 No Costco receipt for the Sat 11/7 trip yet — the weekly sweep will look again."
     )
+
+
+# CdpDriver on a real Chromium (skipped without one) ---------------------------------------------
+
+# Orders & Purchases as the live SPA renders it: the frame (`myOrderHistory`, the tabs) at once,
+# each tab's cards a moment later (the first live sweep read the frame alone: 0 orders, 0 receipts).
+LATE_LIST = """<!doctype html><html><body><div automation-id="myOrderHistory">
+<button automation-id="myOnlineOrdersTab" role="tab" aria-selected="true">Online</button>
+<button automation-id="myWarehouseOrdersTab" role="tab" aria-selected="false">Warehouse</button>
+<div id="list"></div></div><script>
+const CARDS = {
+  online: '<a id="orderNumber_1000000001" href="#/orderdetails/1000000001">Order</a>',
+  warehouse: '<div id="viewRecieptBtn_21099920100422611071815">11/07/2026 - 6:15pm</div>',
+};
+function show(tab) {
+  document.getElementById("list").innerHTML = "";
+  setTimeout(() => { document.getElementById("list").innerHTML = CARDS[tab] || ""; }, %(delay)d);
+}
+for (const tab of ["online", "warehouse"]) {
+  document.querySelector(`[automation-id=my${tab[0].toUpperCase() + tab.slice(1)}OrdersTab]`)
+    .addEventListener("click", (e) => {
+      const tabs = document.querySelectorAll("[role=tab]");
+      for (const t of tabs) t.setAttribute("aria-selected", "false");
+      e.target.setAttribute("aria-selected", "true");
+      show(tab);
+    });
+}
+show("%(first)s");
+</script></body></html>"""
+
+
+@pytest.fixture(scope="module")
+def browser_page() -> Any:
+    sync_api = pytest.importorskip("playwright.sync_api")
+    with sync_api.sync_playwright() as pw:
+        try:
+            browser = pw.chromium.launch()
+        except Exception as err:  # no browser installed: `uv run playwright install chromium`
+            pytest.skip(f"chromium unavailable: {str(err).splitlines()[0]}")
+        yield browser.new_page()
+        browser.close()
+
+
+def _late_list(page_: Any, delay_ms: int = 400, first: str = "online") -> Any:
+    from pandabase_tools.browser import CdpDriver
+
+    page_.unroute("**/*")
+    html = LATE_LIST % {"delay": delay_ms, "first": first}
+    page_.route("**/*", lambda route: route.fulfill(body=html, content_type="text/html"))
+    page_.goto("https://www.costco.com/myaccount/")
+    driver = CdpDriver("http://127.0.0.1:9222", timeout_ms=2_000)  # never entered
+    driver._page = page_
+    return driver
+
+
+def test_cdp_orders_page_waits_for_the_online_cards(browser_page: Any) -> None:
+    snap = _late_list(browser_page).costco_ready("orders")
+    assert [c.order_number for c in cr.parse_online_list(snap)] == ["1000000001"]
+
+
+def test_cdp_warehouse_tab_waits_for_the_receipt_cards(browser_page: Any) -> None:
+    driver = _late_list(browser_page)
+    driver.costco_ready("orders")
+    snap = driver.costco_tab("warehouse")
+    assert [c.barcode for c in cr.parse_warehouse_list(snap.html)] == [FIRST]
+
+
+def test_cdp_an_empty_tab_still_returns(browser_page: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    from pandabase_tools import browser
+
+    monkeypatch.setattr(browser, "COSTCO_LIST_WAIT_MS", 300, raising=False)
+    monkeypatch.setattr(browser, "WIDGET_SETTLE_MS", 300)
+    snap = _late_list(browser_page, first="none").costco_ready("orders")
+    assert cr.parse_online_list(snap) == [] and cr.page_problem(snap) is None
