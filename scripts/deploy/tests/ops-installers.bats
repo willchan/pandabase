@@ -146,3 +146,14 @@ JSON
     grep -qF -- "agent/skills/digital-receipt-scraper/SKILL.md first and follow it. Sweep receipts"
   ! grep -qF -- 'Use $' "$STUB/calls"
 }
+
+# M10.3: the Costco receipt sweeps are command jobs (no model turn) to the ops channel, even though
+# their skill is digital-receipt-scraper, whose Amazon sweeps come from the members instead.
+@test "install-agent-cron installs the Costco receipt sweeps as command jobs" {
+  run /bin/bash "$ROOT_DIR/scripts/ops/install-agent-cron.sh"
+  [ "$status" -eq 0 ]
+  grep -F "pandabase-costco-receipts " "$STUB/calls" | grep -qF -- "receipts sweep --vendor costco --due --reply"
+  grep -F "pandabase-costco-receipts " "$STUB/calls" | grep -qF -- "--to channel:456"
+  grep -F "pandabase-costco-receipts-weekly" "$STUB/calls" | grep -qF -- "--cron 40 19 * * 0"
+  ! grep -F "pandabase-costco-receipts" "$STUB/calls" | grep -qF -- "--message"
+}

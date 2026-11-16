@@ -59,7 +59,7 @@ export function tokenSetRatio(a: string, b: string): number {
 /** A `vendor_alias` row (normalized `vendorString`). */
 export interface Alias {
   vendor: string;
-  kind: "receipt_text" | "asin";
+  kind: "receipt_text" | "asin" | "item_number";
   vendorString: string;
   itemId: string | null;
   productId: string | null;
@@ -202,6 +202,46 @@ export function matchDigitalLine(input: {
   const product = input.products.find(
     (p) => p.vendor === input.vendor && p.asin?.toUpperCase() === asin,
   );
+  if (product)
+    return { kind: "known", itemId: product.itemId, productId: product.id, via: "product" };
+  return { kind: "unknown" };
+}
+
+/** A product row reachable by its vendor's item number (`product.vendor_sku`, Costco). */
+export interface SkuProduct {
+  id: string;
+  itemId: string;
+  vendor: string;
+  vendorSku: string | null;
+}
+
+/** Item numbers are digits; compare without leading zeros or spaces. */
+export const normalizeSku = (sku: string): string => sku.trim().replace(/^0+(?=\d)/, "");
+
+/**
+ * §4.8 item-number resolution (Costco): `vendor_alias(kind=item_number)` (a human's answer or an
+ * ignore), then `product.vendor_sku`. Like `matchDigitalLine` for ASINs.
+ */
+export function matchSkuLine(input: {
+  sku: string;
+  vendor: string;
+  aliases: readonly Alias[];
+  products: readonly SkuProduct[];
+}): DigitalLineMatch {
+  const sku = normalizeSku(input.sku);
+  const alias = input.aliases.find(
+    (a) => a.vendor === input.vendor && a.kind === "item_number" && a.vendorString === sku,
+  );
+  if (alias?.ignored) return { kind: "ignored" };
+  const product = input.products.find(
+    (p) => p.vendor === input.vendor && p.vendorSku !== null && normalizeSku(p.vendorSku) === sku,
+  );
+  if (alias?.itemId) {
+    // The alias names the item; the item number's product, if it's that item's, names the product.
+    const productId =
+      alias.productId ?? (product && product.itemId === alias.itemId ? product.id : null);
+    return { kind: "known", itemId: alias.itemId, productId, via: "alias" };
+  }
   if (product)
     return { kind: "known", itemId: product.itemId, productId: product.id, via: "product" };
   return { kind: "unknown" };

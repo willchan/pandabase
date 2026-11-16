@@ -2652,6 +2652,14 @@
               "null"
             ]
           },
+          "tax_cents": {
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
           "total_cents": {
             "maximum": 9007199254740991,
             "minimum": 0,
@@ -2678,6 +2686,14 @@
       "ReceiptIngestResponse": {
         "properties": {
           "closed_cycle_id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "costco_trip_id": {
             "maxLength": 64,
             "minLength": 1,
             "type": [
@@ -2794,6 +2810,13 @@
             "minimum": 0,
             "type": [
               "integer",
+              "null"
+            ]
+          },
+          "vendor_sku": {
+            "pattern": "^\\d{1,12}$",
+            "type": [
+              "string",
               "null"
             ]
           }

@@ -4,7 +4,7 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_CONFIG, type Config } from "../config";
 import { isLapsed } from "./predictions";
-import { adLikePhrase, staleRunoutDays, storeSplit } from "./dataQuality";
+import { adLikePhrase, deliveryPremiums, staleRunoutDays, storeSplit } from "./dataQuality";
 
 const cfg: Config = DEFAULT_CONFIG;
 const many = (store: string, n: number) => Array.from({ length: n }, () => store);
@@ -71,5 +71,43 @@ describe("staleRunoutDays", () => {
     for (const r of ["2026-09-08T20:00:00.000Z", "2026-09-09T20:00:00.000Z"]) {
       expect(staleRunoutDays(r, now, cfg) !== null).toBe(isLapsed(r, now, cfg));
     }
+  });
+});
+
+describe("deliveryPremiums (Costco, M10.3)", () => {
+  const p = (sku: string, fulfillment: string, at: string, unitPriceCents: number) => ({
+    sku,
+    itemId: `i${sku}`,
+    fulfillment,
+    at,
+    unitPriceCents,
+  });
+  it("compares the latest warehouse and delivered price of item numbers bought both ways", () => {
+    expect(
+      deliveryPremiums([
+        p("9000201", "in_store", "2026-10-01", 2299),
+        p("9000201", "in_store", "2026-11-01", 2399),
+        p("9000201", "delivery", "2026-10-05", 2799),
+        p("9000101", "in_store", "2026-11-01", 949),
+        p("9000101", "delivery", "2026-11-02", 999),
+        p("9000301", "delivery", "2026-11-02", 1249), // online only
+        p("9000401", "pickup", "2026-11-02", 100),
+      ]),
+    ).toEqual([
+      {
+        sku: "9000201",
+        itemId: "i9000201",
+        warehouseCents: 2399,
+        deliveredCents: 2799,
+        premium: 400 / 2399,
+      },
+      {
+        sku: "9000101",
+        itemId: "i9000101",
+        warehouseCents: 949,
+        deliveredCents: 999,
+        premium: 50 / 949,
+      },
+    ]);
   });
 });

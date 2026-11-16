@@ -109,6 +109,19 @@ class CartConfig(BaseModel):
     ] = Field(default_factory=dict)
 
 
+class CostcoReceiptsConfig(BaseModel):
+    """`receipts sweep --vendor costco` (M10.3, DESIGN §4.8)."""
+
+    # The signed-in account's Orders & Purchases page,
+    # `https://www.costco.com/myaccount/#/app/<account id>/ordersandpurchases` — copy it from the
+    # pandabase browser's address bar (docs/SETUP-MAC.md). Stays on the Mac: never committed.
+    orders_url: str | None = None
+    # Seconds between page loads and clicks: Costco has bot checks.
+    throttle_seconds: float = Field(default=4.0, ge=0)
+    # A backfill walks this many entries of the period picker ("Last 3 Months", then quarters).
+    backfill_periods: int = Field(default=9, ge=1, le=12)
+
+
 class ReceiptsConfig(BaseModel):
     throttle_seconds: float = Field(default=3.0, ge=0)
     sweep_lookback_days: int = Field(default=14, ge=0)
@@ -124,6 +137,7 @@ class ReceiptsConfig(BaseModel):
         default_factory=lambda: ["https://www.amazon.com/your-orders/orders?timeFilter=year-{year}"]
     )
     order_details_url: str = "https://www.amazon.com/your-orders/order-details?orderID={order_id}"
+    costco: CostcoReceiptsConfig = Field(default_factory=CostcoReceiptsConfig)
 
 
 class JobsConfig(BaseModel):

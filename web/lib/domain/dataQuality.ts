@@ -55,3 +55,49 @@ export function staleRunoutDays(
   if (localDate(runoutAt, tz) >= addDays(today, -config.lapsedAfterDays)) return null;
   return Math.round((Date.parse(today) - Date.parse(localDate(runoutAt, tz))) / 86_400_000);
 }
+
+/** A priced Costco receipt line (M10.3 delivery premium). */
+export interface ChannelPrice {
+  sku: string;
+  itemId: string | null;
+  fulfillment: string;
+  at: string;
+  unitPriceCents: number;
+}
+
+export interface DeliveryPremium {
+  sku: string;
+  itemId: string | null;
+  warehouseCents: number;
+  deliveredCents: number;
+  /** `(delivered − warehouse) / warehouse`. */
+  premium: number;
+}
+
+/**
+ * DESIGN §4.8 *Price by channel*: per Costco item number bought both in the warehouse and
+ * delivered, the latest unit price each way and how much more delivery costs. Largest premium
+ * first; ties by item number.
+ */
+export function deliveryPremiums(prices: readonly ChannelPrice[]): DeliveryPremium[] {
+  const latest = new Map<string, { in_store?: ChannelPrice; delivery?: ChannelPrice }>();
+  for (const p of prices) {
+    if (p.fulfillment !== "in_store" && p.fulfillment !== "delivery") continue;
+    const entry = latest.get(p.sku) ?? {};
+    const prev = entry[p.fulfillment];
+    if (!prev || p.at > prev.at) entry[p.fulfillment] = p;
+    latest.set(p.sku, entry);
+  }
+  const out: DeliveryPremium[] = [];
+  for (const [sku, { in_store: w, delivery: d }] of latest) {
+    if (!w || !d || w.unitPriceCents <= 0) continue;
+    out.push({
+      sku,
+      itemId: d.itemId ?? w.itemId,
+      warehouseCents: w.unitPriceCents,
+      deliveredCents: d.unitPriceCents,
+      premium: (d.unitPriceCents - w.unitPriceCents) / w.unitPriceCents,
+    });
+  }
+  return out.sort((a, b) => b.premium - a.premium || a.sku.localeCompare(b.sku));
+}

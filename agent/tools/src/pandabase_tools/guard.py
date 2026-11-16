@@ -3,6 +3,9 @@
 Every URL a tool opens, and every URL the browser lands on after a click, passes `check_url`.
 Anything that isn't plain Amazon `https`, or that looks like checkout, payment or sign-in, is
 refused before the request is made (Buy Now, 1-Click and Turbo checkout count as checkout).
+Costco (M10.3, DESIGN §4.8) is read-only: only its account pages (`/myaccount/…`: Orders &
+Purchases and order details) may load; its cart, checkout and every other page are refused, so no
+tool can ever reach a Costco cart.
 `CdpDriver` also installs this as a Playwright route so a redirect or script-initiated navigation to
 checkout is aborted in the browser itself.
 """
@@ -13,6 +16,14 @@ import re
 from urllib.parse import unquote, urlsplit
 
 ALLOWED_HOSTS = frozenset({"www.amazon.com", "amazon.com", "smile.amazon.com"})
+COSTCO_HOSTS = frozenset({"www.costco.com", "costco.com"})
+# Costco's sign-in (a separate host, or the old logon form) means the profile's session expired.
+COSTCO_SIGNIN_HOSTS = frozenset({"signin.costco.com"})
+COSTCO_SIGNIN_PATHS = re.compile(r"^/(?:logonform|logon|signin|login)", re.I)
+# The only Costco pages the tools read: Orders & Purchases and order details (hash routes under
+# `/myaccount/`). Everything else on costco.com — cart, checkout, product pages — is refused.
+COSTCO_ALLOWED_PATH = re.compile(r"^/myaccount/?$")
+COSTCO_CHECKOUT = re.compile(r"cart|checkout|payment|placeorder|orderreview|buy", re.I)
 
 # Matched against the lower-cased, URL-decoded path + query.
 CHECKOUT_PATTERNS: tuple[re.Pattern[str], ...] = tuple(
@@ -69,7 +80,12 @@ def classify_url(url: str) -> str | None:
     if url in ("about:blank", ""):
         return None
     parts = urlsplit(url)
-    if parts.scheme != "https" or (parts.hostname or "").lower() not in ALLOWED_HOSTS:
+    host = (parts.hostname or "").lower()
+    if parts.scheme == "https" and (host in COSTCO_HOSTS or host in COSTCO_SIGNIN_HOSTS):
+        return _classify_costco(
+            host, unquote(parts.path), unquote(parts.query) + "#" + unquote(parts.fragment)
+        )
+    if parts.scheme != "https" or host not in ALLOWED_HOSTS:
         return "host"
     path = unquote(parts.path).lower()
     target = path + "?" + unquote(parts.query).lower()
@@ -81,6 +97,18 @@ def classify_url(url: str) -> str | None:
         return "signin"
     if any(p.search(path) for p in CHALLENGE_PATTERNS):
         return "challenge"
+    return None
+
+
+def _classify_costco(host: str, path: str, query: str) -> str | None:
+    """`query` includes the fragment: Costco's account pages route in it (`#/app/…/orderdetails/n`),
+    and "Buy Items Again" / cart routes there are refused too."""
+    if host in COSTCO_SIGNIN_HOSTS or COSTCO_SIGNIN_PATHS.search(path):
+        return "signin"
+    if COSTCO_CHECKOUT.search(path) or COSTCO_CHECKOUT.search(query):
+        return "checkout"
+    if not COSTCO_ALLOWED_PATH.match(path):
+        return "host"
     return None
 
 

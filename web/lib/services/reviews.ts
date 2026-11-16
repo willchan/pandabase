@@ -378,6 +378,7 @@ export async function answerReceiptReview(
       lines: decided.map(({ line, decision }) => ({
         lineId: line.id,
         normalized: rec.source === "paper" ? normalizeReceiptText(line.rawText) : null,
+        vendorSku: line.vendorSku,
         itemId: line.itemId,
         productId: line.productId,
         matchScore: line.matchScore,

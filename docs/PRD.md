@@ -174,9 +174,17 @@ if we use it up, so PandaBase decides per item where it comes from and keeps a l
   Whole Foods/Amazon cart buys the usual amount and says it's bridging to Costco. Something
   we're out of with a trip only days away is bought in the weekly cart, not on the trip. The Saturday
   summary names both, and anyone adding the item to the week's list puts it back in the cart.
-- **Receipts (M10.3, not yet):** Will's Costco account (warehouse receipts and online orders) is read by the
-  receipt sweep on the `pandabase` browser profile after "back from Costco", with a weekly
-  fallback; a trip's receipt ends that trip. Costco item numbers are remembered like ASINs.
+- **Receipts (M10.3):** Will's Costco account is read on the `pandabase` browser profile:
+  warehouse receipts and costco.com 2-Day Delivery orders (Same-Day/Instacart isn't used). "Back
+  from Costco" closes the trip and the receipt is imported by itself the next morning (receipts
+  appear on costco.com within a day; one retry the day after), plus a weekly fallback; nobody types
+  in what they bought. A warehouse receipt dated on or a few days after a trip is that trip's
+  receipt (and closes it if nobody said "back from Costco"). Costco item numbers are remembered
+  like ASINs: a new item number becomes a new (unverified) item, and an item first named from the
+  receipt's abbreviation ("KS ORG EGGS") gets its full name when an online order brings it. Store
+  choice uses warehouse prices (delivered prices run higher); the weekly diagnostics show the
+  delivery premium per item bought both ways. A receipt line PandaBase can't read (e.g. a
+  discount) is reported, never guessed. The sweep only reads pages: it can't reach a Costco cart.
 - **After a trip (M10.4, not yet):** one Discord question about bulk perishables ("froze any of the chicken /
   bread?"). A reply moves that amount to the freezer; no reply changes nothing and the question
   expires.

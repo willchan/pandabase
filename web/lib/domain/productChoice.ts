@@ -164,6 +164,8 @@ export interface ProductPatch {
   lastBoughtAt?: string;
   lastPriceCents?: number;
   lastPriceAt?: string;
+  /** Receipt fulfillment the price came from (§4.8 *Price by channel*). */
+  lastPriceFulfillment?: string;
 }
 
 export interface Learning {

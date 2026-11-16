@@ -3,8 +3,8 @@
 // normally the prod copy (`make prod-copy`) — and print counts only, safe to paste into chat.
 // `--names` also prints the flagged item names: for your own terminal, never for a PR or chat.
 // Refuses anything but a `file:` database. Read-only.
-import { createDb, receipt } from "@pandabase/db";
-import { asc } from "drizzle-orm";
+import { createDb, receipt, receiptLine } from "@pandabase/db";
+import { asc, eq, sql } from "drizzle-orm";
 import path from "node:path";
 import { parseArgs } from "node:util";
 import { lastCompleteWeek, renderWeekly } from "../lib/diagnostics/weekly";
@@ -70,6 +70,26 @@ try {
   const share95 = purchaseWeeks.filter((s) => s.topShare >= config.dataQuality.storeSplitShare);
   console.log(
     `\nBy purchase week (receipts, not lines): ${purchaseWeeks.length} weeks, ${share95.length} with ≥ ${Math.round(config.dataQuality.storeSplitShare * 100)}% from one store.`,
+  );
+
+  // Costco (M10.3): how its receipts resolved — counts only.
+  const costco = await db
+    .select({
+      fulfillment: receipt.fulfillment,
+      totalsCheck: receipt.totalsCheck,
+      method: receiptLine.matchMethod,
+      sku: receiptLine.vendorSku,
+      pending: sql<number>`${receiptLine.itemId} IS NULL AND ${receiptLine.ignored} = 0`,
+    })
+    .from(receiptLine)
+    .innerJoin(receipt, eq(receipt.id, receiptLine.receiptId))
+    .where(eq(receipt.vendor, config.costco.vendor));
+  const count = (f: (r: (typeof costco)[number]) => boolean) => costco.filter(f).length;
+  console.log(
+    `\nCostco lines: ${costco.length} (warehouse ${count((r) => r.fulfillment === "in_store")}, ` +
+      `online ${count((r) => r.fulfillment === "delivery")}); by item number ${count((r) => r.method === "asin")}, ` +
+      `fuzzy ${count((r) => r.method === "fuzzy")}, pending ${count((r) => Boolean(r.pending))}, ` +
+      `no item number ${count((r) => r.sku === null)}; lines on receipts failing the totals check ${count((r) => r.totalsCheck === "fail")}.`,
   );
 
   const adLike = catalog.filter((r) => r.check === "ad_like_name");

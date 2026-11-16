@@ -8,6 +8,15 @@ export const ReceiptLineIn = named(
   z.object({
     raw_text: z.string().min(1).max(300),
     asin: z.string().max(20).nullable().optional(),
+    /**
+     * Costco item number (DESIGN §4.8): lines resolve by it like an ASIN (`vendor_alias`
+     * `item_number`, `product.vendor_sku`); a new one creates an unverified item and product.
+     */
+    vendor_sku: z
+      .string()
+      .regex(/^\d{1,12}$/)
+      .nullable()
+      .optional(),
     /** Product title (digital) — names auto-created items. */
     title: z.string().max(300).nullable().optional(),
     /** Purchase units. */
@@ -36,6 +45,8 @@ export const ReceiptIngestRequest = named(
     acquired_at: Timestamp,
     subtotal_cents: Cents.nullable().optional(),
     total_cents: Cents.nullable().optional(),
+    /** Sales tax when printed (Costco): the totals check also wants subtotal + tax = total. */
+    tax_cents: Cents.nullable().optional(),
     lines: z.array(ReceiptLineIn).max(300),
   }),
 );
@@ -71,6 +82,8 @@ export const ReceiptIngestResponse = named(
     review_ids: z.array(z.string()),
     /** The receipt was the ready cycle's order and closed it. */
     closed_cycle_id: Id.nullable(),
+    /** A Costco warehouse receipt linked to this Costco trip (and closed it if planned; §4.8). */
+    costco_trip_id: Id.nullable().optional(),
   }),
 );
 

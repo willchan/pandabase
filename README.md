@@ -309,7 +309,9 @@ member's Amazon orders ever need sweeping.
 Manual: in the `pandabase` window, sign in to the cart member's Amazon account (tick *Keep me
 signed in*), visit Whole Foods on Amazon once to set the store, and optionally name the Chrome
 profile "PandaBase" (profile menu → *Customize profile*). The tools never sign in; if the session
-expires, the smoke check and the agent will say so, and you sign in again by hand. Coming from a
+expires, the smoke check and the agent will say so, and you sign in again by hand. For Costco
+receipts, also sign in to Will's costco.com account in that window and set
+`receipts.costco.orders_url` ([SETUP-MAC *Costco*](docs/SETUP-MAC.md#costco-receipts-only)). Coming from a
 profile named after a member (`will`)? See
 [SETUP-MAC *Renaming the browser profile*](docs/SETUP-MAC.md#renaming-the-browser-profile-to-pandabase).
 

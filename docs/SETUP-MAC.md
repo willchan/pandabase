@@ -325,6 +325,28 @@ account (or sit at the Mac), tick *Keep me signed in*, and visit Whole Foods on 
 the store. Optionally name the Chrome profile "PandaBase" (profile menu → *Customize profile*).
 The tools never sign in.
 
+### Costco (receipts only)
+
+PandaBase reads Will's Costco receipts (warehouse and costco.com orders) in the same window; it
+never opens a Costco cart or checkout (DESIGN §4.8).
+
+1. In the `pandabase` window, sign in to costco.com by hand with Will's account (tick *Keep me
+   signed in*) and open **Account → Orders & Purchases**.
+2. Copy that page's address (`https://www.costco.com/myaccount/#/app/<account id>/ordersandpurchases`)
+   into the agent account's `pandabase.config.json`:
+
+   ```json
+   "receipts": { "costco": { "orders_url": "https://www.costco.com/myaccount/#/app/…/ordersandpurchases" } }
+   ```
+
+   It stays on the Mac (it carries the account id); the repo's example has no `orders_url`.
+3. `make install-agent-cron` adds the two Costco automations (the morning after "back from
+   Costco", and Sunday 19:40). If Costco signs out or shows a bot check, `#pandabase` gets one ⚠️
+   (at most weekly): sign in again, or clear the check, by hand in this window.
+4. Check, then backfill, as in [§9](#9-smoke-test-and-backfill): first one read-only sweep, then
+   "backfill Costco receipts" in `#pandabase` (or `scripts/ops/agent-run.sh receipts sweep
+   --vendor costco --backfill`).
+
 Members' own Chrome profiles, e.g. one per member for their personal OpenClaw agents, aren't
 PandaBase's. They're set up outside this repo, under their own names, and must not reuse
 PandaBase's user data dir or DevTools port, or be attached to it as an OpenClaw browser profile.

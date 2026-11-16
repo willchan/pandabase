@@ -192,12 +192,13 @@ word. Don't add to it, shorten it, or make up a list yourself.
 | They say | Run, then post what it prints |
 |---|---|
 | "going to Costco Saturday", "Costco run on the 21st", "Costco tomorrow" | `pandabase-tools costco plan --when <day> --thread-id <message id> --actor <sender id> --key discord:<message id>` — `<day>` is `YYYY-MM-DD`, `today`, `tomorrow` or a weekday (`saturday`: the next one, today included). Saying it again with another day moves the trip |
-| "back from Costco", "just got back from Costco" | `pandabase-tools costco done --actor <sender id> --key discord:<message id>` |
+| "back from Costco", "just got back from Costco" | `pandabase-tools costco done --actor <sender id> --key discord:<message id>` — closes the trip and schedules the receipt import for tomorrow morning (one retry the day after); you don't run the sweep |
 | "not going to Costco after all" | `pandabase-tools costco cancel --actor <sender id> --key discord:<message id>` |
 
 "What's on the Costco list?" → `pandabase-tools api get /api/costco/trip` and list the `lines`
 (name, quantity × product title); no trip → say so and how to plan one. Purchases they tell you
-about ("got 2 eggs at Costco") are text purchases: `discord-intake`. A trip nobody closes is closed
-by PandaBase a week after its date, so never nag about it.
+about ("got 2 eggs at Costco") are text purchases: `discord-intake`; after a trip the receipt is
+imported from costco.com by itself, so don't ask them to type in what they bought. A trip nobody
+closes is closed by its receipt, or by PandaBase a week after its date, so never nag about it.
 
 "Get X at Costco" / "get X at Whole Foods" pins where an item comes from: `discord-intake`.

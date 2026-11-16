@@ -24,10 +24,12 @@ export const POST = handle(
         acquiredAt: isoUtc(body.acquired_at),
         subtotalCents: body.subtotal_cents ?? null,
         totalCents: body.total_cents ?? null,
+        taxCents: body.tax_cents ?? null,
         idempotencyKey,
         lines: body.lines.map((l) => ({
           rawText: l.raw_text,
           asin: l.asin ?? null,
+          vendorSku: l.vendor_sku ?? null,
           title: l.title ?? null,
           qty: l.qty,
           unitPriceCents: l.unit_price_cents ?? null,

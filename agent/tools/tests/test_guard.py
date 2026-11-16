@@ -407,3 +407,39 @@ def test_cdp_add_to_cart_wont_add_a_wrong_quantity() -> None:
     assert driver.add_to_cart("B0SYNTH202", 3) is None and not any("click" in x for x in log)
     with pytest.raises(ValueError):
         driver.add_to_cart("B0SYNTH202']", 1)
+
+
+# Costco (M10.3): read-only account pages only.
+ACCOUNT = "https://www.costco.com/myaccount/#/app/00000000-0000-0000-0000-000000000000"
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        f"{ACCOUNT}/ordersandpurchases",
+        f"{ACCOUNT}/orderdetails/1000000001",
+        "https://www.costco.com/myaccount/",
+    ],
+)
+def test_allows_costco_orders_pages(url: str) -> None:
+    assert guard.classify_url(url) is None
+
+
+@pytest.mark.parametrize(
+    ("url", "reason"),
+    [
+        ("https://www.costco.com/CheckoutCartDisplayView", "checkout"),
+        ("https://www.costco.com/CheckoutCartView?x=1", "checkout"),
+        (f"{ACCOUNT}/buyagain/ordersandpurchases/1000000001", "checkout"),
+        ("https://www.costco.com/myaccount/?go=checkout", "checkout"),
+        ("https://www.costco.com/Kirkland-Signature-Bath-Tissue.product.9000201.html", "host"),
+        ("https://www.costco.com/grocery-household.html", "host"),
+        ("https://www.costco.com/", "host"),
+        ("https://signin.costco.com/authorize?x=1", "signin"),
+        ("https://www.costco.com/LogonForm", "signin"),
+        ("http://www.costco.com/myaccount/", "host"),
+        ("https://costco.example.com/myaccount/", "host"),
+    ],
+)
+def test_refuses_every_other_costco_page(url: str, reason: str) -> None:
+    assert guard.classify_url(url) == reason

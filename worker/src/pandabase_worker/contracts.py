@@ -275,6 +275,7 @@ class ReceiptLineIn(BaseModel):
     raw_text: Annotated[str, Field(max_length=300, min_length=1)]
     title: Annotated[str | None, Field(max_length=300)] = None
     unit_price_cents: Annotated[int | None, Field(ge=0, le=9007199254740991)] = None
+    vendor_sku: Annotated[str | None, Field(pattern="^\\d{1,12}$")] = None
 
 
 class ReceiptLineOut(BaseModel):
@@ -633,12 +634,14 @@ class ReceiptIngestRequest(BaseModel):
     ordered_at: AwareDatetime | None = None
     source: Literal["digital", "manual"]
     subtotal_cents: Annotated[int | None, Field(ge=0, le=9007199254740991)] = None
+    tax_cents: Annotated[int | None, Field(ge=0, le=9007199254740991)] = None
     total_cents: Annotated[int | None, Field(ge=0, le=9007199254740991)] = None
     vendor: Annotated[str, Field(max_length=40, min_length=1)]
 
 
 class ReceiptIngestResponse(BaseModel):
     closed_cycle_id: Annotated[str | None, Field(max_length=64, min_length=1)]
+    costco_trip_id: Annotated[str | None, Field(max_length=64, min_length=1)] = None
     duplicate: bool
     lines: list[ReceiptLineOut]
     new_item_ids: list[str]

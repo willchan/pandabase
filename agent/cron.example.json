@@ -39,6 +39,24 @@
       "message": "Sweep receipts for member will."
     },
     {
+      "name": "pandabase-costco-receipts",
+      "cron": "10 9 * * *",
+      "skill": "digital-receipt-scraper",
+      "command": "pandabase-tools receipts sweep --vendor costco --due --reply",
+      "deliver_to": "ops_channel",
+      "timeout_seconds": 900,
+      "_comment": "Command payload (M10.3): loads nothing unless \"back from Costco\" scheduled a sweep (the next morning, then one retry: receipts appear within 24 hours). Prints NO_REPLY, the trip's receipt line, or a sign-in / bot-check warning."
+    },
+    {
+      "name": "pandabase-costco-receipts-weekly",
+      "cron": "40 19 * * 0",
+      "skill": "digital-receipt-scraper",
+      "command": "pandabase-tools receipts sweep --vendor costco --reply",
+      "deliver_to": "ops_channel",
+      "timeout_seconds": 900,
+      "_comment": "Command payload (M10.3): the weekly fallback — Warehouse and Online tabs, new receipts only (few page loads: Costco has bot checks). Sunday evening, clear of the 21:00 Amazon sweep on the same profile."
+    },
+    {
       "name": "pandabase-diagnostics",
       "cron": "0 23 * * 0",
       "skill": "telemetry-aggregator",

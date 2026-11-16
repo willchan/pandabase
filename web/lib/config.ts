@@ -78,6 +78,9 @@ export const DEFAULT_CONFIG = {
       "Whole Foods Market",
       "Amazon Fresh",
       "Amazon Basics",
+      // Costco (§4.8): online titles say "Kirkland Signature", warehouse receipts "KS".
+      "Kirkland Signature",
+      "KS",
     ] as string[],
   },
 
@@ -120,6 +123,12 @@ export const DEFAULT_CONFIG = {
     tripExpireAfterDays: 7,
     /** Trip dates more than this far ahead are refused ("going to Costco" means soon). */
     tripMaxAheadDays: 60,
+    /**
+     * A Costco warehouse receipt dated on a planned or done trip's date, or up to this many days
+     * after it, is that trip's receipt (`costco_trip.receipt_id`; a planned trip closes `done`).
+     * Covers going a day or two later than planned.
+     */
+    tripReceiptWindowDays: 3,
   },
 
   /** §4.5 Receipt matching. */
@@ -237,6 +246,11 @@ export const DEFAULT_CONFIG = {
       "learn more",
       "shop now",
       "sign in",
+      // Costco page furniture (M10.3; header/footer links on the orders pages).
+      "instacart",
+      "same-day",
+      "shop card",
+      "executive membership",
     ] as string[],
   },
 

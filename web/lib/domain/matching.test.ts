@@ -5,7 +5,9 @@ import {
   deriveItemName,
   matchDigitalLine,
   matchPaperLine,
+  matchSkuLine,
   normalizeReceiptText,
+  normalizeSku,
   parseUnitQuantity,
   ratio,
   toBaseUnits,
@@ -283,5 +285,46 @@ describe("confirmedAlias", () => {
         existing,
       }),
     ).toMatchObject({ confidenceScore: 1, productId: "p-ban", created: false });
+  });
+});
+
+describe("matchSkuLine (Costco item numbers, §4.8)", () => {
+  const a = (o: Partial<Alias>): Alias => ({
+    vendor: "costco",
+    kind: "item_number",
+    vendorString: "9000101",
+    itemId: null,
+    productId: null,
+    confidenceScore: 1,
+    ignored: false,
+    ...o,
+  });
+  const products = [{ id: "p1", itemId: "eggs", vendor: "costco", vendorSku: "9000101" }];
+  const match = (aliases: Alias[], sku = "9000101") =>
+    matchSkuLine({ sku, vendor: "costco", aliases, products });
+
+  it("normalizes leading zeros and spaces", () => {
+    expect(normalizeSku(" 0009000101 ")).toBe("9000101");
+    expect(normalizeSku("0")).toBe("0");
+  });
+
+  it("an alias wins over the product; an ignored alias skips the line", () => {
+    expect(match([a({ itemId: "other" })])).toEqual({
+      kind: "known",
+      itemId: "other",
+      productId: null,
+      via: "alias",
+    });
+    expect(match([a({ itemId: "eggs" })])).toMatchObject({ itemId: "eggs", productId: "p1" });
+    expect(match([a({ ignored: true })])).toEqual({ kind: "ignored" });
+  });
+
+  it("falls back to product.vendor_sku, else unknown; other vendors' aliases don't count", () => {
+    expect(match([a({ vendor: "amazon", ignored: true })])).toMatchObject({
+      kind: "known",
+      productId: "p1",
+      via: "product",
+    });
+    expect(match([], "9000999")).toEqual({ kind: "unknown" });
   });
 });

@@ -586,15 +586,60 @@ def test_11b_back_from_costco(stack: Stack) -> None:
     assert set(result["costco_waiting_item_ids"]) == waiting
     out = stack.skill(GC, "costco done", sender_id=SAM, message_id=stack.message_id())
     print("BACK", out)
-    assert out.startswith("✅ Welcome back")
+    assert out.startswith("✅ Welcome back") and "tomorrow morning" in out
     trip = stack.one("select * from costco_trip where id = ?", W["trip"])
     assert trip["status"] == "done" and trip["closed_at"] and trip["receipt_id"] is None
+    # M10.3: the receipt sweep is scheduled for the next morning, with one retry.
+    state_file = stack.tmp / "state" / "receipts-costco.json"
+    state = json.loads(state_file.read_text())
+    assert len(state["due"]) == 2 and min(state["due"]) > stack.today()
     [closed] = [x["payload"] for x in stack.telemetry("costco_trip")]
     assert closed["outcome"] == "done"
     assert closed["bridged"] == len(set(result["costco_bridged_item_ids"]))
     choices = [x["payload"] for x in stack.telemetry("store_choice")]
     assert choices and {c["cycleId"] for c in choices} == {W["cycle"]}
     assert {c["itemId"] for c in choices if c["timing"] == "wait"} == waiting
+
+
+def test_11c_costco_receipt_sweep(stack: Stack) -> None:
+    """The next morning's Costco sweep (M10.3) as its automation runs it: the warehouse receipt
+    (dated the trip's day) links the closed trip; item numbers resolve to the seed's Costco
+    products; the online order keeps the warehouse price; nothing goes near a Costco cart."""
+    state_file = stack.tmp / "state" / "receipts-costco.json"
+    argv = ["receipts", "sweep", "--vendor", "costco", "--due", "--reply"]
+    assert stack.tools(argv, shim=True) == "NO_REPLY"  # not due yet: nothing loaded
+    state = json.loads(state_file.read_text())
+    state["due"] = [stack.today(), max(state["due"])]  # "the next morning"
+    state_file.write_text(json.dumps(state))
+    out = stack.tools(argv, shim=True)
+    print("COSTCO SWEEP", out)
+    assert out.startswith("🧾 Costco receipt from ") and "the trip is closed" in out
+    trip = stack.one("select * from costco_trip where id = ?", W["trip"])
+    assert trip["receipt_id"] and trip["status"] == "done"
+    lines = stack.rows(
+        "select l.raw_text, l.vendor_sku, l.item_id, l.match_method, r.fulfillment "
+        "from receipt_line l join receipt r on r.id = l.receipt_id where r.vendor = 'costco'"
+    )
+    warehouse = {x["vendor_sku"]: x for x in lines if x["fulfillment"] == "in_store"}
+    assert len(warehouse) == 5 and len(lines) == 7
+    assert warehouse["9000101"]["item_id"] == item_id(stack, "Eggs")
+    assert warehouse["9000101"]["match_method"] == "asin"
+    tp = stack.one(
+        "select last_price_cents, last_price_fulfillment from product "
+        "where vendor = 'costco' and vendor_sku = '9000201'"
+    )
+    assert tp == {"last_price_cents": 2399, "last_price_fulfillment": "in_store"}
+    assert json.loads(state_file.read_text())["due"] == []
+    [sweep] = [x["payload"] for x in stack.telemetry("receipt_sweep") if x["payload"].get("vendor")]
+    assert (sweep["warehouse"], sweep["online"], sweep["trip_receipts"]) == (1, 1, 1)
+    # Read-only: only the orders page and one order's details were loaded.
+    pages = [json.loads(x) for x in stack.amazon_log.read_text().splitlines()]
+    opened = [p["url"] for p in pages if p["kind"] == "opened" and "costco" in p["url"]]
+    assert len(opened) == 2 and all("/myaccount/" in u for u in opened)
+    # Runs again quietly: nothing new.
+    assert stack.tools(["receipts", "sweep", "--vendor", "costco", "--reply"], shim=True) == (
+        "NO_REPLY"
+    )
 
 
 @preview

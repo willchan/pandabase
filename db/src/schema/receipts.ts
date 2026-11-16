@@ -49,6 +49,8 @@ export const receiptLine = sqliteTable(
       .references(() => receipt.id, { onDelete: "cascade" }),
     rawText: text("raw_text").notNull(),
     asin: text("asin"),
+    /** Costco item number (§4.8); matched like `asin` (`match_method` `asin`). */
+    vendorSku: text("vendor_sku"),
     productId: text("product_id").references(() => product.id),
     itemId: text("item_id").references(() => item.id),
     /** Purchase units. */

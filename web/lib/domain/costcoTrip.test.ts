@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_CONFIG } from "../config";
-import { costcoTripList, isTripExpired, tripDateProblem } from "./costcoTrip";
+import {
+  costcoTripList,
+  isTripExpired,
+  tripDateProblem,
+  tripForReceipt,
+  type ReceiptTripCandidate,
+} from "./costcoTrip";
 import type { PlanItemInput } from "./predictions";
 import type { ProductCandidate } from "./productChoice";
 
@@ -103,5 +109,45 @@ describe("costcoTripList", () => {
     ]);
     // 18 berries last 9 days < 10 → cheaper; cover capped at 10 days = 20 → 2 packs.
     expect([l!.quantity, l!.choice.why]).toEqual([2, "cheaper"]);
+  });
+});
+
+describe("tripForReceipt (M10.3)", () => {
+  const trip = (
+    id: string,
+    plannedFor: string,
+    o: Partial<ReceiptTripCandidate> = {},
+  ): ReceiptTripCandidate => ({ id, plannedFor, status: "planned", receiptId: null, ...o });
+  // Sat Nov 7, 6:15pm Los Angeles.
+  const receiptAt = "2026-11-08T02:15:00.000Z";
+
+  it("takes the trip on the receipt's local date, or up to the window before it", () => {
+    expect(tripForReceipt([trip("a", "2026-11-07")], receiptAt, config)?.id).toBe("a");
+    expect(tripForReceipt([trip("a", "2026-11-04")], receiptAt, config)?.id).toBe("a");
+    expect(tripForReceipt([trip("a", "2026-11-03")], receiptAt, config)).toBeNull();
+    expect(tripForReceipt([trip("a", "2026-11-08")], receiptAt, config)).toBeNull();
+  });
+
+  it("a done trip counts; a cancelled one or one with a receipt doesn't; latest wins", () => {
+    expect(
+      tripForReceipt([trip("d", "2026-11-07", { status: "done" })], receiptAt, config)?.id,
+    ).toBe("d");
+    expect(
+      tripForReceipt(
+        [
+          trip("c", "2026-11-07", { status: "cancelled" }),
+          trip("r", "2026-11-06", { status: "done", receiptId: "x" }),
+        ],
+        receiptAt,
+        config,
+      ),
+    ).toBeNull();
+    expect(
+      tripForReceipt(
+        [trip("old", "2026-11-05", { status: "done" }), trip("new", "2026-11-06")],
+        receiptAt,
+        config,
+      )?.id,
+    ).toBe("new");
   });
 });

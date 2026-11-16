@@ -23,7 +23,12 @@ import {
 export const TRACKING_TYPES = ["velocity", "static"] as const;
 export const OUTLIER_DIRECTIONS = ["high", "low"] as const;
 export const STANCES = ["preferred", "acceptable", "rejected"] as const;
-export const ALIAS_KINDS = ["receipt_text", "asin"] as const;
+/**
+ * `item_number`: Costco's item number (§4.8), matched like an ASIN. Widening the CHECK rebuilt
+ * `vendor_alias` (migration 0003, a marked contract migration: every column survives and no table
+ * references it).
+ */
+export const ALIAS_KINDS = ["receipt_text", "asin", "item_number"] as const;
 /** `item.store_pin` (DESIGN §4.8): `regular` = the weekly Whole Foods/Amazon cart. */
 export const STORE_PINS = ["costco", "regular"] as const;
 
@@ -91,6 +96,16 @@ export const product = sqliteTable(
     lastBoughtAt: text("last_bought_at"),
     lastPriceCents: integer("last_price_cents"),
     lastPriceAt: text("last_price_at"),
+    /**
+     * Vendor's own product id that isn't an ASIN: Costco's item number (§4.8). Unique per vendor.
+     */
+    vendorSku: text("vendor_sku"),
+    /**
+     * The receipt `fulfillment` that `last_price_cents` came from. A Costco delivery price never
+     * replaces an `in_store` one (§4.8 *Price by channel*). No CHECK: adding one would rebuild
+     * `product`; `applyReceipt` is the only writer.
+     */
+    lastPriceFulfillment: text("last_price_fulfillment"),
   },
   (t) => [
     enumCheck("product", t.unitQuantityTrust, CATALOG_TRUST),
@@ -99,6 +114,9 @@ export const product = sqliteTable(
     uniqueIndex("product_vendor_asin_unique")
       .on(t.vendor, t.asin)
       .where(sql`${col(t.asin)} IS NOT NULL`),
+    uniqueIndex("product_vendor_sku_unique")
+      .on(t.vendor, t.vendorSku)
+      .where(sql`${col(t.vendorSku)} IS NOT NULL`),
     index("product_item_idx").on(t.itemId),
   ],
 );
@@ -109,7 +127,7 @@ export const vendorAlias = sqliteTable(
     ...baseColumns(),
     vendor: text("vendor").notNull(),
     kind: enumText("kind", ALIAS_KINDS).notNull(),
-    /** Normalized external string (receipt text or ASIN). */
+    /** Normalized external string (receipt text, ASIN or item number). */
     vendorString: text("vendor_string").notNull(),
     /** Null only for ignored aliases (e.g. store fee lines). */
     itemId: text("item_id").references(() => item.id),
