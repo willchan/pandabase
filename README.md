@@ -306,12 +306,14 @@ user-data dir or DevTools port. The tools still accept more than one profile (on
 in `profiles.json`, each with its own port and dir; two members can't share one), should another
 member's Amazon orders ever need sweeping.
 
-Manual: in the `pandabase` window, sign in to the cart member's Amazon account (tick *Keep me
+Manual: `HEADED=1 make install-chromium` (PandaBase's Chrome otherwise runs headless, with no
+window), then in the `pandabase` window sign in to the cart member's Amazon account (tick *Keep me
 signed in*), visit Whole Foods on Amazon once to set the store, and optionally name the Chrome
 profile "PandaBase" (profile menu → *Customize profile*). The tools never sign in; if the session
-expires, the smoke check and the agent will say so, and you sign in again by hand. For Costco
+expires, the smoke check and the agent will say so, and you sign in again by hand the same way. For Costco
 receipts, also sign in to Will's costco.com account in that window and set
-`receipts.costco.orders_url` ([SETUP-MAC *Costco*](docs/SETUP-MAC.md#costco-receipts-only)). Coming from a
+`receipts.costco.orders_url` ([SETUP-MAC *Costco*](docs/SETUP-MAC.md#costco-receipts-only)). Then
+`make install-chromium` goes back to headless (the sessions stay). Coming from a
 profile named after a member (`will`)? See
 [SETUP-MAC *Renaming the browser profile*](docs/SETUP-MAC.md#renaming-the-browser-profile-to-pandabase).
 

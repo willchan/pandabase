@@ -4,6 +4,7 @@
   PandaBase: one Chrome/Chromium per household member, kept running for the agent tools (CDP attach).
   Rendered by scripts/ops/install-chromium.sh into ~/Library/LaunchAgents; don't edit the copy.
   The DevTools port is bound to loopback only: CDP is full control of a signed-in browser.
+  Started through scripts/ops/chromium-launch.sh: headless unless installed with HEADED=1.
 -->
 <plist version="1.0">
 <dict>
@@ -11,6 +12,8 @@
   <string>@LABEL@</string>
   <key>ProgramArguments</key>
   <array>
+    <string>@LAUNCHER@</string>
+    <string>@MODE@</string>
     <string>@CHROMIUM_BIN@</string>
     <string>--user-data-dir=@USER_DATA_DIR@</string>
     <string>--remote-debugging-port=@PORT@</string>
