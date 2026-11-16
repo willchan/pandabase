@@ -318,19 +318,30 @@ make install-chromium
 ```
 
 PandaBase drives one browser profile, **`pandabase`**: the cart member's Amazon session, in a
-Google Chrome window titled "PandaBase · pandabase" with its own user data dir
-(`~/Library/Application Support/PandaBase/chromium-pandabase`) and a DevTools port on `127.0.0.1`
-only (9222). Sign in to Amazon **by hand** in that window: use *Screen Sharing* into the agent
-account (or sit at the Mac), tick *Keep me signed in*, and visit Whole Foods on Amazon once to set
-the store. Optionally name the Chrome profile "PandaBase" (profile menu → *Customize profile*).
-The tools never sign in.
+Google Chrome with its own user data dir (`~/Library/Application Support/PandaBase/chromium-pandabase`)
+and a DevTools port on `127.0.0.1` only (9222). It runs **headless** (no window): a window in the
+agent account's background session stops painting while the display sleeps, and the tools'
+clicks then time out (DESIGN §10 #81).
+
+**Signing in** (first setup, or when the agent says a store signed out): with nothing holding the
+profile (`scripts/ops/agent-run.sh lock status --member <name>` shows `"lease": null`),
+
+```sh
+HEADED=1 make install-chromium   # restarts Chrome with a window, "PandaBase · pandabase"
+```
+
+then sign in to Amazon **by hand** in that window: use *Screen Sharing* into the agent account (or
+sit at the Mac), tick *Keep me signed in*, and visit Whole Foods on Amazon once to set the store.
+Optionally name the Chrome profile "PandaBase" (profile menu → *Customize profile*). Then go back
+to headless with `make install-chromium` (the session stays: it's the same profile). The tools
+never sign in.
 
 ### Costco (receipts only)
 
 PandaBase reads Will's Costco receipts (warehouse and costco.com orders) in the same window; it
 never opens a Costco cart or checkout (DESIGN §4.8).
 
-1. In the `pandabase` window, sign in to costco.com by hand with Will's account (tick *Keep me
+1. In the `pandabase` window (`HEADED=1 make install-chromium`, above), sign in to costco.com by hand with Will's account (tick *Keep me
    signed in*) and open **Account → Orders & Purchases**.
 2. Copy that page's address (`https://www.costco.com/myaccount/#/app/<account id>/ordersandpurchases`)
    into the agent account's `pandabase.config.json`:
@@ -342,7 +353,8 @@ never opens a Costco cart or checkout (DESIGN §4.8).
    It stays on the Mac (it carries the account id); the repo's example has no `orders_url`.
 3. `make install-agent-cron` adds the two Costco automations (the morning after "back from
    Costco", and Sunday 19:40). If Costco signs out or shows a bot check, `#pandabase` gets one ⚠️
-   (at most weekly): sign in again, or clear the check, by hand in this window.
+   (at most weekly): sign in again, or clear the check, by hand in this window (headed, then
+   `make install-chromium` again).
 4. Check, then backfill, as in [§9](#9-smoke-test-and-backfill): first one read-only sweep, then
    "backfill Costco receipts" in `#pandabase` (or `scripts/ops/agent-run.sh receipts sweep
    --vendor costco --backfill`).

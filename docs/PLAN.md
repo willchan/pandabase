@@ -1359,3 +1359,9 @@ This Week with a planned trip; the prod copy for the store split of the real cat
     use digit-only boundaries. Regression tests: real Chromium with late-rendered cards, and the
     inline texts. Also `pandabase-tools api get '/path?k=v'` now takes the query from the path
     (CLAUDE.md's form for `/api/diagnostics/weekly?week=…` failed with "no agent route").
+  - **Second live sweep (2026-11-16) timed out** clicking the Warehouse tab: with the display
+    asleep, the headed Chrome in the agent account's background session stopped painting, so the
+    click never saw a "stable" element. PandaBase's Chrome now runs headless (headed Chrome's user
+    agent, a desktop screen size), and `HEADED=1 make install-chromium` gives a window for signing
+    in (DESIGN §10 #81). Costco's occasional silent session refresh (`/OAuthLogonCmd`), which the
+    guard refuses as `refused_host`, is still to do once its full redirect chain has been seen.
