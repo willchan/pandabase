@@ -18,9 +18,15 @@ header row (the member number). Card digits, approval codes and the like inside 
 never read: only item rows, the multi-buy rows before them, SUBTOTAL / TAX / Total and the item
 count. Nothing identifying goes to the API or telemetry (URLs carry the account id: never logged).
 
-Rows the parser doesn't recognise as an item, a multi-buy or a total — a negative amount above
-all (no discount line has been seen live yet) — are **reported, not guessed**: they go to
-`unknown_lines` in the sweep result and telemetry, and the receipt's totals check fails in the
+Instant savings (seen live 2026-11-16) print as `<coupon number> / <item number> <amount>-`
+under the item: the amount comes off that item's line (its line total, and its unit price), so
+the line is what was paid and the lines add up to SUBTOTAL. Online, an item's own fee (California's
+"CA BEP FEE" sits inside the item's block, with its own price, quantity and total) is added to
+that item's line total; its unit price stays the listed price.
+
+Rows the parser doesn't recognise as an item, a multi-buy, an instant saving or a total — a
+negative amount naming no item on the receipt, above all — are **reported, not guessed**: they go
+to `unknown_lines` in the sweep result and telemetry, and the receipt's totals check fails in the
 State Engine because its lines no longer add up to the subtotal.
 """
 
@@ -64,6 +70,10 @@ ITEMS_SOLD = re.compile(r"total number of items sold\s*=\s*(\d+)", re.I)
 QUANTITY = re.compile(r"\bquantity\s+(\d{1,3})\b", re.I)
 TOTAL_LABELS = ("SUBTOTAL", "TAX", "TOTAL")
 ITEM_LABEL = re.compile(r"^\s*item\s+(\d{4,12})\s*$", re.I)
+# "389504 / 1977696 4.00-": coupon number / the item number it applies to, the saving.
+INSTANT_SAVINGS = re.compile(
+    r"^(?:[A-Z]\s+)?(\d{4,12})\s*/\s*(\d{4,12})\s+(\d{1,6}(?:,\d{3})*)\.(\d{2})\s*-\s*[A-Z]?\s*$"
+)
 
 # A page without Orders & Purchases is signed out unless it reads like a bot check (Akamai's
 # "Access Denied" and similar; not seen on Costco yet — check the first live run).
@@ -238,6 +248,7 @@ class ParsedReceipt:
     total_cents: int | None
     items_sold: int | None
     unknown_lines: list[UnknownLine] = field(default_factory=list)
+    instant_savings: int = 0  # instant-savings rows taken off their item's line
 
     def units(self) -> float:
         return sum(line.qty for line in self.lines)
@@ -262,6 +273,7 @@ def parse_warehouse_receipt(html: str) -> ParsedReceipt | None:
     unknown: list[UnknownLine] = []
     subtotal = tax = total = sold = None
     multi: tuple[int, int] | None = None
+    savings: list[tuple[str, int, str]] = []  # (item number, cents, row text)
     for tr in rows:
         cells = _cells(tr)
         joined = " ".join(x for x in cells if x)
@@ -286,8 +298,13 @@ def parse_warehouse_receipt(html: str) -> ParsedReceipt | None:
             amount = AMOUNT.match(cells[-1])
             assert amount is not None
             line_total = cents(amount.group(1), amount.group(2))
+            saving = INSTANT_SAVINGS.match(joined) if amount.group(3) else None
+            if saving:
+                savings.append((saving.group(2), line_total, joined[:120]))
+                multi = None
+                continue
             if amount.group(3) or len(cells) != 4 or not ITEM_NUMBER.match(cells[1]):
-                # "5.00-": a discount or refund — its format hasn't been seen yet.
+                # "5.00-" naming no item: a refund or another format not seen yet.
                 unknown.append(UnknownLine(joined[:120], -line_total))
                 multi = None
                 continue
@@ -302,7 +319,17 @@ def parse_warehouse_receipt(html: str) -> ParsedReceipt | None:
                     line_total_cents=line_total,
                 )
             )
-    return ParsedReceipt(lines, subtotal, tax, total, sold, unknown)
+    applied = 0
+    for sku, off, text in savings:
+        target = next((x for x in reversed(lines) if x.vendor_sku == sku), None)
+        if target is None or target.line_total_cents is None or off > target.line_total_cents:
+            unknown.append(UnknownLine(text, -off))
+            continue
+        net = target.line_total_cents - off
+        target.line_total_cents = net
+        target.unit_price_cents = round(net / target.qty)
+        applied += 1
+    return ParsedReceipt(lines, subtotal, tax, total, sold, unknown, applied)
 
 
 # Online --------------------------------------------------------------------------------------
@@ -358,6 +385,47 @@ class ParsedOnlineOrder:
     shipping_cents: int | None
     tax_cents: int | None
     total_cents: int | None
+    discount_cents: int | None = None  # "Discount on Order" (below the subtotal)
+    fees: int = 0  # item fees added to their item's line ("CA BEP FEE PERCENT")
+
+
+@dataclass
+class _ItemAmounts:
+    unit: int | None = None
+    qty: int = 1
+    total: int | None = None
+    fees: list[int] = field(default_factory=list)
+
+
+def _item_amounts(block: dom.Node, label: dom.Node) -> _ItemAmounts:
+    """The item's price, "Quantity n", "Total" $x, then any fee printed inside the item's block
+    (a name, then its own price, quantity and total), read from the text after the item number.
+    Other text (delivery notes, buttons) is skipped."""
+    leaves = [n for n in block.iter() if not [k for k in n.children if isinstance(k, dom.Node)]]
+    start = next((i for i, n in enumerate(leaves) if n is label), None)
+    if start is None:
+        return _ItemAmounts()
+    texts = [t for n in leaves[start + 1 :] if (t := n.text().strip())]
+    item = _ItemAmounts()
+    in_fee = expect_total = False
+    for i, text in enumerate(texts):
+        money = MONEY.search(text)
+        if money:
+            value = cents(money.group(1), money.group(2))
+            if expect_total and in_fee:
+                item.fees.append(value)
+            elif expect_total:
+                item.total = value
+            elif item.unit is None:
+                item.unit = value
+            expect_total = False
+        elif text.lower() == "total":
+            expect_total = True
+        elif (q := QUANTITY.search(text)) and not in_fee:
+            item.qty = int(q.group(1))
+        elif item.total is not None and i + 1 < len(texts) and MONEY.search(texts[i + 1]):
+            in_fee = True  # a fee's name, followed by its price
+    return item
 
 
 def _labelled_money(box: dom.Node, label: str) -> int | None:
@@ -389,7 +457,10 @@ def parse_order_details(html: str) -> ParsedOnlineOrder | None:
         tax = _first_money(taxes[0].text()) if taxes else None
     totals = _by_automation(root, "orderTotal")
     total = _first_money(totals[0].text()) if totals else None
+    discounts = _by_automation(root, "totalDiscountOutput")
+    discount = _first_money(discounts[0].text()) if discounts else None
     lines: list[c.ReceiptLineIn] = []
+    fees = 0
     for label in _by_automation(root, "itemNumber"):
         m = ITEM_LABEL.match(label.text())
         if not m:
@@ -397,6 +468,10 @@ def parse_order_details(html: str) -> ParsedOnlineOrder | None:
         sku = m.group(1)
 
         def one_item(n: dom.Node, sku: str = sku) -> bool:
+            # One item's block, never the order summary: with a single item the widest such
+            # ancestor was the whole page, so its prices were the summary's (live, 2026-11-16).
+            if _by_automation(n, "orderTotalOutput") or _by_automation(n, "orderNumber"):
+                return False
             found = {
                 mm.group(1)
                 for x in _by_automation(n, "itemNumber")
@@ -411,12 +486,16 @@ def parse_order_details(html: str) -> ParsedOnlineOrder | None:
             if f".product.{sku}." in _attr(a, "href") and (t := a.text().strip())
         ]
         title = max(titles, key=len) if titles else f"Item {sku}"
-        text = block.text()
-        qty_m = QUANTITY.search(text)
-        qty = int(qty_m.group(1)) if qty_m else 1
-        prices = [cents(p.group(1), p.group(2)) for p in MONEY.finditer(text)]
-        unit = prices[0] if prices else None
-        line_total = prices[-1] if len(prices) >= 2 else (unit * qty if unit is not None else None)
+        amounts = _item_amounts(block, label)
+        qty, unit = amounts.qty, amounts.unit
+        line_total = (
+            amounts.total
+            if amounts.total is not None
+            else (unit * qty if unit is not None else None)
+        )
+        if line_total is not None and amounts.fees:
+            line_total += sum(amounts.fees)
+            fees += len(amounts.fees)
         lines.append(
             c.ReceiptLineIn(
                 raw_text=title[:300],
@@ -436,6 +515,8 @@ def parse_order_details(html: str) -> ParsedOnlineOrder | None:
         shipping_cents=shipping,
         tax_cents=tax,
         total_cents=total,
+        discount_cents=discount,
+        fees=fees,
     )
 
 
@@ -494,8 +575,9 @@ def online_request(order: ParsedOnlineOrder, member: Member, tz: str) -> c.Recei
     }
     if order.ordered_on:
         body["ordered_at"] = local_noon(order.ordered_on, tz)
-    # subtotal + tax = total only holds without shipping; with it, only the line sum is checked.
-    if not order.shipping_cents:
+    # subtotal + tax = total only holds without shipping or an order discount ("Discount on
+    # Order" sits below the subtotal); with either, only the line sum is checked.
+    if not order.shipping_cents and not order.discount_cents:
         body["tax_cents"] = order.tax_cents
     return c.ReceiptIngestRequest(**body)
 
@@ -582,6 +664,8 @@ class CostcoSweepResult:
     pending: list[str] = field(default_factory=list)  # online orders not delivered yet
     unknown_lines: list[dict[str, Any]] = field(default_factory=list)
     errors: list[dict[str, str]] = field(default_factory=list)
+    instant_savings: int = 0  # warehouse instant-savings rows taken off their item's line
+    item_fees: int = 0  # online item fees added to their item's line
 
     def trip_receipts(self) -> list[dict[str, Any]]:
         return [x for x in self.ingested if x.get("costco_trip_id")]
@@ -657,6 +741,8 @@ class CostcoSweeper:
             duplicates=len(result.duplicates),
             pending=len(result.pending),
             unknown_lines=len(result.unknown_lines),
+            instant_savings=result.instant_savings,
+            item_fees=result.item_fees,
             totals_fail=sum(1 for x in result.ingested if x.get("totals_check") == "fail"),
             trip_receipts=len(result.trip_receipts()),
             errors=len(result.errors),
@@ -708,6 +794,7 @@ class CostcoSweeper:
             result.errors.append({"error": "receipt_unreadable", "receipt": card.barcode[-6:]})
             return
         self._report_unknown(receipt, card.barcode, result)
+        result.instant_savings += receipt.instant_savings
         self._ingest(
             key,
             "warehouse",
@@ -729,6 +816,7 @@ class CostcoSweeper:
             self.tel.emit("selector_error", selector="costco_order_details", error="no_lines")
             result.errors.append({"error": "order_unreadable", "order": card.order_number})
             return
+        result.item_fees += order.fees
         self._ingest(key, "online", online_request(order, self.member, self.tz), result)
 
     def _report_unknown(

@@ -108,18 +108,46 @@ def test_warehouse_receipt_lines_multi_buy_and_totals() -> None:
     assert cr.parse_warehouse_receipt(page("orders_warehouse.html")) is None
 
 
-def test_an_unknown_negative_line_is_reported_not_guessed() -> None:
-    """No discount line has been seen live: a negative row (e.g. instant savings "5.00-") must
-    not be folded into any item or dropped silently."""
-    html = page("orders_warehouse_receipt.html").replace(
+def _with_row(row: str, subtotal: str) -> str:
+    return page("orders_warehouse_receipt.html").replace(
         '<tr><td colspan="2"></td><td>SUBTOTAL</td><td>67.87</td></tr>',
-        "<tr><td></td><td>356001</td><td>/9000103</td><td>3.00-</td></tr>"
-        '<tr><td colspan="2"></td><td>SUBTOTAL</td><td>64.87</td></tr>',
+        f'{row}<tr><td colspan="2"></td><td>SUBTOTAL</td><td>{subtotal}</td></tr>',
     )
-    r = cr.parse_warehouse_receipt(html)
+
+
+# Bug: the first live sweep (2026-11-16) reported an instant-savings row ("<coupon> / <item>
+# 4.00-") as unknown, and that receipt failed its totals check: the item stayed at full price.
+@pytest.mark.parametrize(
+    "row",
+    [
+        "<tr><td></td><td>356001</td><td>/9000103</td><td>3.00-</td></tr>",
+        "<tr><td>356001</td><td>/ 9000103</td><td>3.00-</td></tr>",  # the live spacing
+    ],
+)
+def test_instant_savings_come_off_the_item_they_name(row: str) -> None:
+    r = cr.parse_warehouse_receipt(_with_row(row, "64.87"))
     assert r is not None
-    assert len(r.lines) == 5
-    assert [(u.amount_cents, "/9000103" in u.text) for u in r.unknown_lines] == [(-300, True)]
+    assert r.unknown_lines == [] and r.instant_savings == 1
+    milk = next(x for x in r.lines if x.vendor_sku == "9000103")
+    assert (milk.qty, milk.line_total_cents, milk.unit_price_cents) == (2.0, 1098, 549)
+    assert sum(x.line_total_cents or 0 for x in r.lines) == r.subtotal_cents
+
+
+@pytest.mark.parametrize(
+    "row",
+    [
+        "<tr><td></td><td>356001</td><td>/9999999</td><td>3.00-</td></tr>",  # no such item
+        "<tr><td></td><td>356001</td><td>/9000102</td><td>3.00-</td></tr>",  # more than its line
+        "<tr><td></td><td>REFUND</td><td>SYNTHETIC</td><td>3.00-</td></tr>",  # another format
+    ],
+)
+def test_an_unknown_negative_line_is_reported_not_guessed(row: str) -> None:
+    """A negative row that names no item on the receipt (or more than that item's line) must not
+    be folded into any item or dropped silently."""
+    r = cr.parse_warehouse_receipt(_with_row(row, "64.87"))
+    assert r is not None
+    assert len(r.lines) == 5 and r.instant_savings == 0
+    assert [u.amount_cents for u in r.unknown_lines] == [-300]
     # The lines no longer add up to the subtotal: the State Engine's totals check fails.
     assert sum(x.line_total_cents or 0 for x in r.lines) != r.subtotal_cents
 
@@ -398,6 +426,7 @@ def test_sweep_reads_both_tabs_with_few_page_loads(tmp_path: Path) -> None:
     (tel,) = s.tel.metrics("receipt_sweep")
     assert tel["vendor"] == "costco"
     assert (tel["warehouse"], tel["online"], tel["pages"], tel["clicks"]) == (3, 2, 3, 7)
+    assert (tel["instant_savings"], tel["item_fees"]) == (0, 0)
     # No URL (it carries the account id) in telemetry.
     assert "costco.com" not in json.dumps([e.payload for e in s.tel.events])
 
@@ -714,3 +743,66 @@ def test_costco_refresh_page_is_never_opened_or_read() -> None:
     assert not guard.costco_session_refresh("https://www.costco.com.evil.test/OAuthLogonCmd")
     assert not guard.costco_session_refresh("http://www.costco.com/OAuthLogonCmd")
     assert not guard.costco_session_refresh("https://www.costco.com/OAuthLogonCmd/cart")
+
+
+def _one_item_order_with_fee_and_discount() -> str:
+    """The committed order cut to its first item, with a fee inside that item's block and a
+    "Discount on Order" row: the live one-item order's shape (2026-11-16), synthetic numbers."""
+    html = page("order_details_delivered.html")
+    second = re.search(
+        r'\s*<div class="d6-item">(?:(?!<div class="d6-item">).)*?9000301.*?</button>\s*</div>',
+        html,
+        re.S,
+    )
+    assert second is not None
+    html = html.replace(second.group(0), "")
+    fee = (
+        '<div>CA BEP FEE PERCENT</div><div class="d6-p">$1.20</div>'
+        '<div class="d6-q"><span>Quantity 1</span><div>Total</div><div>$1.20</div></div>'
+    )
+    html = html.replace(
+        '<div class="d6-q"><span>Quantity 1</span><div>Total</div><div>$27.99</div></div>',
+        '<div class="d6-q"><span>Quantity 1</span><div>Total</div><div>$27.99</div></div>' + fee,
+    )
+    return (
+        html.replace(
+            "<div><h3>Subtotal</h3><div>$52.97</div></div>",
+            "<div><h3>Subtotal</h3><div>$29.19</div></div><div><h4>Discount on Order</h4>"
+            '<div automation-id="totalDiscountOutput">-$5.00</div></div>',
+        )
+        .replace(
+            '<div automation-id="taxOutput">$2.59</div>',
+            '<div automation-id="taxOutput">$2.00</div>',
+        )
+        .replace("<h3>Total</h3><div>$55.56</div>", "<h3>Total</h3><div>$26.19</div>")
+    )
+
+
+# Bug: on the live one-item order (2026-11-16) the item's block grew to the whole page (no second
+# item to stop it), so its price was the summary's first amount and its line total the fee's: the
+# totals check failed. And "Discount on Order" broke subtotal + tax = total.
+def test_one_item_order_reads_the_item_and_adds_its_fee() -> None:
+    o = cr.parse_order_details(_one_item_order_with_fee_and_discount())
+    assert o is not None and len(o.lines) == 1
+    line = o.lines[0]
+    assert (line.vendor_sku, line.qty, line.unit_price_cents, line.line_total_cents) == (
+        "9000201",
+        1.0,
+        2799,
+        2919,
+    )
+    assert o.fees == 1 and o.discount_cents == 500
+    assert sum(x.line_total_cents or 0 for x in o.lines) == o.subtotal_cents
+    req = cr.online_request(o, WILL, TZ)
+    assert req.tax_cents is None  # subtotal + tax ≠ total with an order discount
+
+
+def test_two_item_order_is_unchanged() -> None:
+    o = cr.parse_order_details(page("order_details_delivered.html"))
+    assert o is not None
+    assert [(x.unit_price_cents, x.line_total_cents) for x in o.lines] == [
+        (2799, 2799),
+        (1249, 2498),
+    ]
+    assert o.fees == 0 and o.discount_cents is None
+    assert cr.online_request(o, WILL, TZ).tax_cents == 259
