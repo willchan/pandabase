@@ -13,6 +13,8 @@
 #   RESET_APPLY        true | false                     reset-imports / rename-items: false (default)
 #                      only counts; true deletes the digital receipt import (refused if human data
 #                      is found) / renames brand-named auto-created items
+#   RESET_VENDOR       all | amazon | wholefoods | costco   reset-imports: one store's import only
+#                      (all = every store, the default)
 #   DRY_RUN=1          validate and print the command; touch nothing
 #
 # Needs TURSO_DATABASE_URL (libsql://…) and TURSO_AUTH_TOKEN (+ ALLOWED_EMAILS for add-member).
@@ -32,6 +34,7 @@ profile="$(printf '%s' "${MEMBER_PROFILE:-}" | tr -d '[:space:]')"
 sweep="${MEMBER_SWEEP:-keep}"
 cart="${MEMBER_CART:-false}"
 apply="${RESET_APPLY:-false}"
+vendor="${RESET_VENDOR:-all}"
 
 errors=()
 err() { errors+=("$1"); }
@@ -79,6 +82,9 @@ fi
 if [ "$action" = reset-imports ] || [ "$action" = rename-items ]; then
   case "$apply" in true | false) ;; *) err "apply must be true or false" ;; esac
 fi
+if [ "$action" = reset-imports ]; then
+  case "$vendor" in all | amazon | wholefoods | costco) ;; *) err "vendor must be all, amazon, wholefoods or costco" ;; esac
+fi
 
 if [ "$DRY_RUN" != 1 ]; then
   if [ -z "${TURSO_DATABASE_URL:-}" ] || [ -z "${TURSO_AUTH_TOKEN:-}" ]; then
@@ -107,6 +113,7 @@ if [ "$action" = migrate ]; then
 elif [ "$action" = reset-imports ] || [ "$action" = rename-items ]; then
   # Counts only unless apply; reset-imports refuses (exit 3) when it finds human data.
   cmd=(pnpm "db:$action")
+  [ "$action" != reset-imports ] || [ "$vendor" = all ] || cmd+=(--vendor "$vendor")
   [ "$apply" = false ] || cmd+=(--apply)
   shown="${cmd[*]}"
 else

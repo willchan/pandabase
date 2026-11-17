@@ -577,8 +577,8 @@ Implementation notes (`web/lib/domain/receipts.ts`):
     prefix of the other counts), and pairs (either way round) that already have a pending or
     dismissed suggestion. The unverified side is the one merged away; one suggestion per source item (most
     confident). An expired suggestion may be asked again.
-- **Resetting the digital import** (`pnpm db:reset-imports [--apply]`, `db/src/reset-imports.ts`;
-  Bootstrap action `reset-imports`): ingest dedupes on the order id, so a parser fix can't correct
+- **Resetting the digital import** (`pnpm db:reset-imports [--vendor V] [--apply]`, `db/src/reset-imports.ts`;
+  Bootstrap action `reset-imports`, input `vendor`): ingest dedupes on the order id, so a parser fix can't correct
   rows an earlier import already wrote. The reset deletes the import's footprint so the backfill can
   run again: `source = digital` receipts and their lines; the items those lines reference that the
   import *created* (an item's `created_at` equals a referencing receipt's — ingest stamps both
@@ -596,7 +596,12 @@ Implementation notes (`web/lib/domain/receipts.ts`):
   other items, an item with settings (audit hint, shelf life, reorder threshold), or an item a
   digital line matched but didn't create. Without `--apply` it only counts. It prints counts only
   (per table, lines by store, reviews by kind, each blocker), never names, since Actions logs are
-  public.
+  public. A Costco trip a deleted receipt closed is kept, `done`, with its `receipt_id` cleared,
+  so the re-imported receipt links it again. `--vendor V` limits all of this to one store's
+  `source = digital, vendor = V` receipts (a Costco parser fix needn't re-import Amazon): it keeps
+  the merge_suggest jobs, deleting only the merge reviews naming one of its items on either side
+  (`item_id` or `merge_into_item_id`), clears only its own orders' `receipt:…:{order id}` replies,
+  and also refuses if another store's imported lines name an item or product it would delete.
 
 ### 4.6 Review expiry & trust
 

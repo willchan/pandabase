@@ -435,11 +435,12 @@ are inputs, which GitHub may show on the run's page; Discord ids are
 already visible to anyone in your server, but use a first name, not a
 full name.
 
-### Resetting the Amazon receipt import
+### Resetting the digital receipt import
 
 If a receipt import went wrong (wrong store, junk lines), action
 `reset-imports` removes everything that import created so the backfill can
-run again. Pause the nightly receipt sweep first. Run it with **apply**
+run again. Pick a store under **vendor** to reset only its import (say
+`costco` after a Costco parser fix); `all` resets every store's. Pause the nightly receipt sweep first. Run it with **apply**
 unticked to see the counts; tick **apply** to delete. It refuses, and
 deletes nothing, if anyone has answered a review about those receipts or
 entered counts for those items; the run's summary lists what it found.

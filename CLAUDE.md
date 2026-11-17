@@ -70,8 +70,9 @@ pnpm db:reset && pnpm db:seed   # fresh db/dev.db (or TURSO_DATABASE_URL), migra
 pnpm db:add-member --email E --name N [--discord ID] [--profile P] [--sweep daily|weekly|off] [--cart]
                              # upsert a member by email (sign-in also creates them; TURSO_* for prod)
                              # no terminal: Actions → Bootstrap (bootstrap.yml; docs/SETUP-CLOUD.md)
-pnpm db:reset-imports [--apply]   # undo the digital receipt import (counts only without --apply;
-                             # refuses on human data; DESIGN §4.5). No terminal: Bootstrap reset-imports
+pnpm db:reset-imports [--vendor V] [--apply]   # undo the digital receipt import, or one store's
+                             # (counts only without --apply; refuses on human data; DESIGN §4.5).
+                             # No terminal: Bootstrap reset-imports (input vendor)
 pnpm db:rename-items [--apply]    # re-name auto-created items named after a store brand (counts only
                              # without --apply; DESIGN §4.5). No terminal: Bootstrap rename-items
 pnpm db:generate             # after editing db/src/schema/*: new migration in db/migrations (commit it)

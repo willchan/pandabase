@@ -1379,5 +1379,10 @@ This Week with a planned trip; the prod copy for the store split of the real cat
     and its "Discount on Order" broke subtotal + tax = total. Fixed: the block stops at the order
     summary, the fee is added to its item's line, and tax isn't sent with an order discount
     (DESIGN §10 #82). Ingest dedupes on the receipt id, so the six receipts already written keep
-    the old lines until they are reset and swept again (`db:reset-imports` resets every digital
-    import, Amazon's too).
+    the old lines until they are reset and swept again: `db:reset-imports --vendor costco`
+    (Bootstrap input `vendor`) resets Costco's import alone, keeping Amazon's. It also stopped a
+    reset from failing on a Costco trip that links to a deleted receipt (the trip keeps its status
+    and loses only the link). On production it refuses: some Costco lines matched items an Amazon / Whole
+    Foods import created, and Costco's ingest also moved those items' buy streaks and product
+    stances, which deleting its lines can't undo. A full reset (every store) is unblocked but
+    re-imports every Amazon and Whole Foods order too.
