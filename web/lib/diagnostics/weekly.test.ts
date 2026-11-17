@@ -524,6 +524,42 @@ describe("weekly diagnostics", () => {
     );
   });
 
+  it("counts held receipts (§4.5) and flags the ones still held at the end of the week", async () => {
+    const ingest = (id: string, subtotal: number) =>
+      h.call(HANDLERS.receiptsIngest.POST, "/api/receipts/ingest", {
+        body: {
+          actor_discord_id: "100000000000000001",
+          source: "digital",
+          vendor: "costco",
+          account: "100000000000000001",
+          external_order_id: id,
+          fulfillment: "delivery",
+          acquired_at: "2026-10-20T19:00:00Z",
+          subtotal_cents: subtotal,
+          lines: [
+            { raw_text: "KS ALMOND MLK", vendor_sku: "9000103", qty: 1, line_total_cents: 699 },
+          ],
+        },
+      });
+    await ingest("1000000123", 399); // held, never fixed
+    await ingest("1000000456", 399); // held, then re-read right
+    await ingest("1000000456", 699);
+    const report = await renderWeekly(h.db, "2026-W43", {
+      ...ctx,
+      now: "2026-10-27T16:00:00.000Z",
+    });
+    expect(report.markdown).toContain(
+      "Held receipts (totals don't add up, not applied): 1 held at the end of the week, 2 newly held, 1 applied after a re-read, 0 applied as read on expiry.",
+    );
+    expect(report.markdown).toContain("1. 1 digital receipt(s) held:");
+    expect(report.markdown).toContain(
+      "Held: costco order …000123 (2026-10-20), 1 read(s), applied as read on 2026-11-03",
+    );
+    const dq = report.extracts.find((e) => e.name === "data_quality.jsonl")!.jsonl;
+    expect(dq).toContain('"check":"receipt_held"');
+    expect(dq).toContain('"check":"receipt_hold_released"');
+  });
+
   it("data quality: a week without receipts isn't flagged and says so", async () => {
     const report = await renderWeekly(h.db, "2025-W01", ctx);
     expect(report.markdown).toContain("| Store split (this week) | no lines |");

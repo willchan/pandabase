@@ -1386,3 +1386,15 @@ This Week with a planned trip; the prod copy for the store split of the real cat
     Foods import created, and Costco's ingest also moved those items' buy streaks and product
     stances, which deleting its lines can't undo. A full reset (every store) is unblocked but
     re-imports every Amazon and Whole Foods order too.
+  - **Held receipts (2026-11-17, DESIGN §4.5 *Held receipts*, §10 #83):** so a misread can't reach
+    shared items again, a digital receipt whose totals check fails is now stored as a
+    `receipt_hold` (migration `0004_receipt_holds`) and not applied; a re-ingest of the order that
+    adds up applies it, and the daily cron applies an unfixed hold as read after
+    `receipts.heldExpireDays` (14). Ingest answers `status: "held"` (+ `held_until`); both sweeps
+    keep held orders out of `done` (Amazon re-reads them past its list window) and re-send them
+    under a key with the body's hash, so a corrected read isn't answered from the 24 h idempotency
+    store. `db:reset-imports` deletes holds. Telemetry `receipt_held` / `receipt_hold_released`,
+    `receipt_sweep.held`; weekly report §3 counts them. Applies to Amazon / Whole Foods too: their
+    totals check (lines vs "Item(s) Subtotal") hadn't been measured on the prod copy when this
+    shipped (the copy couldn't be pulled from that session) — check §3's held count after the
+    first week. Does not fix the six receipts already applied: those still need a reset.

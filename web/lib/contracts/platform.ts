@@ -79,5 +79,7 @@ export const MaintenanceResponse = named(
     reprioritized_reviews: z.number().int(),
     /** Planned Costco trips closed as `cancelled` / `expired` (§4.8 default outcome). */
     expired_costco_trips: z.number().int(),
+    /** Held digital receipts applied as read at their expiry (§4.5 default outcome). */
+    applied_held_receipts: z.number().int(),
   }),
 );

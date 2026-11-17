@@ -232,6 +232,7 @@ describe("reset-imports", () => {
       inventory_state: 3,
       inventory_event: 5,
       receipt_line: 4,
+      receipt_hold: 0,
       receipt: 2,
       product: 3,
       item: 3,
@@ -499,6 +500,7 @@ describe("reset-imports --vendor", () => {
       inventory_state: 1,
       inventory_event: 1,
       receipt_line: 1,
+      receipt_hold: 0,
       receipt: 1,
       product: 1,
       item: 1,
@@ -528,7 +530,7 @@ describe("reset-imports --vendor", () => {
     const states = (await db.select().from(t.inventoryState)).map((s) => s.itemId);
     expect(states).not.toContain(towels);
     expect(Object.values((await planImportReset(db, { vendor: "costco" })).counts)).toEqual(
-      Array(12).fill(0),
+      Array(13).fill(0),
     );
   });
 

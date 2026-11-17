@@ -13,7 +13,7 @@ import pytest
 from conftest import REPO, FakeApi, FakeDriver, FakeShop
 from test_cart_injector import VIEW, line, product
 
-from pandabase_tools import cli, costco_receipts
+from pandabase_tools import cli, costco_receipts, receipt_parser
 from pandabase_tools.config import load
 
 
@@ -850,6 +850,42 @@ def test_receipts_ingest_gives_the_closed_cycles_discord_thread(config: Path) ->
     )
     assert code == 0
     assert out["closed_cycle_id"] == "C1" and out["closed_cycle_thread_id"] == "T1"
+
+
+def test_receipts_ingest_leaves_a_held_receipt_for_the_next_sweep(config: Path) -> None:
+    """§4.5: the State Engine held the agent's own extraction (totals don't add up), so the order
+    isn't marked done: the next sweep hands it over again."""
+    (config.parent / "state").mkdir(exist_ok=True)
+    held = {
+        "receipt_id": "H1",
+        "duplicate": False,
+        "status": "held",
+        "totals_check": "fail",
+        "lines": [],
+        "new_item_ids": [],
+        "review_ids": [],
+        "closed_cycle_id": None,
+        "held_until": "2026-11-01T19:00:00Z",
+    }
+    api = FakeApi(
+        {
+            "GET /api/grocery/cycle/current": lambda _: {"cycle": None},
+            "POST /api/receipts/ingest": lambda _: held,
+        }
+    )
+    body = {
+        "vendor": "amazon",
+        "external_order_id": "114-0000004-0000004",
+        "acquired_at": "2026-10-12T19:00:00Z",
+        "subtotal_cents": 999,
+        "lines": [{"raw_text": "Synthetic Dish Soap", "qty": 1, "line_total_cents": 499}],
+    }
+    code, out = run(
+        config, ["receipts", "ingest", "--member", "will", "--json", json.dumps(body)], api
+    )
+    assert code == 0 and out["status"] == "held"
+    state = receipt_parser.SweepState.load(config.parent / "state" / "receipts-will.json")
+    assert state.done == {}
 
 
 # Costco trips (DESIGN §4.8) --------------------------------------------------------------------

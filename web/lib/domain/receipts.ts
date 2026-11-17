@@ -291,6 +291,22 @@ export function totalsCheck(
   return sum === r.subtotalCents ? "pass" : "fail";
 }
 
+/**
+ * §4.5 Held receipts: a digital receipt whose lines don't add up is stored, not applied — its
+ * lines are what a parser read off a page, and once applied (items, buy streaks, stances, usage
+ * rates) a misread can't be corrected by re-reading the order, which dedupes. Paper receipts have
+ * their own review; manual ones are typed by a person.
+ */
+export const holdsReceipt = (
+  input: Pick<ReceiptInput, "source" | "subtotalCents" | "lines" | "discountCents" | "taxCents"> & {
+    totalCents?: number | null;
+  },
+): boolean => input.source === "digital" && totalsCheck(input) === "fail";
+
+/** When an unfixed hold is applied as read (§4.5 default outcome). */
+export const heldReceiptExpiry = (heldAt: string, config: Pick<Config, "receipts">): string =>
+  new Date(Date.parse(heldAt) + config.receipts.heldExpireDays * 86_400_000).toISOString();
+
 const NEW_ITEM_DEFAULTS = {
   category: "Uncategorized",
   defaultLocation: "pantry",

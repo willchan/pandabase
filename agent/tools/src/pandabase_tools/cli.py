@@ -467,7 +467,7 @@ def cmd_receipts_ingest(env: Env) -> Any:
     except api_mod.ApiError:
         cycle = None
     res = env.api.ingest_receipt(req, key=key)
-    if oid:
+    if oid and res.status != "held":  # a held receipt (§4.5) stays for the next sweep to re-read
         sweeper_state = env.loaded.state_dir() / f"receipts-{member.name}.json"
         state = receipt_parser.SweepState.load(sweeper_state)
         state.done[oid] = datetime.now(UTC).isoformat()

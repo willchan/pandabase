@@ -1866,6 +1866,11 @@
       },
       "MaintenanceResponse": {
         "properties": {
+          "applied_held_receipts": {
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
           "expired_costco_trips": {
             "maximum": 9007199254740991,
             "minimum": -9007199254740991,
@@ -1928,7 +1933,8 @@
           "opened_cycle_id",
           "merge_suggest_jobs",
           "reprioritized_reviews",
-          "expired_costco_trips"
+          "expired_costco_trips",
+          "applied_held_receipts"
         ],
         "type": "object"
       },
@@ -2704,6 +2710,13 @@
           "duplicate": {
             "type": "boolean"
           },
+          "held_until": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "lines": {
             "items": {
               "$ref": "#/components/schemas/ReceiptLineOut"
@@ -2731,7 +2744,8 @@
             "enum": [
               "applied",
               "pending_review",
-              "partial"
+              "partial",
+              "held"
             ],
             "type": "string"
           },

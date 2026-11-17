@@ -65,6 +65,7 @@ describe("digital receipts", () => {
       ...amazonOrder,
       vendor: "wholefoods",
       external_order_id: "111-0000365-0000365",
+      subtotal_cents: 499,
       lines: [
         {
           raw_text: "365 By Whole Foods Market, Organic Peeled Garlic, 6 Ounce",

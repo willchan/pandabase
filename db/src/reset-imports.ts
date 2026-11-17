@@ -2,7 +2,7 @@
 // be re-run with a fixed parser (DESIGN §4.5 "Resetting the digital import"). Ingest dedupes on the
 // order id, so re-importing alone can't correct rows a buggy parser wrote.
 //
-// Deletes what the import created: digital receipts and their lines, the items and products they
+// Deletes what the import created: digital receipts and their lines, held receipts (§4.5), the items and products they
 // created, those items' inventory events / state / preference events / price quotes / vendor
 // aliases, the reviews about them (Cleanup's receipt, new-product, unverified-item and merge
 // reviews), the merge_suggest jobs, and the stored replies to `receipt:` ingest keys (else a
@@ -41,6 +41,7 @@ import {
   priceQuote,
   product,
   receipt,
+  receiptHold,
   receiptLine,
   reviewItem,
   vendorAlias,
@@ -58,6 +59,7 @@ export const RESET_TABLES = [
   "inventory_state",
   "inventory_event",
   "receipt_line",
+  "receipt_hold",
   "receipt",
   "product",
   "item",
@@ -113,6 +115,7 @@ export interface ImportResetPlan {
 
 interface Scope {
   receipts: string[];
+  holds: string[];
   lines: string[];
   items: string[];
   products: string[];
@@ -158,6 +161,16 @@ async function scope(q: Q, opts: ResetOptions): Promise<{ s: Scope; plan: Import
         : and(eq(receipt.source, "digital"), eq(receipt.vendor, vendor)),
     );
   const receiptIds = receipts.map((r) => r.id);
+  // Held receipts (§4.5): nothing applied, but the order's hold would stop a re-import holding
+  // it afresh (and an applied hold points at a receipt deleted here).
+  const holds = await q
+    .select({ id: receiptHold.id, externalOrderId: receiptHold.externalOrderId })
+    .from(receiptHold)
+    .where(
+      vendor === null
+        ? eq(receiptHold.source, "digital")
+        : and(eq(receiptHold.source, "digital"), eq(receiptHold.vendor, vendor)),
+    );
   const receiptById = new Map(receipts.map((r) => [r.id, r]));
 
   const lines = await q
@@ -276,7 +289,9 @@ async function scope(q: Q, opts: ResetOptions): Promise<{ s: Scope; plan: Import
       ),
     );
   // `receipt:{discord id}:{order id}`: one store's reset clears only its own orders' replies.
-  const orderIds = new Set(receipts.flatMap((r) => (r.externalOrderId ? [r.externalOrderId] : [])));
+  const orderIds = new Set(
+    [...receipts, ...holds].flatMap((r) => (r.externalOrderId ? [r.externalOrderId] : [])),
+  );
   const keys =
     vendor === null
       ? allKeys
@@ -374,6 +389,7 @@ async function scope(q: Q, opts: ResetOptions): Promise<{ s: Scope; plan: Import
 
   const s: Scope = {
     receipts: receiptIds,
+    holds: holds.map((h) => h.id),
     lines: lines.map((l) => l.id),
     items: itemIds,
     products: productIds,
@@ -398,6 +414,7 @@ async function scope(q: Q, opts: ResetOptions): Promise<{ s: Scope; plan: Import
       inventory_event: s.events.length,
       receipt_line: s.lines.length,
       receipt: s.receipts.length,
+      receipt_hold: s.holds.length,
       product: s.products.length,
       item: s.items.length,
       idempotency_key: s.idempotencyKeys.length,
@@ -454,6 +471,7 @@ export async function applyImportReset(db: Db, opts: ResetOptions = {}): Promise
     for (const ch of chunks(s.trips)) {
       await tx.update(costcoTrip).set({ receiptId: null }).where(inArray(costcoTrip.id, ch));
     }
+    await del(receiptHold, receiptHold.id, s.holds);
     await del(receipt, receipt.id, s.receipts);
     await del(product, product.id, s.products);
     // Merges among imported items point inside the set; clear them so delete order can't matter.

@@ -164,6 +164,13 @@ naive fold; since M3 it calls `projectInventory` from `web/lib/domain/inventory.
 `total_cents`, `totals_check` (`pass`|`fail`|`n/a`), `job_id`, `status` (`applied`|`pending_review`|`partial`).
 `acquired_at` is required (it feeds the paper dedupe key and the EMA); `ordered_at` is nullable.
 
+**receipt_hold** (§4.5 *Held receipts*, migration `0004_receipt_holds`) — a digital receipt whose
+totals check failed, stored but not applied: `dedupe_key` (unique; the receipt's), `source`,
+`vendor`, `account_member_id`, `external_order_id`, `acquired_at`, `input` (json: the latest
+ingest's `ReceiptInput`), `attempts`, `status` (`held`|`applied`|`expired`), `expires_at`,
+`resolved_at` (set iff not `held`, CHECK), `receipt_id` (the receipt it became). A separate table
+rather than a `held` receipt status: widening `receipt.status`'s CHECK would rebuild `receipt`.
+
 **receipt_line** — `receipt_id`, `raw_text`, `asin`, `vendor_sku` (Costco item number, M10.3),
 `product_id`, `item_id`, `qty` (purchase units), `unit_price_cents`, `line_total_cents`,
 `match_method` (`asin`|`alias_exact`|`fuzzy`|`manual`|`none`; `asin` also means "by Costco item
@@ -496,6 +503,35 @@ text before the first comma/dash, sizes removed, at most 6 words. `pnpm db:renam
 as the old rule named them from one of their product titles; names a person gave or confirmed are
 never touched.
 
+**Held receipts** (`holdsReceipt` in `web/lib/domain/receipts.ts`; `ingestReceiptIn` in
+`web/lib/services/receipts.ts`): a **digital** receipt whose totals check fails is stored as a
+`receipt_hold` and **not applied** — no receipt row, lines, items, products, inventory events,
+item/product/preference changes, reviews, cycle closure or Costco trip link. Its lines are what a
+parser read off a page; once applied (new items, buy streaks, product stances, usage rates), a
+misread can't be corrected by re-reading the order (ingest dedupes on it) without resetting every
+store's import (§10 #83). The response is `status: "held"`, `totals_check: "fail"`, no lines,
+`receipt_id` = the hold's id and `held_until` = its expiry.
+- *Re-ingest* of the same order (same dedupe key) while held: still failing → the hold's `input` is
+  replaced (a newer parser's read), `attempts` += 1, the expiry stays; adding up (or unchecked: a
+  subtotal or line total missing) → applied normally, and the hold becomes `applied` with its
+  `receipt_id`. After that the order is an ordinary duplicate.
+- *Default outcome and expiry:* the daily cron (`applyExpiredHolds`, maintenance
+  `applied_held_receipts`) applies a hold still `held` at `expires_at` (`receipts.heldExpireDays`,
+  14, after it was first held) **as read**, through the same `applyReceipt` path, and marks it
+  `expired`. Nothing waits on a person: a parser fix within two weeks lands the right lines; after
+  that, a lost purchase (the item looks unbought, so the weekly cart buys it again) costs more than
+  one wrong line — both live failures had their items right and a price or quantity off.
+- *Agent:* a held response isn't "done" in the sweep's state file (`held` instead), so every
+  later sweep re-reads the order — Amazon's even once its order list has moved past it — and
+  re-ingests it under `receipt:{discord id}:{body hash}:{order id}` so a corrected read isn't
+  answered with the held reply stored for the idempotency window (24 h). Entries older than 60
+  days are forgotten (long since applied as read).
+- Paper receipts keep their own review flow, and manual (typed) receipts apply as before.
+- *Telemetry:* `receipt_held {holdId, vendor, fulfillment, attempt, lines, replaced, heldUntil}`
+  and `receipt_hold_released {holdId, receiptId, vendor, outcome: totals_pass|unchecked|expired,
+  attempts, heldDays}` → weekly report §3 (held at the end of the week, newly held, applied after a
+  re-read, applied as read; a finding while any are held) and the `data_quality` extract.
+
 **Paper:** normalize `raw_text` (upper-case, collapse whitespace, strip prices/codes), then:
 
 | Match | Action | Trust |
@@ -584,7 +620,8 @@ Implementation notes (`web/lib/domain/receipts.ts`):
   import *created* (an item's `created_at` equals a referencing receipt's — ingest stamps both
   alike); those items' products, `vendor_alias`es, inventory events (digital-receipt and system
   ones), `preference_event`s and `price_quote`s; reviews about those receipts or items or from
-  merge_suggest jobs, and the merge_suggest jobs themselves; and the stored replies for `receipt:`
+  merge_suggest jobs, and the merge_suggest jobs themselves; held receipts (`receipt_hold`, any
+  status); and the stored replies for `receipt:`
   ingest idempotency keys (the scraper's keys are deterministic, so a re-import within the 24 h
   window would otherwise replay the old responses). `inventory_state` is then rebuilt. Members,
   settings, away periods, grocery cycles (including ones an imported order closed) and telemetry
@@ -600,7 +637,7 @@ Implementation notes (`web/lib/domain/receipts.ts`):
   so the re-imported receipt links it again. `--vendor V` limits all of this to one store's
   `source = digital, vendor = V` receipts (a Costco parser fix needn't re-import Amazon): it keeps
   the merge_suggest jobs, deleting only the merge reviews naming one of its items on either side
-  (`item_id` or `merge_into_item_id`), clears only its own orders' `receipt:…:{order id}` replies,
+  (`item_id` or `merge_into_item_id`), clears only its own (and its held) orders' `receipt:…:{order id}` replies,
   and also refuses if another store's imported lines name an item or product it would delete.
 
 ### 4.6 Review expiry & trust
@@ -615,6 +652,7 @@ Run daily by `/api/cron/maintenance`:
 | unverified_item | stays unverified | never expires (low priority) |
 | failed_job | dismiss | 14d |
 | trash_cam (low confidence) | do nothing | 7d |
+| held digital receipt (§4.5; a `receipt_hold`, not a review) | apply it as read | 14d (`receipts.heldExpireDays`) |
 
 Only human actions create `labeled_observation`s. `impact_score` = 10 if the item is in the current
 cart plan, + 3 if in please_check, 1 if neither; Cleanup sorts by it. Reviews scoring above 1 are
@@ -741,7 +779,7 @@ done|cancelled|expired, listLines, bridged, receiptId}` on close (`bridged` = di
 on the receipt, when a receipt closes it); `costco_trip_receipt {tripId, plannedFor, receiptId,
 closedTrip, lines, bought, listLines}` when a receipt links; `costco_item_renamed {itemId,
 changed}`; `receipt_sweep {vendor: "costco", pages, clicks, warehouse, online, duplicates,
-pending, unknown_lines, instant_savings, item_fees, totals_fail, trip_receipts, errors, error_kinds, complete}` (no URLs: they
+pending, unknown_lines, instant_savings, item_fees, totals_fail, held, trip_receipts, errors, error_kinds, complete}` (no URLs: they
 carry the account id); `store_override {itemId, from, to, kind, thresholdBefore, thresholdAfter, store, why}` →
 weekly report §6 *Store choice* and the `store_choice` extract.
 
@@ -824,6 +862,9 @@ CDP, like Amazon; the agent itself has no browser, §10 #52). Page shapes are in
   item on the receipt (or more than that item's line) or a row that isn't an item, multi-buy,
   instant saving or total — are reported, not guessed: the sweep lists them (`unknown_lines`, also "items sold" ≠ units) and doesn't send
   them, so the receipt's lines no longer add up to its subtotal and the totals check fails.
+  A receipt whose totals check fails is **held**, not applied (§4.5 *Held receipts*): the sweep
+  keeps re-reading it (its trip waits for it), says once in the ops channel that it was held, and
+  counts it in `held` and `totals_fail`.
 - **Price by channel:** delivered prices run higher than the warehouse's (live: $34.99 vs $29.99
   for the same item number), so a Costco product's `last_price_cents` is its latest **warehouse**
   price: a delivery line's price is written only while `last_price_fulfillment` isn't `in_store`
@@ -1124,7 +1165,8 @@ productId, vendor, outcome, error}`, `cycle_opened`, `cycle_transition`, `job_cr
 raised, lowered}`, `review_resolved {reviewId, kind, outcome,
 impactScore, ageHours, …line counts}`, `item_merged {itemId, intoItemId, reviewKind, eventScale}`,
 `item_settings_changed {itemId, fields}`, `settings_changed {keys}`, `presumed_discarded`,
-`maintenance_run`, `settings_rejected {keys}`, `merge_suggest_requested {trigger: backfill|cron,
+`maintenance_run`, `settings_rejected {keys}`, `receipt_held` / `receipt_hold_released` (§4.5
+*Held receipts*; report §3), `merge_suggest_requested {trigger: backfill|cron,
 jobIds, candidates, items}`, `merge_suggestions_created {jobId, items, suggestions, created,
 duplicate, low_confidence, merged, self, unknown, both_confirmed}` (accepted / dismissed / expired
 suggestions are the `review_resolved` / `review_expired` rows of kind `merge_suggestion`); source `session`: `ui_action {action, ok, latencyMs,
@@ -1138,7 +1180,7 @@ reasons}` (summary finding above all others) and `cart_probe {store, asin, found
 (per-store found / not-found table and a finding per miss; both in the cart-injection extract), `clarifying_question {question}`, `photo_classified {job_type, basis}` and `photo_reclassified
 {to_job_type}` (UX section: photos by classification basis and human re-files). The agent
 tools also emit `receipt_sweep {member, mode, pages, ingested, duplicates, pending, needs_agent,
-errors, complete}` (stored for ad-hoc queries; no report section). The worker's `vlm_inference` /
+held, errors, complete}` (stored for ad-hoc queries; no report section). The worker's `vlm_inference` /
 `vlm_parse_failure` also carry `job_id`, `job_type`, `attempt`, `repaired` and per-type fields
 (receipts `lines`, `discount_lines`, `date_fallback`, `store_missing`; Trash Cam `detections`,
 `top_confidence`; merges `items`, `suggestions`, `dropped`), all copied into the `vlm` extract.
@@ -1514,3 +1556,4 @@ docker-compose.yml (+ docker-compose.build.yml), Makefile, CLAUDE.md, README.md,
 | 80 | The Costco sweep never reads `data-private` content except receipt rows, and an unreadable receipt line is reported (sweep reply, telemetry, failed totals check), never mapped to an item | Member and card numbers, address and contact details are on the same pages; the State Engine needs none of them. No discount line has been seen yet: guessing its format could subtract a saving from the wrong item or drop a purchase silently |
 | 81 | PandaBase's Chrome runs headless (`--headless`, headed Chrome's user agent for the installed major version, a 1920×1080 screen); `HEADED=1 make install-chromium` gives a window for signing in by hand | A headed window in the agent account's background login session stops painting once the display sleeps, so Playwright clicks wait forever for a "stable" element (first Costco sweep, 2026-11-16); pandaden's OpenClaw profile hit the same thing. Chrome 157 headless still says `HeadlessChrome` in its user agent and reports an 800×600 screen, both easy bot-check tells, while its client hints are the normal brands; the launcher reads the version at each start so the user agent keeps matching them after Chrome updates. Anti-backgrounding flags alone were the alternative, but a sleeping display stops frames regardless |
 | 82 | A Costco instant saving comes off the line of the item it names (line total and unit price); an online item's fee is added to its item's line total; an online "Discount on Order" isn't spread over the lines | The coupon row names its item number, so the paid price is known exactly: store choice then compares what the household paid, and the lines add up to SUBTOTAL. A receipt-level `discount_cents` (Amazon's way) would leave every Costco price high. A fee belongs to buying that item, but isn't its price per unit. An order discount names no item; with several items any split would be a guess, so it only switches off the subtotal + tax = total check |
+| 83 | A digital receipt whose totals check fails is held — stored, not applied — until a re-read of the order adds up, or for 14 days, then applied as read (§4.5 *Held receipts*) | In the first Costco sweep (2026-11-16) the two receipts with wrong lines were exactly the two whose totals failed, and applying them changed shared items (buy streaks, stances, usage rates) that an order-id-deduped re-ingest can't correct; `db:reset-imports --vendor` then refused because those items were shared with Amazon's import. Holding costs nothing when the parser is fixed in time. Never applying would lose the purchase for good (the item looks unbought and is ordered again), and both live failures had their items right, so the default after two weeks is to apply as read. A separate `receipt_hold` table, not a `held` receipt status: widening `receipt.status`'s CHECK would rebuild `receipt` |

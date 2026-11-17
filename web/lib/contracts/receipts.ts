@@ -72,10 +72,16 @@ export const ReceiptLineOut = named(
 export const ReceiptIngestResponse = named(
   "ReceiptIngestResponse",
   z.object({
+    /** The receipt's id, or for a `held` receipt the hold's (§4.5 Held receipts). */
     receipt_id: Id,
     /** The receipt was already ingested (same dedupe key); nothing changed. */
     duplicate: z.boolean(),
-    status: z.enum(["applied", "pending_review", "partial"]),
+    /**
+     * `held`: a digital receipt whose totals check failed was stored but not applied (no lines,
+     * items, events or trip link). Ingest the order again once it reads right; at `held_until` it
+     * is applied as read.
+     */
+    status: z.enum(["applied", "pending_review", "partial", "held"]),
     totals_check: z.enum(["pass", "fail", "n/a"]),
     lines: z.array(ReceiptLineOut),
     new_item_ids: z.array(z.string()),
@@ -84,6 +90,8 @@ export const ReceiptIngestResponse = named(
     closed_cycle_id: Id.nullable(),
     /** A Costco warehouse receipt linked to this Costco trip (and closed it if planned; §4.8). */
     costco_trip_id: Id.nullable().optional(),
+    /** A held receipt: when the daily cron applies it as read unless a re-ingest adds up first. */
+    held_until: Timestamp.nullable().optional(),
   }),
 );
 

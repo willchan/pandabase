@@ -48,7 +48,7 @@ from . import dom, guard
 from .api import ApiClient, ApiError
 from .browser import Challenged, NotSignedIn, Snapshot
 from .config import CostcoReceiptsConfig, Member
-from .receipt_parser import local_noon
+from .receipt_parser import ingest_key, local_noon, prune_held
 from .telemetry import Telemetry
 
 VENDOR = "costco"
@@ -616,6 +616,8 @@ class CostcoState:
     due: list[str] = field(default_factory=list)
     due_trip: str | None = None  # the trip date the scheduled sweeps are for
     last_warning: dict[str, str] = field(default_factory=dict)  # error → ISO time
+    # key → first held (§4.5: totals didn't add up; not done, so every sweep re-reads it)
+    held: dict[str, str] = field(default_factory=dict)
 
     @classmethod
     def load(cls, path: Path) -> CostcoState:
@@ -628,6 +630,7 @@ class CostcoState:
             due=list(data.get("due", [])),
             due_trip=data.get("due_trip"),
             last_warning=dict(data.get("last_warning", {})),
+            held=dict(data.get("held", {})),
         )
 
     def save(self, path: Path) -> None:
@@ -666,6 +669,7 @@ class CostcoSweepResult:
     errors: list[dict[str, str]] = field(default_factory=list)
     instant_savings: int = 0  # warehouse instant-savings rows taken off their item's line
     item_fees: int = 0  # online item fees added to their item's line
+    held: list[dict[str, Any]] = field(default_factory=list)  # §4.5: stored, not applied
 
     def trip_receipts(self) -> list[dict[str, Any]]:
         return [x for x in self.ingested if x.get("costco_trip_id")]
@@ -743,7 +747,9 @@ class CostcoSweeper:
             unknown_lines=len(result.unknown_lines),
             instant_savings=result.instant_savings,
             item_fees=result.item_fees,
-            totals_fail=sum(1 for x in result.ingested if x.get("totals_check") == "fail"),
+            totals_fail=len(result.held)
+            + sum(1 for x in result.ingested if x.get("totals_check") == "fail"),
+            held=len(result.held),
             trip_receipts=len(result.trip_receipts()),
             errors=len(result.errors),
             error_kinds=sorted({e["error"] for e in result.errors}),
@@ -758,6 +764,7 @@ class CostcoSweeper:
         return options[: self.cfg.backfill_periods]
 
     def _sweep(self, mode: Mode, result: CostcoSweepResult) -> None:
+        prune_held(self.state.held, self.now())
         snap = self._open(self.cfg.orders_url or "", "orders", result)  # opens on the Online tab
         online: dict[str, OnlineCard] = {}
         periods = self._periods(snap, mode)
@@ -836,13 +843,26 @@ class CostcoSweeper:
         result: CostcoSweepResult,
         extra: dict[str, Any] | None = None,
     ) -> None:
+        order_id = body.external_order_id or ""
         try:
             res = self.api.ingest_receipt(
-                body, key=f"receipt:{self.member.discord_id}:{body.external_order_id}"
+                body,
+                key=ingest_key(self.member.discord_id, order_id, body, held=key in self.state.held),
             )
         except (ApiError, ValueError) as err:
             result.errors.append({"error": "ingest_failed", "detail": str(err)[:300]})
             return
+        if res.status == "held":
+            # §4.5: its lines don't add up, so nothing was applied. Not done: every sweep re-reads
+            # it (a fixed parser applies it); the State Engine applies it as read at `held_until`.
+            first = key not in self.state.held
+            self.state.held.setdefault(key, self.now().isoformat())
+            self.state.save(self.path)
+            result.held.append(
+                {"kind": kind, "lines": len(body.lines), "first": first, **(extra or {})}
+            )
+            return
+        self.state.held.pop(key, None)
         self.state.done[key] = self.now().isoformat()
         self.state.save(self.path)
         if res.duplicate:
@@ -901,12 +921,30 @@ def sweep_reply(
             f"🧾 Costco receipt from {_short_day(r['purchased_at'])} is in: {r['lines']} lines "
             "stocked, and the trip is closed."
         )
+    for h in result.held:
+        if h["first"]:
+            what = (
+                f"Costco receipt from {_short_day(h['purchased_at'])}"
+                if h["kind"] == "warehouse"
+                else "A Costco online order"
+            )
+            lines.append(
+                f"🧾 {what} doesn't add up to its total, so I've held it (nothing stocked yet) — "
+                "I'll re-read it on later sweeps."
+            )
     if result.unknown_lines:
         lines.append(
             f"⚠️ {len(result.unknown_lines)} Costco receipt line(s) I couldn't read (a discount?) — "
             "they're in the weekly diagnostics."
         )
-    if last_try and not result.errors and not result.trip_receipts() and state.due_trip:
+    held_warehouse = any(h["kind"] == "warehouse" for h in result.held)
+    if (
+        last_try
+        and not result.errors
+        and not result.trip_receipts()
+        and not held_warehouse
+        and state.due_trip
+    ):
         lines.append(
             f"🧾 No Costco receipt for the {_short_day(state.due_trip)} trip yet — the weekly "
             "sweep will look again."
