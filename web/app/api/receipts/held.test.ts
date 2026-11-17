@@ -195,6 +195,22 @@ describe("held digital receipts", () => {
     expect((await ingest(FIXED)).body).toMatchObject({ duplicate: true, receipt_id: r!.id });
   });
 
+  // Regression (prod copy, 2026-11-17): 33 of 35 checked Whole Foods orders and 11 of 163 Amazon
+  // ones fail the totals check — Whole Foods charges weight-priced produce by the weight packed, so
+  // its lines rarely add up — and #78 held them all, the weekly cart's order included.
+  it("a Whole Foods order whose weighed lines don't add up applies at once (not held)", async () => {
+    const res = await ingest({
+      vendor: "wholefoods",
+      external_order_id: "112-0000002-0000099",
+      fulfillment: "pickup",
+      acquired_at: "2026-10-17T19:00:00Z",
+      subtotal_cents: 512, // the bananas weighed a little more than listed
+      lines: [{ raw_text: "Organic Bananas", asin: "B0SYNTHWF1", qty: 6, line_total_cents: 474 }],
+    });
+    expect(res.body).toMatchObject({ status: "applied", totals_check: "fail" });
+    expect(await holds()).toEqual([]);
+  });
+
   it("a passing or unchecked digital receipt applies at once, as before", async () => {
     expect((await ingest(FIXED)).body.status).toBe("applied");
     const noTotals = { ...FIXED, external_order_id: "1000000009", subtotal_cents: undefined };
