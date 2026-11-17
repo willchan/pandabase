@@ -4,6 +4,8 @@ import type { InventoryState } from "./inventory";
 import type { Alias } from "./matching";
 import {
   applyReceipt,
+  heldReceiptExpiry,
+  holdsReceipt,
   lineBaseUnits,
   reconcileReceiptEvents,
   type FinalLine,
@@ -621,6 +623,24 @@ describe("dedupe key and totals", () => {
     expect(totalsCheck({ subtotalCents: 700, lines, discountCents: 100 })).toBe("pass");
     expect(totalsCheck({ subtotalCents: 700, lines })).toBe("fail");
     expect(totalsCheck({ subtotalCents: 800, lines, discountCents: null })).toBe("pass");
+  });
+
+  // §4.5 Held receipts: only a digital receipt that fails its totals check is held.
+  it.each([
+    ["digital, fails", "digital", 301, true],
+    ["digital, adds up", "digital", 300, false],
+    ["digital, unchecked", "digital", null, false],
+    ["paper, fails (its own review)", "paper", 301, false],
+    ["manual, fails", "manual", 301, false],
+  ] as const)("holdsReceipt: %s", (_, source, subtotalCents, held) => {
+    const lines = [line("x", { lineTotalCents: 100 }), line("y", { lineTotalCents: 200 })];
+    expect(holdsReceipt({ source, subtotalCents, lines })).toBe(held);
+  });
+
+  it("heldReceiptExpiry is receipts.heldExpireDays after the hold", () => {
+    expect(heldReceiptExpiry(NOW, { receipts: { heldExpireDays: 14 } })).toBe(
+      "2026-11-08T20:00:00.000Z",
+    );
   });
 });
 

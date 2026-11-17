@@ -5,7 +5,15 @@
 // Regression (2026-11, W45): the W45 import tagged every order `wholefoods` and imported the
 // footer's "Amazon Business Card" link on each; ingest dedupes on the order id, so a fixed parser
 // could only take effect after a reset.
-import { item, member, product, receipt, receiptLine, reviewItem } from "@pandabase/db";
+import {
+  item,
+  member,
+  product,
+  receipt,
+  receiptHold,
+  receiptLine,
+  reviewItem,
+} from "@pandabase/db";
 import { applyImportReset, planImportReset } from "@pandabase/db/reset-imports";
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -65,6 +73,28 @@ describe("reset-imports on ingested orders", () => {
     const vendors = await h.db.select({ vendor: receipt.vendor }).from(receipt);
     expect(vendors.map((v) => v.vendor).sort()).toEqual(["amazon", "wholefoods"]);
     expect(await h.db.select().from(item).where(eq(item.canonicalName, card.raw_text))).toEqual([]);
+  });
+
+  it("clears one store's held receipts (§4.5) and their replies, so they're held afresh", async () => {
+    const c1 = order("C-1", "costco", [floss]);
+    const held = {
+      // the line says $1.00, the subtotal $9.99
+      ...c1,
+      subtotal_cents: 999,
+      lines: c1.lines.map((l) => ({ ...l, line_total_cents: 100 })),
+    };
+    expect((await ingest(held)).body.status).toBe("held");
+    expect((await ingest(order("111-1", "amazon", [bananas]))).body.status).toBe("applied");
+    const plan = await planImportReset(h.db, { vendor: "costco" });
+    expect(plan.counts).toMatchObject({ receipt: 0, receipt_hold: 1, idempotency_key: 1 });
+
+    await applyImportReset(h.db, { vendor: "costco" });
+    expect(await h.db.select().from(receiptHold)).toEqual([]);
+    expect(await h.db.select().from(receipt)).toHaveLength(1); // Amazon's stays
+    const again = await ingest(held);
+    expect(again.body).toMatchObject({ status: "held", duplicate: false });
+    expect(again.headers.get("idempotent-replayed")).toBeNull();
+    expect((await h.db.select().from(receiptHold))[0]!.attempts).toBe(1);
   });
 
   it("refuses once someone has answered a review about the import", async () => {

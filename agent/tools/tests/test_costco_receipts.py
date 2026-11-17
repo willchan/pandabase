@@ -353,11 +353,25 @@ class Server:
     def __init__(self) -> None:
         self.ingested: dict[str, dict[str, Any]] = {}
         self.trip_for: set[str] = set()
+        self.hold: set[str] = set()  # orders the State Engine holds (§4.5: totals don't add up)
         self.api = FakeApi({"POST /api/receipts/ingest": self.ingest})
 
     def ingest(self, body: dict[str, Any] | None) -> Any:
         assert body is not None
         oid = body["external_order_id"]
+        if oid in self.hold:
+            return {
+                "receipt_id": "H-" + oid,
+                "duplicate": False,
+                "status": "held",
+                "totals_check": "fail",
+                "lines": [],
+                "new_item_ids": [],
+                "review_ids": [],
+                "closed_cycle_id": None,
+                "costco_trip_id": None,
+                "held_until": "2026-11-21T17:00:00Z",
+            }
         dup = oid in self.ingested
         self.ingested[oid] = body
         return {
@@ -497,6 +511,66 @@ def test_an_ingest_error_is_retried_next_sweep(tmp_path: Path) -> None:
     assert len(res.ingested) == 4
     res = sweeper(server, FakeCostco(), tmp_path).run("sweep")
     assert len(res.ingested) == 1 and res.complete
+
+
+def test_a_held_receipt_is_re_read_on_later_sweeps_until_it_applies(tmp_path: Path) -> None:
+    """§4.5: a receipt the State Engine holds (its lines don't add up) isn't done — the next
+    sweep opens it again, under a new Idempotency-Key so a corrected read isn't answered with the
+    held reply — and once it applies it's done like any other."""
+    server = Server()
+    server.hold.add(FIRST)
+    res = sweeper(server, FakeCostco(), tmp_path).run("sweep")
+    assert res.complete and [h["kind"] for h in res.held] == ["warehouse"]
+    assert res.held[0]["first"] and res.trip_receipts() == []
+    assert len(res.ingested) == 4 and FIRST not in server.ingested
+    state = cr.CostcoState.load(cr.state_path(tmp_path))
+    assert f"warehouse:{FIRST}" in state.held and f"warehouse:{FIRST}" not in state.done
+
+    # Still held on the next sweep: re-read, but not announced again.
+    driver = FakeCostco()
+    s = sweeper(server, driver, tmp_path)
+    res = s.run("sweep")
+    assert driver.actions == ["tab:warehouse", f"receipt:{FIRST[-4:]}", "close"]
+    assert [h["first"] for h in res.held] == [False]
+    (tel,) = s.tel.metrics("receipt_sweep")
+    assert (tel["held"], tel["totals_fail"]) == (1, 1)
+    now = datetime(2026, 11, 8, 17, tzinfo=UTC)
+    assert cr.sweep_reply(res, cr.CostcoState(), now, last_try=False) == cr.NO_REPLY
+
+    # A fixed parser: the State Engine applies it; it's done and no longer held.
+    server.hold.clear()
+    res = sweeper(server, FakeCostco(), tmp_path).run("sweep")
+    assert [x["kind"] for x in res.ingested] == ["warehouse"] and res.held == []
+    state = cr.CostcoState.load(cr.state_path(tmp_path))
+    assert f"warehouse:{FIRST}" in state.done and state.held == {}
+    keys = [
+        r.headers["idempotency-key"]
+        for r in server.api.requests
+        if r.url.path == "/api/receipts/ingest" and FIRST in r.headers["idempotency-key"]
+    ]
+    assert keys[0] == f"receipt:1001:{FIRST}"
+    assert all(re.fullmatch(rf"receipt:1001:[0-9a-f]{{12}}:{FIRST}", k) for k in keys[1:])
+    assert len(keys) == 3
+
+
+def test_reply_says_a_receipt_was_held_once(tmp_path: Path) -> None:
+    server = Server()
+    server.hold.add(FIRST)
+    res = sweeper(server, FakeCostco(), tmp_path).run("sweep")
+    now = datetime(2026, 11, 8, 17, tzinfo=UTC)
+    state = cr.CostcoState(due_trip="2026-11-07")
+    assert cr.sweep_reply(res, state, now, last_try=True) == (
+        "🧾 Costco receipt from Sat 11/7 doesn't add up to its total, so I've held it (nothing "
+        "stocked yet) — I'll re-read it on later sweeps."
+    )
+
+
+def test_held_entries_are_forgotten_after_two_months() -> None:
+    from pandabase_tools.receipt_parser import prune_held
+
+    held = {"a": "2026-09-01T00:00:00+00:00", "b": "2026-11-01T00:00:00+00:00"}
+    prune_held(held, datetime(2026, 11, 8, tzinfo=UTC))
+    assert held == {"b": "2026-11-01T00:00:00+00:00"}
 
 
 # Scheduling and replies -------------------------------------------------------------------------

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Callable
 from datetime import date
 from pathlib import Path
@@ -17,6 +18,7 @@ from pandabase_tools.browser import Snapshot
 from pandabase_tools.config import Member, ReceiptsConfig
 from pandabase_tools.receipt_parser import (
     Sweeper,
+    SweepState,
     ingest_request,
     order_status,
     parse_order_details,
@@ -143,6 +145,7 @@ class Server:
         self.cursor = cursor_ordered_at
         self.ingested: dict[str, dict[str, Any]] = {}
         self.fail_once: set[str] = set()
+        self.hold: set[str] = set()  # §4.5: orders whose totals don't add up
         self.api = FakeApi(
             {
                 "GET /api/receipts/cursor": lambda _: {
@@ -161,6 +164,18 @@ class Server:
         if oid in self.fail_once:
             self.fail_once.discard(oid)
             return httpx.Response(500, json={"error": "boom"})
+        if oid in self.hold:
+            return {
+                "receipt_id": "H-" + oid,
+                "duplicate": False,
+                "status": "held",
+                "totals_check": "fail",
+                "lines": [],
+                "new_item_ids": [],
+                "review_ids": [],
+                "closed_cycle_id": None,
+                "held_until": "2026-11-01T19:00:00Z",
+            }
         dup = oid in self.ingested
         self.ingested[oid] = body
         return {
@@ -237,6 +252,37 @@ def test_second_sweep_skips_done_orders(tmp_path: Path) -> None:
     # Only the in-flight and the fallback orders are looked at again.
     assert opened == {details_url("116-0000006-0000006")}
     assert res.pending == ["111-0000001-0000001"]
+
+
+def test_a_held_order_is_re_read_on_later_sweeps_until_it_applies(tmp_path: Path) -> None:
+    """§4.5: a held order (totals don't add up) isn't done; later sweeps open its details page
+    again — even once the list's window has moved past it — until the State Engine applies it."""
+    held = "114-0000004-0000004"  # Oct 12, delivered
+    server = Server("2026-10-01T19:00:00Z")
+    server.hold.add(held)
+    s = sweeper(server, FakeDriver(site), tmp_path, lambda _: None)
+    res = s.run("sweep")
+    assert res.held == [held] and held not in server.ingested
+    assert res.complete  # held isn't unfinished business for the run
+    assert s.tel.metrics("receipt_sweep")[0]["held"] == 1
+    state = SweepState.load(tmp_path / "receipts-will.json")
+    assert held in state.held and held not in state.done
+
+    server.cursor = "2026-11-01T19:00:00Z"  # window: since Oct 18 — the list no longer has it
+    server.hold.clear()
+    driver = FakeDriver(site)
+    res = sweeper(server, driver, tmp_path, lambda _: None).run("sweep")
+    assert details_url(held) in driver.opened
+    assert [x["order_id"] for x in res.ingested] == [held] and res.held == []
+    state = SweepState.load(tmp_path / "receipts-will.json")
+    assert held in state.done and state.held == {}
+    keys = [
+        r.headers["Idempotency-Key"]
+        for r in server.api.requests
+        if r.method == "POST" and held in r.headers["Idempotency-Key"]
+    ]
+    assert keys[0] == f"receipt:1001:{held}"
+    assert re.fullmatch(rf"receipt:1001:[0-9a-f]{{12}}:{held}", keys[1])
 
 
 def test_no_cursor_uses_initial_window(tmp_path: Path) -> None:

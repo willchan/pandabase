@@ -136,6 +136,11 @@ export const DEFAULT_CONFIG = {
     /** Fuzzy (token-set ratio) score at or above which a paper line is applied provisionally. */
     fuzzyApplyThreshold: 0.85,
   },
+  /**
+   * §4.5 Held receipts: a digital receipt whose totals check fails is stored, not applied, until a
+   * re-ingest of the same order adds up or `heldExpireDays` pass; then it is applied as read.
+   */
+  receipts: { heldExpireDays: 14 },
 
   /** §4.6 Review expiry windows in days (`null` = never expires). */
   reviewExpiryDays: {

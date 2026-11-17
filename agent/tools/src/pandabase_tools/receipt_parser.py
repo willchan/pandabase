@@ -17,6 +17,7 @@ cursor on purpose; the state file's `done` set just avoids reopening pages.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import time
@@ -343,6 +344,28 @@ def ingest_request(order: ParsedOrder, member: Member, tz: str) -> c.ReceiptInge
     return c.ReceiptIngestRequest(**body)
 
 
+def ingest_key(discord_id: str, order_id: str, body: c.ReceiptIngestRequest, *, held: bool) -> str:
+    """The ingest `Idempotency-Key`: `receipt:{discord id}:{order id}`. Re-reading a held receipt
+    (DESIGN §4.5) puts the request's hash before the order id, so a corrected read isn't answered
+    with the stored reply of the held one for 24 h. `db:reset-imports` reads the order id after
+    the last colon either way."""
+    if not held:
+        return f"receipt:{discord_id}:{order_id}"
+    digest = hashlib.sha256(body.model_dump_json(exclude_none=True).encode()).hexdigest()[:12]
+    return f"receipt:{discord_id}:{digest}:{order_id}"
+
+
+HELD_FORGET_DAYS = 60  # a held order the pages no longer list: the State Engine applied it long ago
+
+
+def prune_held(held: dict[str, str], now: datetime) -> None:
+    """Drop held entries older than `HELD_FORGET_DAYS` (applied as read by the State Engine's
+    expiry long since; a sweep that still lists the order finds it a duplicate)."""
+    for key, since in list(held.items()):
+        if now - datetime.fromisoformat(since) > timedelta(days=HELD_FORGET_DAYS):
+            del held[key]
+
+
 # Sweep / backfill -----------------------------------------------------------------------------
 
 Mode = Literal["sweep", "backfill"]
@@ -354,6 +377,8 @@ class SweepState:
 
     done: dict[str, str] = field(default_factory=dict)  # order_id → ingested_at
     run: dict[str, Any] | None = None
+    # order_id → first held (§4.5: totals didn't add up; not done, re-read on every sweep)
+    held: dict[str, str] = field(default_factory=dict)
 
     @classmethod
     def load(cls, path: Path) -> SweepState:
@@ -361,11 +386,15 @@ class SweepState:
             data = json.loads(path.read_text())
         except FileNotFoundError:
             return cls()
-        return cls(done=dict(data.get("done", {})), run=data.get("run"))
+        return cls(
+            done=dict(data.get("done", {})), run=data.get("run"), held=dict(data.get("held", {}))
+        )
 
     def save(self, path: Path) -> None:
         tmp = path.with_suffix(".tmp")
-        tmp.write_text(json.dumps({"done": self.done, "run": self.run}, indent=1))
+        tmp.write_text(
+            json.dumps({"done": self.done, "run": self.run, "held": self.held}, indent=1)
+        )
         tmp.replace(path)
 
 
@@ -382,6 +411,7 @@ class SweepResult:
     skipped: list[dict[str, str]] = field(default_factory=list)
     needs_agent_extraction: list[dict[str, Any]] = field(default_factory=list)
     errors: list[dict[str, str]] = field(default_factory=list)
+    held: list[str] = field(default_factory=list)  # §4.5: stored, not applied; re-read next time
 
 
 class Sweeper:
@@ -484,6 +514,7 @@ class Sweeper:
             for o in run["collected"].values()
             if o["status"] in ("final", "unknown")
             and o["order_id"] not in self.state.done
+            and o["order_id"] not in self.state.held
             and o["order_id"] not in run["fallback"]
         ]
         result.complete = bool(run["collect_done"]) and not remaining and not result.errors
@@ -499,6 +530,7 @@ class Sweeper:
             duplicates=len(result.duplicates),
             pending=len(result.pending),
             needs_agent=len(result.needs_agent_extraction),
+            held=len(result.held),
             errors=len(result.errors),
             complete=result.complete,
         )
@@ -532,6 +564,14 @@ class Sweeper:
             run["collect_done"] = True
 
     def _process(self, run: dict[str, Any], result: SweepResult, max_orders: int | None) -> None:
+        # Held orders (§4.5) are re-read on every sweep, even once the order list's window has
+        # moved past them; their details page is enough.
+        prune_held(self.state.held, self.now())
+        for oid, since in self.state.held.items():
+            run["collected"].setdefault(
+                oid,
+                {"order_id": oid, "ordered_on": since[:10], "status": "final", "details_url": ""},
+            )
         orders = sorted(
             run["collected"].values(), key=lambda o: (o["ordered_on"] or "9999", o["order_id"])
         )
@@ -570,14 +610,21 @@ class Sweeper:
                     run["fallback"].append(oid)
                 continue
             self._remember_cycle()
+            body = ingest_request(order, self.member, self.tz)
             try:
                 res = self.api.ingest_receipt(
-                    ingest_request(order, self.member, self.tz),
-                    key=f"receipt:{self.member.discord_id}:{oid}",
+                    body,
+                    key=ingest_key(self.member.discord_id, oid, body, held=oid in self.state.held),
                 )
             except (ApiError, ValueError) as err:
                 result.errors.append({"order_id": oid, "error": str(err)[:300]})
                 continue
+            if res.status == "held":  # §4.5: not done; the next sweep reads it again
+                self.state.held.setdefault(oid, self.now().isoformat())
+                self.state.save(self.path)
+                result.held.append(oid)
+                continue
+            self.state.held.pop(oid, None)
             self.state.done[oid] = self.now().isoformat()
             self.state.save(self.path)
             if res.duplicate:

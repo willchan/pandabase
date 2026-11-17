@@ -2,7 +2,15 @@
 import { sql } from "drizzle-orm";
 import { check, index, integer, real, sqliteTable, text } from "drizzle-orm/sqlite-core";
 import { item, product } from "./catalog";
-import { baseColumns, boolCheck, CATALOG_TRUST, col, enumCheck, enumText } from "./common";
+import {
+  baseColumns,
+  boolCheck,
+  CATALOG_TRUST,
+  col,
+  enumCheck,
+  enumText,
+  jsonCheck,
+} from "./common";
 import { auditJob } from "./jobs";
 import { member } from "./people";
 
@@ -10,6 +18,7 @@ export const RECEIPT_SOURCES = ["digital", "paper", "manual"] as const;
 export const FULFILLMENTS = ["delivery", "pickup", "in_store", "unknown"] as const;
 export const TOTALS_CHECKS = ["pass", "fail", "n/a"] as const;
 export const RECEIPT_STATUSES = ["applied", "pending_review", "partial"] as const;
+export const RECEIPT_HOLD_STATUSES = ["held", "applied", "expired"] as const;
 export const MATCH_METHODS = ["asin", "alias_exact", "fuzzy", "manual", "none"] as const;
 
 export const receipt = sqliteTable(
@@ -69,5 +78,43 @@ export const receiptLine = sqliteTable(
     check("receipt_line_match_score_check", sql`${col(t.matchScore)} BETWEEN 0 AND 1`),
     index("receipt_line_receipt_idx").on(t.receiptId),
     index("receipt_line_item_idx").on(t.itemId),
+  ],
+);
+
+/**
+ * DESIGN §4.5 Held receipts: a digital receipt whose totals check failed, stored as read (the
+ * ingest input) but not applied. A re-ingest of the same order replaces `input`; one that adds up
+ * is applied (`applied`), and the daily cron applies an unfixed hold as-is at `expires_at`
+ * (`expired`). Either way `receipt_id` is the receipt it became. One row per order (`dedupe_key`
+ * is the receipt's).
+ */
+export const receiptHold = sqliteTable(
+  "receipt_hold",
+  {
+    ...baseColumns(),
+    dedupeKey: text("dedupe_key").notNull().unique(),
+    source: enumText("source", RECEIPT_SOURCES).notNull(),
+    vendor: text("vendor").notNull(),
+    accountMemberId: text("account_member_id").references(() => member.id),
+    externalOrderId: text("external_order_id"),
+    acquiredAt: text("acquired_at").notNull(),
+    /** The latest ingest's `ReceiptInput` (camelCase), applied as-is on expiry. */
+    input: text("input", { mode: "json" }).notNull(),
+    /** Ingests of this order while held, the one that released it included. */
+    attempts: integer("attempts").notNull().default(1),
+    status: enumText("status", RECEIPT_HOLD_STATUSES).notNull().default("held"),
+    expiresAt: text("expires_at").notNull(),
+    resolvedAt: text("resolved_at"),
+    receiptId: text("receipt_id").references(() => receipt.id),
+  },
+  (t) => [
+    enumCheck("receipt_hold", t.source, RECEIPT_SOURCES),
+    enumCheck("receipt_hold", t.status, RECEIPT_HOLD_STATUSES),
+    jsonCheck("receipt_hold", t.input),
+    check(
+      "receipt_hold_resolved_check",
+      sql`(${col(t.status)} = 'held') = (${col(t.resolvedAt)} IS NULL)`,
+    ),
+    index("receipt_hold_status_idx").on(t.status, t.expiresAt),
   ],
 );

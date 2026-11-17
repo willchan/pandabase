@@ -21,6 +21,14 @@ beforeAll(async () => {
     .insert(schema.idempotencyKey)
     .values({ key: "k1", scope: "receipts", responseStatus: 201, responseBody: { ok: true } });
   await db.insert(schema.costcoTrip).values({ plannedFor: "2026-11-21", list: [] });
+  await db.insert(schema.receiptHold).values({
+    dedupeKey: "digital:-:probe",
+    source: "digital",
+    vendor: "costco",
+    acquiredAt: "2026-11-14T20:00:00.000Z",
+    input: { lines: [] },
+    expiresAt: "2026-11-28T20:00:00.000Z",
+  });
 });
 
 /**
@@ -48,7 +56,7 @@ describe("migrations", () => {
     );
     const names = res.rows.map((r) => r.name).sort();
     expect(names).toEqual(tables.map((t) => getTableName(t)).sort());
-    expect(names).toHaveLength(20);
+    expect(names).toHaveLength(21);
   });
 
   it("enforce foreign keys", async () => {
@@ -138,6 +146,14 @@ describe("row CHECKs", () => {
     [
       "closed trip without closed_at",
       `UPDATE costco_trip SET status = 'done' WHERE status = 'planned'`,
+    ],
+    [
+      "resolved hold without resolved_at",
+      `UPDATE receipt_hold SET status = 'applied' WHERE status = 'held'`,
+    ],
+    [
+      "held receipt with resolved_at",
+      `UPDATE receipt_hold SET resolved_at = '2026-11-15T00:00:00.000Z' WHERE status = 'held'`,
     ],
   ])("reject %s", async (_, sql) => {
     expect(await failure(sql)).toMatch(/CHECK constraint failed/);

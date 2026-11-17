@@ -163,6 +163,7 @@ class LookupResponse(BaseModel):
 
 
 class MaintenanceResponse(BaseModel):
+    applied_held_receipts: Annotated[int, Field(ge=-9007199254740991, le=9007199254740991)]
     expired_costco_trips: Annotated[int, Field(ge=-9007199254740991, le=9007199254740991)]
     expired_reviews: Annotated[int, Field(ge=-9007199254740991, le=9007199254740991)]
     failed_jobs: Annotated[int, Field(ge=-9007199254740991, le=9007199254740991)]
@@ -643,11 +644,12 @@ class ReceiptIngestResponse(BaseModel):
     closed_cycle_id: Annotated[str | None, Field(max_length=64, min_length=1)]
     costco_trip_id: Annotated[str | None, Field(max_length=64, min_length=1)] = None
     duplicate: bool
+    held_until: AwareDatetime | None = None
     lines: list[ReceiptLineOut]
     new_item_ids: list[str]
     receipt_id: Annotated[str, Field(max_length=64, min_length=1)]
     review_ids: list[str]
-    status: Literal["applied", "pending_review", "partial"]
+    status: Literal["applied", "pending_review", "partial", "held"]
     totals_check: Literal["pass", "fail", "n/a"]
 
 
