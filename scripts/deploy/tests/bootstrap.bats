@@ -130,6 +130,28 @@ member() {
   [ ! -s "$STUB/calls" ]
 }
 
+@test "reset-imports passes one store's vendor and rejects others" {
+  export BOOTSTRAP_ACTION=reset-imports RESET_VENDOR=costco
+  bootstrap
+  [ "$status" -eq 0 ]
+  [ "$(cat "$STUB/calls")" = "[db:reset-imports][--vendor][costco]" ]
+  : >"$STUB/calls"
+  export RESET_APPLY=true
+  bootstrap
+  [ "$status" -eq 0 ]
+  [ "$(cat "$STUB/calls")" = "[db:reset-imports][--vendor][costco][--apply]" ]
+  : >"$STUB/calls"
+  export RESET_VENDOR=all RESET_APPLY=false
+  bootstrap
+  [ "$(cat "$STUB/calls")" = "[db:reset-imports]" ]
+  : >"$STUB/calls"
+  export RESET_VENDOR='costco --apply'
+  bootstrap
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"vendor must be all, amazon, wholefoods or costco"* ]]
+  [ ! -s "$STUB/calls" ]
+}
+
 @test "rename-items counts by default and renames only with apply" {
   export BOOTSTRAP_ACTION=rename-items
   bootstrap
@@ -194,6 +216,8 @@ member() {
   local wf="$REPO_SRC/.github/workflows/bootstrap.yml"
   grep -qF 'options: [migrate, add-member, reset-imports, rename-items]' "$wf"
   grep -qF 'RESET_APPLY: ${{ inputs.apply }}' "$wf"
+  [ "$(grep -cF 'RESET_VENDOR: ${{ inputs.vendor }}' "$wf")" -eq 2 ]
+  grep -qF 'options: [all, amazon, wholefoods, costco]' "$wf"
   grep -qF 'options: [production, preview]' "$wf"
   grep -qF 'options: [keep, daily, weekly, off]' "$wf"
   grep -qF 'options: ["1", "2", "3", "4"]' "$wf"

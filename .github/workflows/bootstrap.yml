@@ -14,7 +14,7 @@ on:
   workflow_dispatch:
     inputs:
       action:
-        description: "migrate = create/update tables; add-member = add or update one member; reset-imports = undo the Amazon receipt import; rename-items = re-name brand-named items"
+        description: "migrate = create/update tables; add-member = add or update one member; reset-imports = undo the digital receipt import; rename-items = re-name brand-named items"
         type: choice
         options: [migrate, add-member, reset-imports, rename-items]
         default: migrate
@@ -46,6 +46,11 @@ on:
         description: "add-member: this member's Amazon account fills the cart"
         type: boolean
         default: false
+      vendor:
+        description: "reset-imports: only this store's import (all = every store)"
+        type: choice
+        options: [all, amazon, wholefoods, costco]
+        default: all
       apply:
         description: "reset-imports / rename-items: really change (unticked = count only)"
         type: boolean
@@ -91,6 +96,7 @@ jobs:
           MEMBER_SWEEP: ${{ inputs.sweep }}
           MEMBER_CART: ${{ inputs.cart }}
           RESET_APPLY: ${{ inputs.apply }}
+          RESET_VENDOR: ${{ inputs.vendor }}
       - name: Environment is configured
         if: ${{ !inputs.dry_run }}
         run: scripts/deploy/require-env.sh "$TARGET" TURSO_DATABASE_URL TURSO_AUTH_TOKEN
@@ -121,5 +127,6 @@ jobs:
           MEMBER_SWEEP: ${{ inputs.sweep }}
           MEMBER_CART: ${{ inputs.cart }}
           RESET_APPLY: ${{ inputs.apply }}
+          RESET_VENDOR: ${{ inputs.vendor }}
           TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
           TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}

@@ -379,3 +379,183 @@ describe("reset-imports", () => {
     expect(Object.values(plan.counts).every((n) => n === 0)).toBe(true);
   });
 });
+
+// `--vendor costco` (2026-11, M10.3): the first Costco sweep imported 6 receipts with a parser that
+// left instant savings unapplied and misread one-item online orders (#76). Ingest dedupes on the
+// order id, so they need a reset — but only Costco's, keeping the Amazon / Whole Foods import.
+const costcoReceipt = ID(13); // digital Costco receipt (T2): paper towels
+const towels = ID(24); // item (created T2 by the Costco receipt)
+const pTowels = ID(34);
+const trip = ID(51); // the Costco trip that receipt closed
+
+async function seedCostco(db: Db) {
+  const base = (id: string, at: string) => ({ id, createdAt: at, updatedAt: at });
+  await db.insert(t.item).values({
+    ...base(towels, T2),
+    canonicalName: "Paper Towels",
+    category: "household",
+    defaultLocation: "pantry",
+    trackingType: "velocity",
+    baseUnit: "each",
+  });
+  await db.insert(t.product).values({
+    ...base(pTowels, T2),
+    itemId: towels,
+    vendor: "costco",
+    vendorSku: "1234567",
+    title: "x",
+  });
+  await db.insert(t.receipt).values({
+    ...base(costcoReceipt, T2),
+    source: "digital",
+    vendor: "costco",
+    accountMemberId: will,
+    externalOrderId: "C-1",
+    dedupeKey: `digital:${costcoReceipt}`,
+    acquiredAt: T2,
+    status: "applied",
+  });
+  await db.insert(t.receiptLine).values({
+    ...base(ID(65), T2),
+    receiptId: costcoReceipt,
+    rawText: "x",
+    itemId: towels,
+    productId: pTowels,
+  });
+  await db.insert(t.inventoryEvent).values({
+    ...base(ID(76), T2),
+    itemId: towels,
+    location: "pantry",
+    kind: "acquired",
+    quantity: 1,
+    occurredAt: T2,
+    source: "digital_receipt",
+    sourceRef: costcoReceipt,
+    actorMemberId: will,
+    actorSystem: "agent",
+  });
+  await db.insert(t.inventoryState).values({
+    itemId: towels,
+    location: "pantry",
+    anchorQty: 1,
+    anchorAt: T2,
+    anchorKind: "acquired",
+  });
+  await db.insert(t.reviewItem).values([
+    {
+      ...base(ID(86), T2),
+      kind: "receipt",
+      receiptId: costcoReceipt,
+      payload: {},
+      defaultAction: { action: "keep" },
+      expiresAt: "2026-12-01T00:00:00.000Z",
+    },
+    {
+      // A merge suggestion whose *other* side is the Costco item: stale once it's gone.
+      ...base(ID(87), T2),
+      kind: "merge_suggestion",
+      itemId: floss,
+      jobId: job,
+      payload: { merge_into_item_id: towels },
+      defaultAction: { action: "keep" },
+      expiresAt: "2026-12-01T00:00:00.000Z",
+    },
+  ]);
+  await db.insert(t.costcoTrip).values({
+    ...base(trip, T0),
+    plannedFor: "2026-10-02",
+    status: "done",
+    list: [],
+    receiptId: costcoReceipt,
+    closedAt: T2,
+    closeReason: "receipt",
+  });
+  await db.insert(t.idempotencyKey).values({
+    key: "receipt:100000000000000101:C-1",
+    scope: "agent:POST /api/receipts/ingest",
+    responseStatus: 200,
+  });
+}
+
+describe("reset-imports --vendor", () => {
+  let db: Db;
+  beforeEach(async () => {
+    db = await createTestDb();
+    await seedImport(db);
+    await seedCostco(db);
+  });
+  const ids = async (table: SQLiteTable & { id: SQLiteColumn }) =>
+    (await db.select({ id: table.id }).from(table)).map((r) => String(r.id)).sort();
+
+  it("counts only that store's import", async () => {
+    const plan = await planImportReset(db, { vendor: "costco" });
+    expect(plan.vendor).toBe("costco");
+    expect(plan.counts).toEqual({
+      review_item: 2,
+      audit_job: 0,
+      price_quote: 0,
+      preference_event: 0,
+      vendor_alias: 0,
+      inventory_state: 1,
+      inventory_event: 1,
+      receipt_line: 1,
+      receipt: 1,
+      product: 1,
+      item: 1,
+      idempotency_key: 1,
+    });
+    expect(Object.values(plan.blockers).every((n) => n === 0)).toBe(true);
+    expect(plan.info.linesByVendor).toEqual({ costco: 1 });
+    expect(plan.info.tripsUnlinked).toBe(1);
+    const text = formatPlan(plan, false);
+    expect(text).toContain("(costco only)");
+    expect(text).toContain("OK to apply");
+  });
+
+  it("apply deletes that store's import and keeps the others'", async () => {
+    await applyImportReset(db, { vendor: "costco" });
+    expect(await ids(t.receipt)).toEqual([amz, wf, paper]);
+    expect(await ids(t.item)).toEqual([card, floss, bananas, kept]);
+    expect(await ids(t.product)).toEqual([pCard, pFloss, pBananas, pKept]);
+    expect(await ids(t.auditJob)).toEqual([job, paperJob]); // merge job kept
+    expect(await ids(t.reviewItem)).toEqual([80, 81, 82, 83, 84, 85].map(ID));
+    expect(await count(db, t.receiptLine)).toBe(5);
+    // The trip stays done; only its link goes, so the re-imported receipt re-links it.
+    const [tr] = await db.select().from(t.costcoTrip);
+    expect(tr).toMatchObject({ id: trip, status: "done", receiptId: null });
+    const keys = (await db.select().from(t.idempotencyKey)).map((k) => k.key).sort();
+    expect(keys).toEqual(["discord:42", "receipt:100000000000000101:111-1", "receipt:x"]);
+    const states = (await db.select().from(t.inventoryState)).map((s) => s.itemId);
+    expect(states).not.toContain(towels);
+    expect(Object.values((await planImportReset(db, { vendor: "costco" })).counts)).toEqual(
+      Array(12).fill(0),
+    );
+  });
+
+  it("refuses when another store's import names an item it would delete", async () => {
+    await db.insert(t.receiptLine).values({ receiptId: wf, rawText: "towels", itemId: towels });
+    const plan = await planImportReset(db, { vendor: "costco" });
+    expect(plan.blockers.other_store_lines).toBe(1);
+    await expect(applyImportReset(db, { vendor: "costco" })).rejects.toBeInstanceOf(
+      ImportResetBlocked,
+    );
+    expect(await count(db, t.receipt)).toBe(4);
+  });
+
+  it("finds nothing for a store with no import", async () => {
+    const plan = await planImportReset(db, { vendor: "amazon" });
+    expect(plan.counts.receipt).toBe(0);
+  });
+
+  // Regression: a full reset deleted a receipt a Costco trip still pointed at (FK violation).
+  it("a full reset unlinks the Costco trip instead of failing", async () => {
+    await applyImportReset(db);
+    const [tr] = await db.select().from(t.costcoTrip);
+    expect(tr).toMatchObject({ status: "done", receiptId: null });
+    expect(await ids(t.receipt)).toEqual([paper]);
+  });
+
+  it("rejects a malformed vendor", async () => {
+    await expect(planImportReset(db, { vendor: "Costco; drop" })).rejects.toThrow("bad vendor");
+  });
+});

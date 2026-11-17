@@ -1,4 +1,4 @@
-// `pnpm db:reset-imports [--apply]`: undo the digital (Amazon / Whole Foods) receipt import so it can
+// `pnpm db:reset-imports [--vendor V] [--apply]`: undo the digital (Amazon / Whole Foods) receipt import so it can
 // be re-run with a fixed parser (DESIGN §4.5 "Resetting the digital import"). Ingest dedupes on the
 // order id, so re-importing alone can't correct rows a buggy parser wrote.
 //
@@ -13,6 +13,12 @@
 // (answered reviews, labeled observations, inventory events from people, cycle overrides, product
 // rejections, paper/manual receipt lines, merges, item settings, items that predate the import).
 // Without --apply it only counts. Output is counts only: the repo and its Actions logs are public.
+//
+// `--vendor V` limits it to one store's import (e.g. re-reading Costco receipts after a parser fix
+// without touching Amazon's). It then also refuses if another store's imported lines name an item
+// it would delete, keeps the merge_suggest jobs (deleting only the merge reviews about its items),
+// and clears only the ingest replies for its own orders. Either way, a Costco trip a deleted
+// receipt closed keeps its status and loses only the link, so the re-imported receipt re-links it.
 import { appendFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
@@ -23,6 +29,7 @@ import { databaseUrlFromEnv } from "./env";
 import { rebuildInventoryState } from "./rebuild-state";
 import {
   auditJob,
+  costcoTrip,
   groceryCycle,
   groceryCycleOverride,
   idempotencyKey,
@@ -58,7 +65,7 @@ export const RESET_TABLES = [
 ] as const;
 export type ResetTable = (typeof RESET_TABLES)[number];
 
-/** Human data that makes the reset refuse. Any non-zero count blocks `--apply`. */
+/** What makes the reset refuse: human data, or another store's import (`--vendor`). */
 export const BLOCKERS = {
   answered_reviews: "reviews someone confirmed, corrected or dismissed",
   labeled_observations: "labeled observations about imported receipts, items or merge jobs",
@@ -66,6 +73,7 @@ export const BLOCKERS = {
   cycle_overrides: "grocery-cycle overrides naming an imported item or product",
   human_preference_events: "product overrides or rejections on imported items",
   other_receipt_lines: "paper or manual receipt lines naming an imported item or product",
+  other_store_lines: "another store's imported lines naming an item or product in scope (--vendor)",
   merges: "item merges between an imported item and another item",
   item_settings: "imported items with an audit hint, shelf life or reorder threshold set",
   items_predating_import: "items a digital receipt matched but did not create",
@@ -80,7 +88,17 @@ const IMPORT_EVENT_SOURCES = ["digital_receipt", "system"] as const;
 const INGEST_KEY_PREFIX = "receipt:";
 const INGEST_SCOPE_SUFFIX = ":POST /api/receipts/ingest";
 
+export interface ResetOptions {
+  /** Only this store's digital import (`receipt.vendor`); all stores when absent. */
+  vendor?: string;
+}
+
+/** Store names `--vendor` accepts (`receipt.vendor` values are lower-case words). */
+export const VENDOR_PATTERN = /^[a-z][a-z0-9_-]{0,31}$/;
+
 export interface ImportResetPlan {
+  /** The store this plan is limited to, or null for every store's import. */
+  vendor: string | null;
   counts: Record<ResetTable, number>;
   blockers: Record<Blocker, number>;
   /** Context for the before/after summary; never deleted. */
@@ -88,6 +106,8 @@ export interface ImportResetPlan {
     linesByVendor: Record<string, number>;
     reviewsByKind: Record<string, number>;
     cyclesClosedByImport: number;
+    /** Costco trips whose closing receipt is deleted: kept, with `receipt_id` cleared. */
+    tripsUnlinked: number;
   };
 }
 
@@ -103,6 +123,7 @@ interface Scope {
   preferenceEvents: string[];
   priceQuotes: string[];
   idempotencyKeys: { key: string; scope: string }[];
+  trips: string[];
 }
 
 const CHUNK = 400;
@@ -120,11 +141,22 @@ const tally = (xs: readonly string[]): Record<string, number> => {
   return out;
 };
 
-async function scope(q: Q): Promise<{ s: Scope; plan: ImportResetPlan }> {
+async function scope(q: Q, opts: ResetOptions): Promise<{ s: Scope; plan: ImportResetPlan }> {
+  const vendor = opts.vendor ?? null;
+  if (vendor !== null && !VENDOR_PATTERN.test(vendor)) throw new Error(`bad vendor: ${vendor}`);
   const receipts = await q
-    .select({ id: receipt.id, createdAt: receipt.createdAt, vendor: receipt.vendor })
+    .select({
+      id: receipt.id,
+      createdAt: receipt.createdAt,
+      vendor: receipt.vendor,
+      externalOrderId: receipt.externalOrderId,
+    })
     .from(receipt)
-    .where(eq(receipt.source, "digital"));
+    .where(
+      vendor === null
+        ? eq(receipt.source, "digital")
+        : and(eq(receipt.source, "digital"), eq(receipt.vendor, vendor)),
+    );
   const receiptIds = receipts.map((r) => r.id);
   const receiptById = new Map(receipts.map((r) => [r.id, r]));
 
@@ -166,19 +198,26 @@ async function scope(q: Q): Promise<{ s: Scope; plan: ImportResetPlan }> {
     .where(inIds(product.itemId, itemIds));
   const productIds = products.map((p) => p.id);
 
-  const jobs = await q
-    .select({ id: auditJob.id })
-    .from(auditJob)
-    .where(eq(auditJob.jobType, "merge_suggest"));
+  // Merge jobs span every store: a full reset deletes them (re-run after the import); a one-store
+  // reset keeps them and deletes only the merge reviews naming its items (either side).
+  const jobs =
+    vendor === null
+      ? await q
+          .select({ id: auditJob.id })
+          .from(auditJob)
+          .where(eq(auditJob.jobType, "merge_suggest"))
+      : [];
   const jobIds = jobs.map((j) => j.id);
 
-  const reviews = await q
-    .select({
-      id: reviewItem.id,
-      kind: reviewItem.kind,
-      status: reviewItem.status,
-      reviewedBy: reviewItem.reviewedByMemberId,
-    })
+  const reviewCols = {
+    id: reviewItem.id,
+    kind: reviewItem.kind,
+    status: reviewItem.status,
+    reviewedBy: reviewItem.reviewedByMemberId,
+    payload: reviewItem.payload,
+  };
+  const direct = await q
+    .select(reviewCols)
     .from(reviewItem)
     .where(
       or(
@@ -187,6 +226,14 @@ async function scope(q: Q): Promise<{ s: Scope; plan: ImportResetPlan }> {
         inIds(reviewItem.jobId, jobIds),
       ),
     );
+  const directIds = new Set(direct.map((r) => r.id));
+  const intoScoped = (
+    await q.select(reviewCols).from(reviewItem).where(eq(reviewItem.kind, "merge_suggestion"))
+  ).filter((r) => {
+    const into = (r.payload as { merge_into_item_id?: unknown } | null)?.merge_into_item_id;
+    return !directIds.has(r.id) && typeof into === "string" && itemSet.has(into);
+  });
+  const reviews = [...direct, ...intoScoped];
 
   const events = await q
     .select({ id: inventoryEvent.id, source: inventoryEvent.source })
@@ -219,7 +266,7 @@ async function scope(q: Q): Promise<{ s: Scope; plan: ImportResetPlan }> {
     .from(inventoryState)
     .where(inIds(inventoryState.itemId, itemIds));
 
-  const keys = await q
+  const allKeys = await q
     .select({ key: idempotencyKey.key, scope: idempotencyKey.scope })
     .from(idempotencyKey)
     .where(
@@ -228,6 +275,17 @@ async function scope(q: Q): Promise<{ s: Scope; plan: ImportResetPlan }> {
         like(idempotencyKey.scope, `%${INGEST_SCOPE_SUFFIX}`),
       ),
     );
+  // `receipt:{discord id}:{order id}`: one store's reset clears only its own orders' replies.
+  const orderIds = new Set(receipts.flatMap((r) => (r.externalOrderId ? [r.externalOrderId] : [])));
+  const keys =
+    vendor === null
+      ? allKeys
+      : allKeys.filter((k) => orderIds.has(k.key.slice(k.key.lastIndexOf(":") + 1)));
+
+  const trips = await q
+    .select({ id: costcoTrip.id })
+    .from(costcoTrip)
+    .where(inIds(costcoTrip.receiptId, receiptIds));
 
   // --- Human data (blockers) ---
   const overrides = await q
@@ -249,6 +307,21 @@ async function scope(q: Q): Promise<{ s: Scope; plan: ImportResetPlan }> {
         or(inIds(receiptLine.itemId, itemIds), inIds(receiptLine.productId, productIds)),
       ),
     );
+  // Another store's import naming an item in scope: deleting the item would orphan its lines.
+  const otherStoreLines =
+    vendor === null
+      ? []
+      : await q
+          .select({ id: receiptLine.id })
+          .from(receiptLine)
+          .innerJoin(receipt, eq(receipt.id, receiptLine.receiptId))
+          .where(
+            and(
+              eq(receipt.source, "digital"),
+              ne(receipt.vendor, vendor),
+              or(inIds(receiptLine.itemId, itemIds), inIds(receiptLine.productId, productIds)),
+            ),
+          );
   const mergedIntoImported = await q
     .select({ id: item.id })
     .from(item)
@@ -284,6 +357,7 @@ async function scope(q: Q): Promise<{ s: Scope; plan: ImportResetPlan }> {
       (HUMAN_PREFERENCE_KINDS as readonly string[]).includes(p.kind),
     ).length,
     other_receipt_lines: otherLines.length,
+    other_store_lines: otherStoreLines.length,
     merges:
       mergedIntoImported.length +
       items.filter((i) => i.mergedIntoItemId && !itemSet.has(i.mergedIntoItemId)).length,
@@ -310,8 +384,10 @@ async function scope(q: Q): Promise<{ s: Scope; plan: ImportResetPlan }> {
     preferenceEvents: prefs.map((p) => p.id),
     priceQuotes: quotes.map((p) => p.id),
     idempotencyKeys: keys,
+    trips: trips.map((t) => t.id),
   };
   const plan: ImportResetPlan = {
+    vendor,
     counts: {
       review_item: s.reviews.length,
       audit_job: s.jobs.length,
@@ -331,6 +407,7 @@ async function scope(q: Q): Promise<{ s: Scope; plan: ImportResetPlan }> {
       linesByVendor: tally(lines.map((l) => receiptById.get(l.receiptId)!.vendor)),
       reviewsByKind: tally(reviews.map((r) => r.kind)),
       cyclesClosedByImport: Number(closed?.n ?? 0),
+      tripsUnlinked: s.trips.length,
     },
   };
   return { s, plan };
@@ -340,8 +417,8 @@ export const isBlocked = (plan: ImportResetPlan): boolean =>
   Object.values(plan.blockers).some((n) => n > 0);
 
 /** Count what a reset would delete and what would block it. Read-only. */
-export async function planImportReset(db: Db): Promise<ImportResetPlan> {
-  return (await scope(db)).plan;
+export async function planImportReset(db: Db, opts: ResetOptions = {}): Promise<ImportResetPlan> {
+  return (await scope(db, opts)).plan;
 }
 
 export class ImportResetBlocked extends Error {
@@ -350,7 +427,7 @@ export class ImportResetBlocked extends Error {
       .filter(([, n]) => n > 0)
       .map(([k, n]) => `${k}=${n}`)
       .join(", ");
-    super(`refusing to reset: human data found (${found}); nothing was deleted`);
+    super(`refusing to reset: blockers found (${found}); nothing was deleted`);
   }
 }
 
@@ -359,9 +436,9 @@ export class ImportResetBlocked extends Error {
  * deletes see the same rows), then rebuild `inventory_state`. Throws `ImportResetBlocked`, having
  * deleted nothing, when the plan has blockers.
  */
-export async function applyImportReset(db: Db): Promise<ImportResetPlan> {
+export async function applyImportReset(db: Db, opts: ResetOptions = {}): Promise<ImportResetPlan> {
   const plan = await db.transaction(async (tx) => {
-    const { s, plan } = await scope(tx);
+    const { s, plan } = await scope(tx, opts);
     if (isBlocked(plan)) throw new ImportResetBlocked(plan);
     const del = async (table: Parameters<Q["delete"]>[0], c: SQLiteColumn, ids: string[]) => {
       for (const ch of chunks(ids)) await tx.delete(table).where(inArray(c, ch));
@@ -374,6 +451,9 @@ export async function applyImportReset(db: Db): Promise<ImportResetPlan> {
     await del(inventoryState, inventoryState.itemId, s.items);
     await del(inventoryEvent, inventoryEvent.id, s.events);
     await del(receiptLine, receiptLine.id, s.lines);
+    for (const ch of chunks(s.trips)) {
+      await tx.update(costcoTrip).set({ receiptId: null }).where(inArray(costcoTrip.id, ch));
+    }
     await del(receipt, receipt.id, s.receipts);
     await del(product, product.id, s.products);
     // Merges among imported items point inside the set; clear them so delete order can't matter.
@@ -395,7 +475,8 @@ export async function applyImportReset(db: Db): Promise<ImportResetPlan> {
 /** Plain-text report (counts only — safe for public logs). */
 export function formatPlan(plan: ImportResetPlan, applied: boolean): string {
   const verb = applied ? "deleted" : "would delete";
-  const out = [`Digital receipt import reset — ${applied ? "APPLIED" : "dry run"}`, ""];
+  const store = plan.vendor === null ? "every store" : `${plan.vendor} only`;
+  const out = [`Digital receipt import reset (${store}) — ${applied ? "APPLIED" : "dry run"}`, ""];
   out.push(`Rows ${verb}:`);
   for (const t of RESET_TABLES) out.push(`  ${t.padEnd(18)} ${plan.counts[t]}`);
   out.push("", "Imported lines by store:");
@@ -409,8 +490,9 @@ export function formatPlan(plan: ImportResetPlan, applied: boolean): string {
   out.push(
     "",
     `Kept: grocery cycles closed by an imported order: ${plan.info.cyclesClosedByImport}`,
+    `Kept, link cleared: Costco trips closed by a deleted receipt: ${plan.info.tripsUnlinked}`,
     "",
-    "Human data (any non-zero refuses the reset):",
+    "Blockers: human data, or (--vendor) data shared with another store; any non-zero refuses:",
   );
   for (const [k, label] of Object.entries(BLOCKERS)) {
     out.push(`  ${k.padEnd(24)} ${plan.blockers[k as Blocker]}  ${label}`);
@@ -418,16 +500,23 @@ export function formatPlan(plan: ImportResetPlan, applied: boolean): string {
   out.push(
     "",
     isBlocked(plan)
-      ? "BLOCKED: human data found. Nothing deleted; resolve it before resetting."
+      ? "BLOCKED: nothing deleted; resolve the blockers above before resetting."
       : applied
         ? "Done. inventory_state rebuilt."
-        : "OK to apply: no human data found.",
+        : "OK to apply: no blockers found.",
   );
   return out.join("\n");
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
-  const { values } = parseArgs({ options: { apply: { type: "boolean", default: false } } });
+  const { values } = parseArgs({
+    options: { apply: { type: "boolean", default: false }, vendor: { type: "string" } },
+  });
+  if (values.vendor !== undefined && !VENDOR_PATTERN.test(values.vendor)) {
+    console.error("--vendor: a store name such as costco, amazon or wholefoods");
+    process.exit(2);
+  }
+  const opts: ResetOptions = values.vendor === undefined ? {} : { vendor: values.vendor };
   const db = createDb({ url: databaseUrlFromEnv() });
   const report = (plan: ImportResetPlan, applied: boolean) => {
     const text = formatPlan(plan, applied);
@@ -437,9 +526,9 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
   };
   try {
     if (values.apply) {
-      report(await applyImportReset(db), true);
+      report(await applyImportReset(db, opts), true);
     } else {
-      const plan = await planImportReset(db);
+      const plan = await planImportReset(db, opts);
       report(plan, false);
       if (isBlocked(plan)) process.exitCode = 3;
     }
