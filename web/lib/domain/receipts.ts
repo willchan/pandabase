@@ -292,16 +292,24 @@ export function totalsCheck(
 }
 
 /**
- * §4.5 Held receipts: a digital receipt whose lines don't add up is stored, not applied — its
+ * §4.5 Held receipts: a digital receipt from a `receipts.holdVendors` store whose lines don't add
+ * up is stored, not applied — its
  * lines are what a parser read off a page, and once applied (items, buy streaks, stances, usage
  * rates) a misread can't be corrected by re-reading the order, which dedupes. Paper receipts have
  * their own review; manual ones are typed by a person.
  */
 export const holdsReceipt = (
-  input: Pick<ReceiptInput, "source" | "subtotalCents" | "lines" | "discountCents" | "taxCents"> & {
+  input: Pick<
+    ReceiptInput,
+    "source" | "vendor" | "subtotalCents" | "lines" | "discountCents" | "taxCents"
+  > & {
     totalCents?: number | null;
   },
-): boolean => input.source === "digital" && totalsCheck(input) === "fail";
+  config: Pick<Config, "receipts">,
+): boolean =>
+  input.source === "digital" &&
+  config.receipts.holdVendors.includes(input.vendor) &&
+  totalsCheck(input) === "fail";
 
 /** When an unfixed hold is applied as read (§4.5 default outcome). */
 export const heldReceiptExpiry = (heldAt: string, config: Pick<Config, "receipts">): string =>
