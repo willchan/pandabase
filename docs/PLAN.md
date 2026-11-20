@@ -947,9 +947,10 @@ provider. Local Ollama doesn't need the env var: the installed plugin counts the
 as configured when `models.providers.ollama.apiKey` is set (openclaw.json already has
 `"ollama-local"` there), and the media-understanding provider has no auth of its own, so image
 description goes through that provider entry (OpenClaw's docs: the env var only stands in when
-the provider `apiKey` is omitted). Read from the installed package, not yet run end to end: the
-host change (delete the line, restart the gateway) is followed by one image to a local-model
-agent. The installer no longer adds the key and its bats test checks it doesn't; it doesn't
+the provider `apiKey` is omitted). ✅ Run on the Mac 2026-11-19: the line deleted from
+`~/.openclaw/.env` (backup kept beside it), the gateway restarted, `openclaw models list` shows
+no `ollama-cloud/` models and `ollama/qwen3.8:27b` still authenticated, and a photo sent by
+Discord DM to a `qwen3.8:27b` agent was described correctly. The installer no longer adds the key and its bats test checks it doesn't; it doesn't
 delete an existing one either (that's the one-off host step). The tier B eval drops it too.
 
 *For M9:*
