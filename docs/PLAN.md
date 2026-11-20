@@ -837,7 +837,7 @@ envelope when unset); `config file --json` → `{path}`; the gateway loads `~/.o
 (never overriding set vars); `automations list --all --json`, `add`, `edit <id>` (same flags),
 `--command` runs `sh -lc` inside the gateway; `tools.media.models` + `models.providers.ollama.
 models[{input: ["text","image"]}]` (OpenClaw's own Ollama-vision example, plus `OLLAMA_API_KEY=
-ollama-local`); `models.providers.*.models.*.input: ["text"]` → images are not injected into that
+ollama-local`, which is no longer written: see the 2026-11-19 note below); `models.providers.*.models.*.input: ["text"]` → images are not injected into that
 model's turns; multi-agent `bindings[]` with `match.peer {kind: "channel", id}`.
 
 *Deviations / choices (DESIGN §1.2, §6, §8 "Mac Mini operations", §9, §10 #41–43 updated):*
@@ -937,6 +937,20 @@ crashed under macOS bash 3.2 (`set -u` + empty array); the gateway patch's
 the Discord channel is an OpenClaw plugin to install. Bats tests for the two scripts run under
 `/bin/bash`. Also seen: Amazon's tier-1 `add.html` now redirects straight to the cart (handled
 by the tier-2 PR).
+
+*2026-11-19 — no more placeholder `OLLAMA_API_KEY`:* `install-agent-skills` had written
+`OLLAMA_API_KEY=ollama-local` into `~/.openclaw/.env` since 2026-10-20, following OpenClaw's
+Ollama-vision example. In OpenClaw 2026.10.10 any `OLLAMA_API_KEY` also switches on the bundled
+hosted `ollama-cloud` provider (default model `kimi-k2.6`, talks to ollama.com), and
+`openclaw models status --probe` failed it with a 401 on the placeholder. Nothing uses that
+provider. Local Ollama doesn't need the env var: the installed plugin counts the `ollama` provider
+as configured when `models.providers.ollama.apiKey` is set (openclaw.json already has
+`"ollama-local"` there), and the media-understanding provider has no auth of its own, so image
+description goes through that provider entry (OpenClaw's docs: the env var only stands in when
+the provider `apiKey` is omitted). Read from the installed package, not yet run end to end: the
+host change (delete the line, restart the gateway) is followed by one image to a local-model
+agent. The installer no longer adds the key and its bats test checks it doesn't; it doesn't
+delete an existing one either (that's the one-off host step). The tier B eval drops it too.
 
 *For M9:*
 - `make update` → `scripts/ops/update.sh` is the procedure to wrap; it needs a clean tracked tree

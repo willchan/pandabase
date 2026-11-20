@@ -10,8 +10,10 @@
 #    PANDABASE_API_URL into PandaBase's own ~/.config/pandabase/agent.env (dir 700, file 600;
 #    PANDABASE_AGENT_ENV overrides the path), which pandabase-tools reads itself. Removes them
 #    (and an older unprefixed AGENT_API_TOKEN) from OpenClaw's ~/.openclaw/.env: the gateway
-#    hands that file to every app's tools, so it keeps only shared keys, such as a dummy
-#    OLLAMA_API_KEY for local vision (added if unset). DESIGN §10 #58.
+#    hands that file to every app's tools, so it keeps only shared keys. It no longer adds a
+#    dummy OLLAMA_API_KEY: in OpenClaw 2026.10.10 any OLLAMA_API_KEY switches on the hosted
+#    ollama-cloud provider, which 401s on the placeholder; local Ollama (vision included) uses
+#    models.providers.ollama.apiKey in openclaw.json instead. DESIGN §10 #58.
 # 3. Runs `openclaw skills check`.
 set -euo pipefail
 # shellcheck source=scripts/ops/lib.sh
@@ -88,17 +90,6 @@ for key in PANDABASE_AGENT_API_TOKEN PANDABASE_CONFIG PANDABASE_API_URL AGENT_AP
     info "removed $key from $OPENCLAW_ENV (PandaBase reads $AGENT_ENV)"
   fi
 done
-# OpenClaw's bundled Ollama provider wants a (dummy) key to count as configured for local vision.
-if [ -z "$(env_get OLLAMA_API_KEY "$OPENCLAW_ENV")" ]; then
-  if [ "$changed" = 0 ] && [ -s "$OPENCLAW_ENV" ]; then backup "$OPENCLAW_ENV"; fi
-  changed=1
-  if [ "$DRY_RUN" = 1 ]; then
-    info "[dry-run] would set OLLAMA_API_KEY=ollama-local in $OPENCLAW_ENV"
-  else
-    env_set OLLAMA_API_KEY ollama-local "$OPENCLAW_ENV"
-    info "set OLLAMA_API_KEY=ollama-local in $OPENCLAW_ENV"
-  fi
-fi
 if [ "$changed" = 1 ]; then
   warn "restart the gateway so it reads $OPENCLAW_ENV: openclaw gateway restart"
 fi

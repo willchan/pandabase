@@ -237,7 +237,9 @@ the worker/Mac Mini path (M9's health check does), cron scheduling, R2.
 - **Skills:** `skills.load.extraDirs` works in a pinned config (lowest precedence, as installed on
   the Mac Mini by `make install-agent-skills`).
 - **Models:** native Ollama provider (`models.providers.ollama`, `api: "ollama"`, `baseUrl`
-  without `/v1` — `/v1` breaks tool calling; `OLLAMA_API_KEY=ollama-local`). Exec has
+  without `/v1` — `/v1` breaks tool calling; `apiKey: "ollama-local"` on the provider). No
+  `OLLAMA_API_KEY` env: in OpenClaw 2026.10.10 it also switches on the hosted `ollama-cloud`
+  provider, which 401s on a placeholder (PLAN M8 Notes, 2026-11-19). Exec has
   `--local-model-lean` (drops high-latency and channel tools) for small local models. Hosted
   providers (OpenAI, Anthropic, Google, …) work with API keys.
 - **Not verified here:** the build sandbox can't reach `ollama.com` or its registry, and has Node
