@@ -111,10 +111,19 @@ def test_01_open_cycle(stack: Stack) -> None:
         message_id=stack.message_id(),
     )
     print(out)
-    assert stack.skill(GC, "api get /api/grocery/cycle/current")["cycle"] is None
+    # §4.7: ending a cycle opens the next one at once when its build is within 7 days (the engine,
+    # no thread yet), e.g. on a weekend; otherwise nothing is open until §1 opens it. Either way
+    # §1's open returns that next cycle with the thread (idempotent: it fills the thread in).
+    after = stack.skill(GC, "api get /api/grocery/cycle/current")["cycle"]
+    if after is not None:
+        assert after["id"] != cur["id"] and after["status"] == "open"
+        assert after["week_label"] > cur["week_label"] and after["discord_thread_id"] is None
     thread = "400000000000000101"
     opened = stack.skill(GC, "/api/grocery/cycle/open", thread_id=thread)
     print(opened)
+    assert opened["cycle"]["discord_thread_id"] == thread
+    if after is not None:
+        assert opened["cycle"]["id"] == after["id"]
     W["cycle"] = opened["cycle"]["id"]
 
 
