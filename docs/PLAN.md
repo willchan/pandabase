@@ -77,7 +77,7 @@ pnpm install && pnpm lint && pnpm typecheck && pnpm test && pnpm --filter web bu
 
 *Versions chosen (checked 2026-10-20):* Node **24.22.0** (Active LTS "Krypton"; `.nvmrc` = `24`,
 `engines.node` = `>=24 <25`), pnpm **12.14.0** (pinned via `packageManager`), Next.js **16.4.2**
-(App Router, Turbopack, scaffolded with `create-next-app@16.4.2`), React **19.3.0**, Tailwind
+(16.4.6 since 2026-11-21: seven moderate advisories, fixed in 16.4.5; App Router, Turbopack, scaffolded with `create-next-app@16.4.2`), React **19.3.0**, Tailwind
 **4.3**, TypeScript **6.0.3**, ESLint **9.39**, typescript-eslint **8.71**, Prettier **3.9**,
 Vitest **5.0**. Python **3.14** (3.14.6; 3.15 is still beta), uv **0.13.3** (pinned in CI),
 ruff **0.17**, mypy **2.4** (strict), pytest **9.1**.
@@ -85,7 +85,7 @@ ruff **0.17**, mypy **2.4** (strict), pytest **9.1**.
 *Deviations / choices:*
 - **TypeScript 6, not 7.** TS 7 (native/Go) is out but typescript-eslint's peer range is
   `<6.1.0` and Next's build type-check uses the JS compiler API; revisit when both support 7.
-- **ESLint 9, not 10.** eslint-config-next 16.4.2 pulls `eslint-plugin-react`/`-import`/
+- **ESLint 9, not 10.** eslint-config-next 16.4 pulls `eslint-plugin-react`/`-import`/
   `-jsx-a11y`, which don't accept ESLint 10 yet.
 - **typescript-eslint 8.71.2, not 8.72.0.** pnpm 12 enforces a minimum release age; 8.72.0 was
   under a day old and pnpm offered to add exclusions. Kept the guard and used the prior minor —
