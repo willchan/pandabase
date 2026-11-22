@@ -43,7 +43,8 @@ contracts.
 | M7 Agent skill pack & tools | done | #9 |
 | M8 Ops, compose, README | done | #11 |
 | M9 Continuous deployment | done | #14 |
-| M10 Costco | in progress (M10.1, M10.2 done; M10.3 in review) | #66, #67, #68, M10.3 PR |
+| M10 Costco | in progress (M10.1–M10.3 done; M10.4 not started) | #66, #67, #68, #71 |
+| M11 Receipts as the source of truth | planned (owner agreed the direction 2026-11-22) | — |
 
 ---
 
@@ -1418,3 +1419,89 @@ This Week with a planned trip; the prod copy for the store split of the real cat
     applied receipts is still blocked on production (14 other-store lines name Costco-created
     items; 4 Costco lines matched items an earlier import created); only the all-stores reset is
     unblocked.
+
+---
+
+## M11 — Receipts as the source of truth
+
+**Goal:** a receipt can be corrected or removed after it was applied. What PandaBase *learns* from
+receipts is recomputed from them, not edited in place: product stats (times bought, buy streak,
+last bought, last price and its fulfillment), auto-promoted stances, the item's usage rate (EMA,
+outlier streak), static → velocity promotion and switch threshold. Re-reading an order replaces
+it; resetting one store's import deletes its receipts and recomputes. No store's import can leave
+state that only a full reset of every store undoes.
+
+**Why (2026-11-22):** every receipt is applied once, as in-place edits to shared rows, and ingest
+dedupes on the order id. So a parser fix can't correct a receipt already written, a store's
+import can't be removed once it touched a shared item, and a receipt that arrives late learns
+differently from one that arrived in order. Each new store brings a new parser that is wrong at
+first on live pages: Amazon (the #62 reset), then Costco — the first importing sweep wrote two
+misread receipts, and `db:reset-imports --vendor costco` refuses on production because applying
+them moved buy streaks and stances of products Amazon's import created (PLAN M10.3 Notes). #78 /
+#79 (hold receipts whose totals fail) narrow the window; they don't close it. Only
+`inventory_state` is rebuildable today (`db:rebuild-state`); M11 does the same for learning.
+
+**Read:** CLAUDE.md; DESIGN §2.2–§2.6, §4.1, §4.4, §4.5 (incl. *Held receipts*, *Resetting the
+digital import*), §8 *Database round trips*, §10 #62, #83, #85; this milestone's Notes as they
+grow. The learning functions are already pure: `recordPurchase`, `learnFromOverride`,
+`rejectProduct`, `updateVelocity` / `placeAcquisition` / `shouldPromoteToVelocity`
+(`web/lib/domain/productChoice.ts`, `velocity.ts`).
+
+**Inputs and outputs.** The rebuild reads only *inputs* and writes only *derived* values:
+
+| Inputs (kept, the source of truth) | Derived (recomputed; today edited in place) |
+|---|---|
+| `receipt`, `receipt_line` (with their current item / product after merges and review answers) | `product.times_bought`, `consecutive_buys`, `last_bought_at`, `last_price_cents`, `last_price_at`, `last_price_fulfillment` |
+| `inventory_event` (non-expired `acquired` events, in `occurred_at` order) and `away_period` | `product.stance` where it came from auto-promotion (`auto_promote` events) |
+| Human preference events: `override_to_preferred`, `override_to_cheaper`, `reject` (`preference_event`, with their recorded cart product and thresholds) | `preference_event` rows of kind `auto_promote`, `implicit_swap`, `switch` (regenerated) |
+| Human catalog decisions: merges (`merged_into_item_id`, the moved products and confirmed pack sizes), confirmed names, item settings, store pins | `item.current_ema_days`, `ema_outlier_streak`, `ema_outlier_direction`, `tracking_type` (promotion only), `switch_threshold` |
+| `grocery_cycle.cart_result` (the cart an implicit swap is compared with) | `inventory_state` (already: `db:rebuild-state`) |
+
+Step 0 of the build is an audit of every writer of a derived column (today: `services/receipts.ts`
+via `applyReceipt`, `cycles.ts` `learnFromProductOverride`, `inventory.ts` `rejectProductById`,
+`reviews.ts` merges): each human decision must leave an input row the rebuild can replay. A
+manual stance or threshold change that leaves none gets an event first (expand-only migration
+if needed). Telemetry is never replayed: the rebuild emits one `learning_rebuilt` summary.
+
+**The rebuild** (`web/lib/domain/learning.ts`, pure; `pnpm db:rebuild-learning [--items …]
+[--apply]`, counts only without `--apply`, like `db:reset-imports`): per item, fold its inputs in
+time order — receipts' purchases through `recordPurchase` (warehouse-price rule included) and
+the velocity functions, human preference events through `learnFromOverride` / `rejectProduct`
+with their recorded values, implicit swaps against the matching cycle's `cart_result` — starting
+from the item's and products' defaults (`default_ema_days`, `NEW_PRODUCT_STANCE`, the default
+switch threshold). Receipts sort by `acquired_at`, so a late receipt takes its place in the
+history instead of skipping the EMA step. The derived columns stay where they are, as a cache the
+rebuild owns: reads don't change, and the migration is expand-only.
+
+One PR each:
+
+1. **M11.1 Rebuild, no behaviour change** — the audit (step 0), `learning.ts` + tests (a replay of
+   `applyReceipt`'s own scenarios gives the same values), `db:rebuild-learning` (dry run prints,
+   per derived column, how many rows would change), and the Bootstrap action. Acceptance on the
+   prod copy: the dry run's differences are counted and each kind explained (expected: late
+   receipts that skipped the EMA, the two misread Costco receipts' effects on shared products);
+   nothing is applied to production in this PR.
+2. **M11.2 Ingest and reset use it** — after `applyReceipt` writes a receipt (lines, events, new
+   items), the touched items' learning is rebuilt instead of patched, inside the same transaction
+   and within §8's round-trip rule (batch the reads; receipts average ~5 lines: 1,167 lines on 241 receipts, prod copy 2026-11-22).
+   Re-ingesting an order whose content changed **replaces** it: its lines and `acquired` events
+   are replaced, review answers on unchanged lines kept, items rebuilt (the 24 h idempotency key
+   must not answer a changed body: key on the body's hash, as held receipts do). `db:reset-imports
+   --vendor` becomes delete-and-rebuild: the shared-item blockers that came from learning side
+   effects go; ones about human data (answered reviews, labels, a human event on an imported
+   item) stay. Decide here whether held receipts (#78/#79) are still needed; if not, retire them
+   in a later contract PR.
+3. **M11.3 Costco, for real** — on production, with the owner: the dry run, then rebuild
+   (`--apply`); reset the Costco import and sweep again with the fixed parser, then the Costco
+   backfill (paused since 2026-11-16).
+
+**Acceptance (each PR):** `make check`; the verify skill's prod-copy loop (M11.1: dry-run counts;
+M11.2: main vs branch identical cart plan and weekly reports for ingest of already-seen
+receipts, and a Costco-only reset that succeeds on a copy); tier A (`make e2e-system`) unchanged
+or extended with a re-read order.
+
+**Watch for:** other sessions touching `applyReceipt`, product choice or velocity at the same time
+(2026-11-22: "Amazon cart redundancy" and "auto cart pause" were running; neither had pushed a
+branch). M10.4 (freezer question) can come after M11.2: it only reads receipts.
+
+**Notes:**
