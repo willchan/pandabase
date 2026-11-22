@@ -648,18 +648,19 @@ describe("dedupe key and totals", () => {
 
   // §4.5 Held receipts: only a digital receipt that fails its totals check is held.
   it.each([
-    ["digital, fails", "digital", 301, true],
-    ["digital, adds up", "digital", 300, false],
-    ["digital, unchecked", "digital", null, false],
-    ["paper, fails (its own review)", "paper", 301, false],
-    ["manual, fails", "manual", 301, false],
-  ] as const)("holdsReceipt: %s", (_, source, subtotalCents, held) => {
+    ["digital, fails", "digital", "costco", 301, true],
+    ["digital, adds up", "digital", "costco", 300, false],
+    ["digital, unchecked", "digital", "costco", null, false],
+    ["digital, fails, not a hold vendor (weighed produce)", "digital", "wholefoods", 301, false],
+    ["paper, fails (its own review)", "paper", "costco", 301, false],
+    ["manual, fails", "manual", "costco", 301, false],
+  ] as const)("holdsReceipt: %s", (_, source, vendor, subtotalCents, held) => {
     const lines = [line("x", { lineTotalCents: 100 }), line("y", { lineTotalCents: 200 })];
-    expect(holdsReceipt({ source, subtotalCents, lines })).toBe(held);
+    expect(holdsReceipt({ source, vendor, subtotalCents, lines }, config)).toBe(held);
   });
 
   it("heldReceiptExpiry is receipts.heldExpireDays after the hold", () => {
-    expect(heldReceiptExpiry(NOW, { receipts: { heldExpireDays: 14 } })).toBe(
+    expect(heldReceiptExpiry(NOW, { receipts: { heldExpireDays: 14, holdVendors: [] } })).toBe(
       "2026-11-08T20:00:00.000Z",
     );
   });
