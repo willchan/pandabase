@@ -104,6 +104,28 @@ def test_delivery_details_skip_nav_and_recommendations() -> None:
     assert (o.subtotal_cents, o.total_cents) == (1347, 1420)
 
 
+def test_whole_foods_item_grid_reads_what_was_charged() -> None:
+    """Regression (prod copy, 2026-11-17: 33 of 35 checked Whole Foods orders failed the totals
+    check). The live item grid has Quantity | Weight | Total columns, and the parser took each
+    item's first dollar amount (a weighed item's per-lb price), missed a bare quantity ("2" read as
+    1) and counted out-of-stock and refunded units as bought. A fulfilled order's charged totals add
+    up to its subtotal exactly."""
+    o = parse("order_details_live_pickup_grid.html", "111-0000009-0000009")
+    assert (o.status, o.vendor, o.fulfillment) == ("final", "wholefoods", "pickup")
+    assert [(x.asin, x.qty, x.unit_price_cents, x.line_total_cents) for x in o.lines] == [
+        ("B0SYNTHG01", 1.0, 449, 449),  # weighed, ordered by count: the total, not $2.99/lb
+        ("B0SYNTHG02", 1.4, 149, 209),  # ordered by weight: the weight is the quantity
+        ("B0SYNTHG03", 2.0, 209, 418),  # a bare quantity column
+        ("B0SYNTHG04", 1.0, 799, 799),  # 2 bought, 1 refunded
+        # B0SYNTHG05 out of stock: not bought
+        ("B0SYNTHG06", 1.0, 899, 899),
+    ]
+    # The page's subtotal still counts the refunded pack; the one sent doesn't.
+    assert o.subtotal_cents == 3573 - 799
+    assert sum(x.line_total_cents or 0 for x in o.lines) == o.subtotal_cents
+    assert o.total_cents == 3593
+
+
 def test_whole_foods_pickup_details() -> None:
     o = parse("order_details_pickup.html", "112-0000002-0000002")
     assert (o.status, o.fulfillment, o.vendor) == ("final", "pickup", "wholefoods")
