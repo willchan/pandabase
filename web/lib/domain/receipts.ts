@@ -41,7 +41,7 @@ import {
   type ProductPatch,
 } from "./productChoice";
 import { newReview, type ImpactFlags } from "./review";
-import { localDate, type AwayPeriod } from "./time";
+import { localDate, type AwayPeriod, type PausePeriod } from "./time";
 import {
   placeAcquisition,
   shouldPromoteToVelocity,
@@ -134,6 +134,8 @@ export interface ReceiptRepository {
   /** Non-expired `acquired` events of the item (base units), any order. */
   acquisitions(itemId: string): Promise<Acquisition[]>;
   awayPeriods(): Promise<AwayPeriod[]>;
+  /** Cart pauses: EMA steps across them don't learn (§4.1). */
+  pausePeriods(): Promise<PausePeriod[]>;
   /** The most recently built cycle (status `ready` or later), if any. */
   lastBuiltCycle(): Promise<CycleCart | null>;
 }
@@ -558,6 +560,7 @@ export async function applyReceipt(
 
   // 2. Per item: inventory, overbuy, EMA, product stats, implicit swaps.
   const away = await repo.awayPeriods();
+  const paused = await repo.pausePeriods();
   const cycle = await repo.lastBuiltCycle();
   /** Implicit swaps compare against the cart only if this receipt is that cart's order. */
   const orderCycle = cycle && receiptMatchesCycleOrder(cycle, input) ? cycle : null;
@@ -627,7 +630,7 @@ export async function applyReceipt(
           item,
           placed.prev,
           { at: input.acquiredAt, qty },
-          { away, config },
+          { away, paused, config },
         );
         if (step.outcome === "first_acquisition") {
           fx.telemetry.push({ metric: "ema_skipped", itemId, reason: "no_previous" });

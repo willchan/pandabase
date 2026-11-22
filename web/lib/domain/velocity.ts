@@ -1,6 +1,13 @@
 // DESIGN §4.1 — consumption velocity as an EMA of "days one base unit lasts".
 import type { Config } from "../config";
-import { daysBetween, effectiveDaysBetween, localDate, type AwayPeriod } from "./time";
+import {
+  daysBetween,
+  effectiveDaysBetween,
+  localDate,
+  overlapsPeriod,
+  type AwayPeriod,
+  type PausePeriod,
+} from "./time";
 
 /** One acquisition of an item, in base units (after `qty × unit_quantity`). */
 export interface Acquisition {
@@ -18,6 +25,12 @@ export interface VelocityState {
 
 export interface VelocityContext {
   away: readonly AwayPeriod[];
+  /**
+   * Cart pauses: an interval between acquisitions that touches one isn't a steady-state
+   * measurement (e.g. parental leave, shopping at untracked stores), so the EMA doesn't learn
+   * from it.
+   */
+  paused?: readonly PausePeriod[];
   config: Config;
 }
 
@@ -30,6 +43,8 @@ export type VelocityOutcome =
   | "outlier_rejected"
   /** Third same-direction outlier in a row: treated as a habit change and blended in. */
   | "outlier_accepted"
+  /** The interval since the previous acquisition touches a cart pause: EMA and streak untouched. */
+  | "paused"
   /** Same household-local day as the previous acquisition: merge instead (caller's job). */
   | "same_day"
   /** Earlier than the previous acquisition (late receipt): EMA untouched. */
@@ -43,6 +58,11 @@ export type VelocityTelemetry =
       emaDays: number;
       direction: "high" | "low";
       streak: number;
+    }
+  | {
+      metric: "ema_paused";
+      observedDays: number;
+      emaDays: number | null;
     }
   | {
       metric: "ema_updated";
@@ -70,7 +90,7 @@ export function updateVelocity(
   state: VelocityState,
   prev: Acquisition | null,
   current: Acquisition,
-  { away, config }: VelocityContext,
+  { away, paused = [], config }: VelocityContext,
 ): VelocityStep {
   const tz = config.householdTz;
   const step = (
@@ -103,6 +123,14 @@ export function updateVelocity(
   const elapsedDays = Math.max(0, effectiveDaysBetween(prev.at, current.at, away, tz));
   const observedDays = elapsedDays / prev.qty;
   const measured = { seeded, elapsedDays, observedDays };
+
+  if (overlapsPeriod(localDate(prev.at, tz), localDate(current.at, tz), paused)) {
+    return step(state, "paused", {
+      elapsedDays,
+      observedDays,
+      telemetry: { metric: "ema_paused", observedDays, emaDays: state.emaDays },
+    });
+  }
 
   if (ema === null) {
     return step({ ...state, emaDays: observedDays }, "initialized", {

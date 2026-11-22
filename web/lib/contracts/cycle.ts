@@ -64,9 +64,42 @@ export const Cycle = named(
   }),
 );
 
+/** A cart pause (PRD §4.1 paused weeks): household-local dates, inclusive. */
+export const CartPause = named(
+  "CartPause",
+  z.object({ id: Id, starts_on: LocalDate, ends_on: LocalDate, note: z.string().nullable() }),
+);
+
 export const CycleCurrentResponse = named(
   "CycleCurrentResponse",
-  z.object({ cycle: Cycle.nullable() }),
+  z.object({
+    cycle: Cycle.nullable(),
+    /**
+     * The cart pause covering today or this cycle's build date (no cart, no Friday nudge), or
+     * null. Optional so tools older than the field still parse.
+     */
+    pause: CartPause.nullable().optional(),
+  }),
+);
+
+export const PauseRequest = named(
+  "PauseRequest",
+  z.object({
+    actor_discord_id: ActorDiscordId,
+    starts_on: LocalDate,
+    ends_on: LocalDate,
+    note: z.string().max(200).nullable().optional(),
+  }),
+);
+export const PauseResponse = named("PauseResponse", z.object({ pause: CartPause }));
+export const PauseEndRequest = named(
+  "PauseEndRequest",
+  z.object({ actor_discord_id: ActorDiscordId }),
+);
+export const PauseEndResponse = named(
+  "PauseEndResponse",
+  /** null: the pause hadn't started (or started today) and was removed. */
+  z.object({ pause: CartPause.nullable() }),
 );
 
 export const CycleOpenRequest = named(

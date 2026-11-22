@@ -1,5 +1,5 @@
 // Inventory reads (read-time estimates, §4.2) and `inventory_state` maintenance.
-import { awayPeriod, inventoryEvent, inventoryState, item } from "@pandabase/db";
+import { awayPeriod, inventoryEvent, inventoryState, item, pausePeriod } from "@pandabase/db";
 import { projectRows, toInventoryItem } from "@pandabase/db/rebuild-state";
 import { and, asc, inArray, isNull, ne } from "drizzle-orm";
 import type { Config } from "../config";
@@ -10,7 +10,7 @@ import {
   type InventoryItem,
   type InventoryState,
 } from "../domain/inventory";
-import type { AwayPeriod } from "../domain/time";
+import type { AwayPeriod, PausePeriod } from "../domain/time";
 import type { Acquisition } from "../domain/velocity";
 import type { Q } from "./db";
 
@@ -19,6 +19,10 @@ export type EventRow = typeof inventoryEvent.$inferSelect;
 
 export const awayPeriods = async (q: Q): Promise<AwayPeriod[]> =>
   q.select({ startsOn: awayPeriod.startsOn, endsOn: awayPeriod.endsOn }).from(awayPeriod);
+
+/** Cart pauses (every one, past included: they keep freezing EMA steps across them). */
+export const pausePeriods = async (q: Q): Promise<PausePeriod[]> =>
+  q.select({ startsOn: pausePeriod.startsOn, endsOn: pausePeriod.endsOn }).from(pausePeriod);
 
 export const toState = (s: typeof inventoryState.$inferSelect): InventoryState => ({
   location: s.location,

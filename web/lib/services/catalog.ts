@@ -7,6 +7,7 @@ import { getItem, productsByItem, type ProductRow } from "../repo/catalog";
 import type { Q } from "../repo/db";
 import {
   awayPeriods,
+  pausePeriods,
   loadEstimates,
   refreshInventoryState,
   type ItemEstimate,
@@ -74,7 +75,7 @@ export async function itemDetail(
       outlierDirection: null,
     },
     acquisitions.map((a) => ({ at: a.at, qty: a.qty ?? 0 })),
-    { away: await awayPeriods(q), config: ctx.config },
+    { away: await awayPeriods(q), paused: await pausePeriods(q), config: ctx.config },
   );
   const merged = acquisitions.length === replay.steps.length ? acquisitions : null;
   return {
