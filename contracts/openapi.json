@@ -126,6 +126,36 @@
         ],
         "type": "object"
       },
+      "CartPause": {
+        "properties": {
+          "ends_on": {
+            "format": "date",
+            "type": "string"
+          },
+          "id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          },
+          "note": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "starts_on": {
+            "format": "date",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "starts_on",
+          "ends_on",
+          "note"
+        ],
+        "type": "object"
+      },
       "CartResponse": {
         "properties": {
           "costco_trip_date": {
@@ -890,6 +920,16 @@
             "anyOf": [
               {
                 "$ref": "#/components/schemas/Cycle"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "pause": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CartPause"
               },
               {
                 "type": "null"
@@ -2187,6 +2227,78 @@
           "tax_cents",
           "total_cents",
           "totals_check"
+        ],
+        "type": "object"
+      },
+      "PauseEndRequest": {
+        "properties": {
+          "actor_discord_id": {
+            "maxLength": 32,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "actor_discord_id"
+        ],
+        "type": "object"
+      },
+      "PauseEndResponse": {
+        "properties": {
+          "pause": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CartPause"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "pause"
+        ],
+        "type": "object"
+      },
+      "PauseRequest": {
+        "properties": {
+          "actor_discord_id": {
+            "maxLength": 32,
+            "minLength": 1,
+            "type": "string"
+          },
+          "ends_on": {
+            "format": "date",
+            "type": "string"
+          },
+          "note": {
+            "maxLength": 200,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "starts_on": {
+            "format": "date",
+            "type": "string"
+          }
+        },
+        "required": [
+          "actor_discord_id",
+          "starts_on",
+          "ends_on"
+        ],
+        "type": "object"
+      },
+      "PauseResponse": {
+        "properties": {
+          "pause": {
+            "$ref": "#/components/schemas/CartPause"
+          }
+        },
+        "required": [
+          "pause"
         ],
         "type": "object"
       },
@@ -5661,6 +5773,210 @@
           }
         ],
         "summary": "R2 presigned PUT for a new media key",
+        "x-scopes": [
+          "agent"
+        ]
+      }
+    },
+    "/api/pauses": {
+      "post": {
+        "operationId": "createPause",
+        "parameters": [
+          {
+            "description": "Replays the stored response for 24h (same key + route + scope).",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "maxLength": 200,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PauseRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PauseResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Wrong scope, or unknown actor_discord_id"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict (e.g. invalid cycle transition, stale job attempt)"
+          }
+        },
+        "security": [
+          {
+            "agent": []
+          }
+        ],
+        "summary": "Pause weekly carts (and EMA learning) for a date range",
+        "x-scopes": [
+          "agent"
+        ]
+      }
+    },
+    "/api/pauses/{id}/end": {
+      "post": {
+        "operationId": "endPause",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Replays the stored response for 24h (same key + route + scope).",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "maxLength": 200,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PauseEndRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PauseEndResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Wrong scope, or unknown actor_discord_id"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict (e.g. invalid cycle transition, stale job attempt)"
+          }
+        },
+        "security": [
+          {
+            "agent": []
+          }
+        ],
+        "summary": "Resume carts: a started pause ends yesterday, a future one is removed",
         "x-scopes": [
           "agent"
         ]

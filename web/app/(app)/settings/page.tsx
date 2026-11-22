@@ -1,8 +1,8 @@
 import { PageSkeleton } from "@/components/page-skeleton";
 import { Suspense } from "react";
-import { awayPeriod, member } from "@pandabase/db";
+import { awayPeriod, member, pausePeriod } from "@pandabase/db";
 import { asc, desc } from "drizzle-orm";
-import { PlaneIcon, Trash2Icon } from "lucide-react";
+import { PauseIcon, PlaneIcon, Trash2Icon } from "lucide-react";
 import type { Metadata } from "next";
 import { ActionForm } from "@/components/action-form";
 import { PageHeader, SectionTitle } from "@/components/page-header";
@@ -18,8 +18,10 @@ import { dateOnly } from "@/lib/format";
 import { TUNABLES } from "@/lib/tunables";
 import {
   addAwayAction,
+  addPauseAction,
   cartAccountAction,
   deleteAwayAction,
+  endPauseAction,
   signOutAction,
   updateMemberAction,
   updateTunablesAction,
@@ -38,7 +40,8 @@ export default function SettingsPage() {
 async function SettingsPageContent() {
   const { db, ctx, member: me } = await currentMember();
   const today = localDate(ctx.now, ctx.config.householdTz);
-  const [away, members] = await Promise.all([
+  const [pauses, away, members] = await Promise.all([
+    db.select().from(pausePeriod).orderBy(desc(pausePeriod.startsOn)),
     db.select().from(awayPeriod).orderBy(desc(awayPeriod.startsOn)),
     db.select().from(member).orderBy(asc(member.displayName)),
   ]);
@@ -47,6 +50,78 @@ async function SettingsPageContent() {
   return (
     <>
       <PageHeader title="Settings" subtitle={`Signed in as ${me.email}`} />
+
+      <section aria-labelledby="pause">
+        <SectionTitle>
+          <span id="pause">Pause carts</span>
+        </SectionTitle>
+        <p className="mb-2 text-sm text-muted-foreground">
+          For weeks that aren&apos;t normal — a new baby, guests, shopping elsewhere. No weekly cart
+          is built, and how fast things get used stays as it was (purchases still count toward
+          what&apos;s on hand). Unlike away, the days still count as eating.
+        </p>
+        <ul className="mb-3 overflow-hidden rounded-xl border bg-card empty:hidden">
+          {pauses.map((p) => {
+            const state = p.endsOn < today ? "past" : p.startsOn <= today ? "now" : "upcoming";
+            return (
+              <li
+                key={p.id}
+                className="flex items-center gap-3 border-b px-4 py-2.5 last:border-b-0"
+              >
+                <PauseIcon className="size-4 text-muted-foreground" aria-hidden="true" />
+                <span className="min-w-0 flex-1 text-sm">
+                  <span className="font-medium">
+                    {dateOnly(p.startsOn)} – {dateOnly(p.endsOn)}
+                  </span>
+                  {p.note ? <span className="text-muted-foreground"> · {p.note}</span> : null}
+                </span>
+                {state === "now" ? <Badge variant="info">now</Badge> : null}
+                {state === "past" ? <Badge variant="secondary">past</Badge> : null}
+                {state !== "past" ? (
+                  <ActionForm action={endPauseAction}>
+                    <input type="hidden" name="id" value={p.id} />
+                    <SubmitButton variant="ghost" size="sm">
+                      {state === "now" ? "Resume" : "Remove"}
+                    </SubmitButton>
+                  </ActionForm>
+                ) : null}
+              </li>
+            );
+          })}
+        </ul>
+        <ActionForm
+          action={addPauseAction}
+          className="flex flex-col gap-2 rounded-xl border bg-card p-4"
+        >
+          <div className="grid grid-cols-2 gap-2">
+            <div className="flex flex-col gap-1.5">
+              <label htmlFor="pauseStartsOn" className="text-sm font-medium">
+                Starts
+              </label>
+              <Input
+                id="pauseStartsOn"
+                name="pauseStartsOn"
+                type="date"
+                required
+                defaultValue={today}
+              />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <label htmlFor="pauseEndsOn" className="text-sm font-medium">
+                Ends (incl.)
+              </label>
+              <Input id="pauseEndsOn" name="pauseEndsOn" type="date" required min={today} />
+            </div>
+          </div>
+          <label htmlFor="pauseNote" className="sr-only">
+            Reason
+          </label>
+          <Input id="pauseNote" name="pauseNote" placeholder="Reason (optional)" maxLength={200} />
+          <SubmitButton variant="secondary" className="self-start">
+            Pause carts
+          </SubmitButton>
+        </ActionForm>
+      </section>
 
       <section aria-labelledby="away">
         <SectionTitle>

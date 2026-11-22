@@ -5,7 +5,7 @@ import type { ReceiptRepository } from "../domain/receipts";
 import { canonicalItems, getItem } from "./catalog";
 import { lastBuiltCycle } from "./cycles";
 import type { Q } from "./db";
-import { awayPeriods, toState } from "./inventory";
+import { awayPeriods, pausePeriods, toState } from "./inventory";
 
 export function receiptRepository(q: Q): ReceiptRepository {
   return {
@@ -99,6 +99,7 @@ export function receiptRepository(q: Q): ReceiptRepository {
           .orderBy(asc(inventoryEvent.occurredAt))
       ).map((a) => ({ at: a.at, qty: a.qty ?? 0 })),
     awayPeriods: () => awayPeriods(q),
+    pausePeriods: () => pausePeriods(q),
     lastBuiltCycle: () => lastBuiltCycle(q),
   };
 }

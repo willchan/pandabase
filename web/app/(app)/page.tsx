@@ -15,6 +15,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { ActionForm } from "@/components/action-form";
 import { ConfirmButton } from "@/components/confirm-button";
+import { PauseBanner } from "@/components/pause-banner";
 import { PageHeader, SectionTitle } from "@/components/page-header";
 import { ReasonBadge, onHandText } from "@/components/reason";
 import { SubmitButton } from "@/components/submit-button";
@@ -38,6 +39,7 @@ import {
 import { activeCycle } from "@/lib/repo/cycles";
 import { currentCostcoTrip } from "@/lib/services/costco";
 import { bridgeText, checkin, predictions } from "@/lib/services/cycles";
+import { relevantPause } from "@/lib/services/pauses";
 import { pendingReviews } from "@/lib/services/reviews";
 import {
   addToListAction,
@@ -75,7 +77,7 @@ async function ThisWeekPageContent() {
   const { db, ctx } = await currentMember();
   const tz = ctx.config.householdTz;
   const cycle = await activeCycle(db);
-  const [plan, check, reviews, items, costco] = await Promise.all([
+  const [plan, check, reviews, items, costco, pause] = await Promise.all([
     predictions(db, cycle?.id ?? null, ctx),
     checkin(db, ctx),
     pendingReviews(db),
@@ -85,7 +87,9 @@ async function ThisWeekPageContent() {
       .where(isNull(item.mergedIntoItemId))
       .orderBy(asc(item.canonicalName)),
     currentCostcoTrip(db, ctx),
+    relevantPause(db, ctx, cycle?.weekLabel ?? null),
   ]);
+  const pauseBanner = pause ? <PauseBanner pause={pause} today={localDate(ctx.now, tz)} /> : null;
   const costcoSection = (
     <CostcoSection
       trip={costco.trip}
@@ -103,6 +107,7 @@ async function ThisWeekPageContent() {
     return (
       <>
         <PageHeader title="This Week" subtitle="No list is open right now." />
+        {pauseBanner}
         <Card>
           <CardHeader>
             <CardTitle>Start this week&apos;s list</CardTitle>
@@ -162,6 +167,7 @@ async function ThisWeekPageContent() {
         subtitle={`${cycle.weekLabel.replace(/^\d+-W/, "Week ")} · ${plan.lines.length} on the list`}
         action={<Badge variant="secondary">{STATUS_LABEL[cycle.status]}</Badge>}
       />
+      {pauseBanner}
 
       <ol className="mb-2 grid grid-cols-3 gap-2 text-xs" aria-label="This week's schedule">
         {steps.map((s) => (

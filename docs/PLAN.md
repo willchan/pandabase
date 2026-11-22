@@ -1442,7 +1442,7 @@ them moved buy streaks and stances of products Amazon's import created (PLAN M10
 `inventory_state` is rebuildable today (`db:rebuild-state`); M11 does the same for learning.
 
 **Read:** CLAUDE.md; DESIGN §2.2–§2.6, §4.1, §4.4, §4.5 (incl. *Held receipts*, *Resetting the
-digital import*), §8 *Database round trips*, §10 #62, #83, #85; this milestone's Notes as they
+digital import*), §8 *Database round trips*, §10 #62, #83, #85 (cart pauses), #86; this milestone's Notes as they
 grow. The learning functions are already pure: `recordPurchase`, `learnFromOverride`,
 `rejectProduct`, `updateVelocity` / `placeAcquisition` / `shouldPromoteToVelocity`
 (`web/lib/domain/productChoice.ts`, `velocity.ts`).
@@ -1452,7 +1452,7 @@ grow. The learning functions are already pure: `recordPurchase`, `learnFromOverr
 | Inputs (kept, the source of truth) | Derived (recomputed; today edited in place) |
 |---|---|
 | `receipt`, `receipt_line` (with their current item / product after merges and review answers) | `product.times_bought`, `consecutive_buys`, `last_bought_at`, `last_price_cents`, `last_price_at`, `last_price_fulfillment` |
-| `inventory_event` (non-expired `acquired` events, in `occurred_at` order) and `away_period` | `product.stance` where it came from auto-promotion (`auto_promote` events) |
+| `inventory_event` (non-expired `acquired` events, in `occurred_at` order), `away_period` and `pause_period` (no EMA learning across a pause, DESIGN §4.1) | `product.stance` where it came from auto-promotion (`auto_promote` events) |
 | Human preference events: `override_to_preferred`, `override_to_cheaper`, `reject` (`preference_event`, with their recorded cart product and thresholds) | `preference_event` rows of kind `auto_promote`, `implicit_swap`, `switch` (regenerated) |
 | Human catalog decisions: merges (`merged_into_item_id`, the moved products and confirmed pack sizes), confirmed names, item settings, store pins | `item.current_ema_days`, `ema_outlier_streak`, `ema_outlier_direction`, `tracking_type` (promotion only), `switch_threshold` |
 | `grocery_cycle.cart_result` (the cart an implicit swap is compared with) | `inventory_state` (already: `db:rebuild-state`) |
@@ -1500,8 +1500,11 @@ M11.2: main vs branch identical cart plan and weekly reports for ingest of alrea
 receipts, and a Costco-only reset that succeeds on a copy); tier A (`make e2e-system`) unchanged
 or extended with a re-read order.
 
-**Watch for:** other sessions touching `applyReceipt`, product choice or velocity at the same time
-(2026-11-22: "Amazon cart redundancy" and "auto cart pause" were running; neither had pushed a
-branch). M10.4 (freezer question) can come after M11.2: it only reads receipts.
+**Watch for:** other sessions touching `applyReceipt`, product choice or velocity at the same time.
+2026-11-22: cart pauses (#84) merged and freeze EMA learning across a `pause_period`, so the
+rebuild's velocity fold must use pauses as well as away periods (a replay of a step that touched a
+pause is `paused`, as at ingest). "Amazon cart redundancy" was still open and, per the owner,
+doesn't change how purchases are recorded. M10.4 (freezer question) can come after M11.2: it only
+reads receipts.
 
 **Notes:**

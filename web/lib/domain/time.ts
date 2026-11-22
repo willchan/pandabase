@@ -109,6 +109,19 @@ export function dateInIsoWeek(label: string, isoWeekdayN: number): string {
 export const isAwayOn = (date: string, away: readonly AwayPeriod[]): boolean =>
   away.some((p) => p.startsOn <= date && date <= p.endsOn);
 
+/** `pause_period` rows (cart pauses): the same inclusive household-local date range. */
+export type PausePeriod = AwayPeriod;
+
+/** The period covering `date`, if any (the latest-ending one when several overlap). */
+export const periodOn = <P extends AwayPeriod>(date: string, periods: readonly P[]): P | null =>
+  periods
+    .filter((p) => p.startsOn <= date && date <= p.endsOn)
+    .sort((a, b) => b.endsOn.localeCompare(a.endsOn))[0] ?? null;
+
+/** Whether household dates `[from, to]` (inclusive) touch any period. */
+export const overlapsPeriod = (from: string, to: string, periods: readonly AwayPeriod[]): boolean =>
+  periods.some((p) => p.startsOn <= to && from <= p.endsOn);
+
 /** Away periods as sorted, merged half-open UTC intervals [start, end) in ms. */
 export function awayIntervals(away: readonly AwayPeriod[], tz: string): [number, number][] {
   const raw = away

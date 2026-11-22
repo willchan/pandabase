@@ -8,8 +8,10 @@ import {
   isoWeekLabel,
   isoWeekday,
   localDate,
+  periodOn,
   zonedToUtc,
   type AwayPeriod,
+  type PausePeriod,
 } from "./time";
 
 export type CycleStatus = "open" | "building" | "ready" | "closed" | "skipped" | "other_store";
@@ -28,7 +30,10 @@ export interface CycleRow {
 export type CycleEvent =
   /** Friday 6pm nudge posted. */
   | { type: "nudge" }
-  /** Saturday 10am build starts. Becomes `skipped` if an away period covers the build date. */
+  /**
+   * Saturday 10am build starts. Becomes `skipped` if an away period (reason `away`) or a cart
+   * pause (reason `paused`) covers the build date.
+   */
   | { type: "build" }
   /** The agent finished filling the cart. */
   | { type: "built" }
@@ -55,7 +60,7 @@ export function transition(
   cycle: CycleRow,
   event: CycleEvent,
   now: string,
-  ctx: { away: readonly AwayPeriod[]; config: Config },
+  ctx: { away: readonly AwayPeriod[]; paused?: readonly PausePeriod[]; config: Config },
 ): TransitionResult {
   const from = cycle.status;
   const ok = (to: CycleStatus, patch: CyclePatch, noop = false): TransitionResult => ({
@@ -84,7 +89,9 @@ export function transition(
     case "build": {
       if (from !== "open") return invalid();
       const buildDate = cycleSchedule(cycle.weekLabel, ctx.config).buildDate;
-      return isAwayOn(buildDate, ctx.away) ? close("skipped", "away") : ok("building", {});
+      if (isAwayOn(buildDate, ctx.away)) return close("skipped", "away");
+      if (periodOn(buildDate, ctx.paused ?? [])) return close("skipped", "paused");
+      return ok("building", {});
     }
     case "built":
       return from === "building" ? ok("ready", { builtAt: now }) : invalid();

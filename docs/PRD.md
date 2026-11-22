@@ -78,6 +78,12 @@ A Discord **thread per cycle** in `#pandabase`, acting as a running grocery list
   channel only when it isn't, or when the cart browser is signed out.
 - **Away weeks:** "away until Nov 3" or "skip this week" → cycle skipped; away days don't distort
   consumption estimates.
+- **Paused weeks:** for stretches that aren't normal but we're still home (a new baby, guests,
+  shopping somewhere PandaBase can't see) — "pause carts until March 1" in Discord, or Settings →
+  Pause carts. No weekly cart and no Friday check-in; Saturday says carts are paused. Purchases
+  still count toward what's on hand, but how fast things get used isn't learned from those weeks,
+  so normal-life estimates are intact when it ends. "Resume carts" (Discord, This Week or
+  Settings) ends it early.
 - **Other-store weeks:** "shopping at Trader Joe's" → cycle closes without a cart; purchases arrive
   via paper-receipt photos or text ("bought milk, eggs").
 
@@ -138,7 +144,7 @@ estimate with an honest confidence hint: "~2 milk (bought Oct 12, unverified) �
 | **Cleanup** | Tabs: receipts (photo beside the lines, one dropdown per line, one confirm), merges (suggested merges and new products), unverified items, jobs (failed jobs and unsure Trash Cam photos) — sorted by impact on this week's cart (re-checked daily, so a review about something in this week's cart moves up to This Week), with expiry shown; 20 per tab, then "Show more". New products bought only once are left out (counted in a note): they stay as their own item, and come back if bought again or added to a cart. (Long-term HITL.) |
 | **Pantry** | Estimated inventory by location; item detail with products, thresholds, EMA history, event log. |
 | **Insights** | Visual view of the diagnostics metrics. |
-| **Settings** | Away periods, members ↔ Discord IDs, cart account, default thresholds. A person on the allowlist becomes a member the first time they sign in. |
+| **Settings** | Cart pauses, away periods, members ↔ Discord IDs, cart account, default thresholds. A person on the allowlist becomes a member the first time they sign in. |
 
 Every page answers "what needs me?" first. Machine guesses are labelled *provisional* /
 *unverified* and perishables show a use-by date, without prompting. "We're out", "running low" and

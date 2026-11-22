@@ -56,7 +56,7 @@ describe("migrations", () => {
     );
     const names = res.rows.map((r) => r.name).sort();
     expect(names).toEqual(tables.map((t) => getTableName(t)).sort());
-    expect(names).toHaveLength(21);
+    expect(names).toHaveLength(22);
   });
 
   it("enforce foreign keys", async () => {

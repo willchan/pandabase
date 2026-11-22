@@ -85,6 +85,7 @@ interface World {
   inventory: Record<string, InventoryState[]>;
   acquisitions: Record<string, Acquisition[]>;
   cycle: CycleCart | null;
+  paused?: { startsOn: string; endsOn: string }[];
 }
 
 function world(): World {
@@ -177,6 +178,7 @@ function repo(w: World): ReceiptRepository {
     inventory: async (id) => w.inventory[id] ?? [],
     acquisitions: async (id) => w.acquisitions[id] ?? [],
     awayPeriods: async () => [],
+    pausePeriods: async () => w.paused ?? [],
     lastBuiltCycle: async () => w.cycle,
   };
 }
@@ -286,6 +288,25 @@ describe("applyReceipt — digital", () => {
         { metric: "receipt_line_match", method: "asin", score: 1, pending: false, ignored: false },
       ]),
     );
+  });
+
+  it("during a cart pause: inventory still counts the purchase, but the EMA doesn't learn", async () => {
+    const w = world();
+    w.paused = [{ startsOn: "2026-10-20", endsOn: "2027-03-01" }];
+    const fx = await apply(
+      receipt({ lines: [line("365 Eggs 18ct", { asin: "B0EGG18", unitPriceCents: 899 })] }),
+      w,
+    );
+    expect(fx.inventoryEvents).toEqual([
+      expect.objectContaining({ itemId: "eggs", kind: "acquired", quantity: 18 }),
+    ]);
+    expect(fx.itemPatches.find((p) => p.id === "eggs")?.patch.emaDays).toBeUndefined();
+    expect(fx.telemetry).toEqual(
+      expect.arrayContaining([
+        { metric: "ema_paused", itemId: "eggs", observedDays: 1, emaDays: 1 },
+      ]),
+    );
+    expect(fx.telemetry.some((t) => t.metric === "ema_updated")).toBe(false);
   });
 
   it("buying the cart's product is not a swap", async () => {
