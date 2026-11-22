@@ -331,6 +331,18 @@ def test_cart_probe_reply_when_the_browser_is_busy(config: Path) -> None:
     assert code == 3 and out["error"] == "profile_locked"
 
 
+_PAUSE = {"id": "P1", "starts_on": "2026-11-23", "ends_on": "2027-03-01", "note": "leave"}
+
+
+def test_cart_probe_loads_nothing_while_carts_are_paused(config: Path) -> None:
+    _probe_config(config)
+    api = FakeApi({"GET /api/grocery/cycle/current": lambda _: {"cycle": None, "pause": _PAUSE}})
+    driver = _probe_driver()
+    assert run(config, ["cart", "probe", "--reply"], api, driver) == (0, "NO_REPLY")
+    assert run(config, ["cart", "probe"], api, driver) == (0, {"status": "paused"})
+    assert driver.html == ""  # no page was loaded
+
+
 def test_cart_build_is_skipped_when_away(config: Path) -> None:
     server = CycleServer()
     server.set_status = lambda body: {"changed": True, "cycle": _cycle("skipped")}  # type: ignore[method-assign]
@@ -718,6 +730,32 @@ def test_cart_build_reply_without_a_cycle_or_when_away(config: Path) -> None:
     }
     code, out = run(config, ["cart", "build", "--reply"], server.api, _driver())
     assert (code, out) == (0, "⏸️ Away on build day — no cart this week.")
+
+
+def test_cart_build_reply_while_carts_are_paused(config: Path) -> None:
+    server = CycleServer()
+    server.api.handlers["GET /api/grocery/cycle/current"] = lambda _: {
+        "cycle": _cycle(server.status),
+        "pause": _PAUSE,
+    }
+    server.api.handlers["POST /api/grocery/cycle/C1/status"] = lambda _: {
+        "changed": True,
+        "cycle": _cycle("skipped") | {"close_reason": "paused"},
+    }
+    code, out = run(config, ["cart", "build", "--reply"], server.api, _driver())
+    assert (code, out) == (
+        0,
+        '⏸️ Carts are paused until Mar 1 — no cart this week. Say "resume carts" here to start '
+        "again sooner.",
+    )
+
+
+def test_cycle_nudge_is_silent_while_carts_are_paused(config: Path) -> None:
+    api = FakeApi(
+        {"GET /api/grocery/cycle/current": lambda _: {"cycle": _cycle("open"), "pause": _PAUSE}}
+    )
+    assert run(config, ["cycle", "nudge"], api) == (0, "NO_REPLY")
+    assert api.bodies("POST /api/grocery/cycle/C1/status") == []
 
 
 def test_cart_build_reply_when_the_browser_is_busy(config: Path) -> None:

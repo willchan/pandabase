@@ -59,6 +59,24 @@ test("Settings: add an away period", async ({ page }) => {
   await expect(page.getByText("Grandma's")).toBeVisible();
 });
 
+test("Settings: pause carts, see it on This Week, resume (PRD §4.1 paused weeks)", async ({
+  page,
+}) => {
+  await signIn(page, "/settings");
+  const ymd = (x: Date) => x.toISOString().slice(0, 10);
+  await page.getByLabel("Ends (incl.)").fill(ymd(new Date(Date.now() + 60 * 86_400_000)));
+  await page.getByLabel("Reason").fill("baby leave");
+  await page.getByRole("button", { name: "Pause carts" }).click();
+  await expect(page.getByText("Carts paused — no weekly cart")).toBeVisible();
+  await page.goto("/");
+  await expect(page.getByText(/Carts paused until/)).toBeVisible();
+  await page.getByRole("button", { name: "Resume carts" }).click();
+  // The banner (and the action's own message with it) goes away once carts are back on.
+  await expect(page.getByText(/Carts paused until/)).toHaveCount(0);
+  await page.reload();
+  await expect(page.getByText(/Carts paused until/)).toHaveCount(0);
+});
+
 test("Costco: plan a trip from This Week, pin an item, cancel the trip (PRD §4.8)", async ({
   page,
 }) => {

@@ -56,6 +56,24 @@ describe("transition — every DESIGN §4.7 edge", () => {
     });
   });
 
+  it("build is a no-op skip (reason paused) when a cart pause covers the build date", () => {
+    const paused = [{ startsOn: "2026-10-20", endsOn: "2027-03-01" }];
+    expect(
+      transition(cycle("open"), { type: "build" }, now, { away: [], paused, config }),
+    ).toMatchObject({
+      ok: true,
+      to: "skipped",
+      patch: { status: "skipped", closeReason: "paused" },
+    });
+  });
+
+  it("a pause that ended before the build date doesn't skip it", () => {
+    const paused = [{ startsOn: "2026-10-01", endsOn: "2026-10-23" }];
+    expect(
+      transition(cycle("open"), { type: "build" }, now, { away: [], paused, config }),
+    ).toMatchObject({ ok: true, to: "building" });
+  });
+
   it("a second nudge is an idempotent no-op", () => {
     expect(transition(cycle("open", { nudgeSentAt: "x" }), { type: "nudge" }, now, ctx)).toEqual({
       ok: true,
