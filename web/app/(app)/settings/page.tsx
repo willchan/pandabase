@@ -96,7 +96,7 @@ async function SettingsPageContent() {
           <div className="grid grid-cols-2 gap-2">
             <div className="flex flex-col gap-1.5">
               <label htmlFor="pauseStartsOn" className="text-sm font-medium">
-                From
+                Starts
               </label>
               <Input
                 id="pauseStartsOn"
@@ -108,15 +108,15 @@ async function SettingsPageContent() {
             </div>
             <div className="flex flex-col gap-1.5">
               <label htmlFor="pauseEndsOn" className="text-sm font-medium">
-                Until (incl.)
+                Ends (incl.)
               </label>
               <Input id="pauseEndsOn" name="pauseEndsOn" type="date" required min={today} />
             </div>
           </div>
           <label htmlFor="pauseNote" className="sr-only">
-            Note
+            Reason
           </label>
-          <Input id="pauseNote" name="pauseNote" placeholder="Note (optional)" maxLength={200} />
+          <Input id="pauseNote" name="pauseNote" placeholder="Reason (optional)" maxLength={200} />
           <SubmitButton variant="secondary" className="self-start">
             Pause carts
           </SubmitButton>
