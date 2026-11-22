@@ -90,13 +90,10 @@ A Discord **thread per cycle** in `#pandabase`, acting as a running grocery list
   Delivery, pickup and phone-linked in-store purchases. An order is ingested once
   delivered/picked up (or, for an old order whose page no longer says, a week after it was
   placed); orders returned in full are skipped. Re-ingesting is harmless. If Amazon shows a bot
-  check, the import stops and asks in the ops channel for someone to clear it. An order whose
-  lines don't add up to its subtotal (a misread page) is **held**: nothing is stocked from it, the
-  next sweeps read it again, and it goes in once it adds up — or, if nobody fixes the reader within
-  two weeks, as it was read. The weekly diagnostics count held orders. Each sweep also reads the
-  Subscribe & Save page (no clicks) to learn what Amazon already delivers on a schedule, and stays
-  silent about it. It only updates the list when it read all of it; if it can't for three weeks,
-  those items are bought normally again rather than silently missed.
+  check, the import stops and asks in the ops channel for someone to clear it. Each sweep also
+  reads the Subscribe & Save page (no clicks) to learn what Amazon already delivers on a schedule,
+  and stays silent about it. It only updates the list when it read all of it; if it can't for three
+  weeks, those items are bought normally again rather than silently missed.
 - **Paper receipts:** photo in Discord → local VLM transcribes → app matches lines to items using
   store-specific aliases → one review item per receipt in the web UI. Exact known matches apply
   immediately; strong guesses apply provisionally; weak ones wait 14 days then expire.
@@ -192,8 +189,10 @@ if we use it up, so PandaBase decides per item where it comes from and keeps a l
   receipt's abbreviation ("KS ORG EGGS") gets its full name when an online order brings it. Store
   choice uses warehouse prices (delivered prices run higher); the weekly diagnostics show the
   delivery premium per item bought both ways. A receipt line PandaBase can't read (e.g. a
-  discount) is reported, never guessed, and a receipt that then doesn't add up is held like any
-  digital order (above; the ops channel says so once). The sweep only reads pages: it can't reach a
+  discount) is reported, never guessed. A receipt whose lines don't add up to its total (a misread
+  page) is **held**: nothing is stocked from it, the ops channel says so once, the next sweeps read
+  it again, and it goes in once it adds up — or, if nobody fixes the reader within two weeks, as it
+  was read. The weekly diagnostics count held receipts. The sweep only reads pages: it can't reach a
   Costco cart.
 - **After a trip (M10.4, not yet):** one Discord question about bulk perishables ("froze any of the chicken /
   bread?"). A reply moves that amount to the freezer; no reply changes nothing and the question

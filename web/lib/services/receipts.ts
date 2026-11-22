@@ -82,7 +82,7 @@ export async function ingestReceiptIn(
   const existing = await existingReceipt(q, key);
   if (existing) return existing;
   const [hold] = await q.select().from(receiptHold).where(eq(receiptHold.dedupeKey, key));
-  if (!opts.asIs && holdsReceipt(input)) return holdReceiptIn(q, key, input, hold, ctx);
+  if (!opts.asIs && holdsReceipt(input, ctx.config)) return holdReceiptIn(q, key, input, hold, ctx);
   const fx = await applyReceipt(input, receiptRepository(q), {
     config: ctx.config,
     newId: () => newId(),

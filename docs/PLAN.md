@@ -1409,10 +1409,15 @@ This Week with a planned trip; the prod copy for the store split of the real cat
     keep held orders out of `done` (Amazon re-reads them past its list window) and re-send them
     under a key with the body's hash, so a corrected read isn't answered from the 24 h idempotency
     store. `db:reset-imports` deletes holds. Telemetry `receipt_held` / `receipt_hold_released`,
-    `receipt_sweep.held`; weekly report §3 counts them. Applies to Amazon / Whole Foods too: their
-    totals check (lines vs "Item(s) Subtotal") hadn't been measured on the prod copy when this
-    shipped (the copy couldn't be pulled from that session) — check §3's held count after the
-    first week. Does not fix the six receipts already applied: those still need a reset.
+    `receipt_sweep.held`; weekly report §3 counts them. Does not fix the six receipts already
+    applied: those still need a reset.
+  - **Costco only (2026-11-17, the day #78 shipped):** the prod copy showed 33 of 35 checked Whole
+    Foods orders failing the totals check (weighed produce, ~6% either way) and 11 of 163 Amazon
+    ones, so #78 would have held nearly every Whole Foods order, the weekly cart's included. Holds
+    now apply only to `receipts.holdVendors` (`costco`). The `--vendor costco` reset of the six
+    applied receipts is still blocked on production (14 other-store lines name Costco-created
+    items; 4 Costco lines matched items an earlier import created); only the all-stores reset is
+    unblocked.
 
 ---
 

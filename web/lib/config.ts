@@ -137,10 +137,13 @@ export const DEFAULT_CONFIG = {
     fuzzyApplyThreshold: 0.85,
   },
   /**
-   * §4.5 Held receipts: a digital receipt whose totals check fails is stored, not applied, until a
-   * re-ingest of the same order adds up or `heldExpireDays` pass; then it is applied as read.
+   * §4.5 Held receipts: a digital receipt from a `holdVendors` store whose totals check fails is
+   * stored, not applied, until a re-ingest of the same order adds up or `heldExpireDays` pass; then
+   * it is applied as read. Only stores whose receipts add up exactly when read right: Whole Foods
+   * charges weighed produce by the weight packed, so its lines rarely match the subtotal (prod copy
+   * 2026-11-17: 33 of 35 checked orders failed; Amazon 11 of 163).
    */
-  receipts: { heldExpireDays: 14 },
+  receipts: { heldExpireDays: 14, holdVendors: ["costco"] as string[] },
 
   /**
    * §4.9 Subscribe & Save: a subscription the agent's sweep last listed more than `staleAfterDays`
