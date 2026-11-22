@@ -38,9 +38,10 @@ from . import (
     layout_watch,
     photos,
     receipt_parser,
+    subscriptions,
 )
 from . import config as config_mod
-from .browser import CdpDriver, Driver, NotSignedIn
+from .browser import CdpDriver, Challenged, Driver, NotSignedIn
 from .lock import ProfileLock, ProfileLocked
 from .outage import OutageTracker
 from .telemetry import Telemetry
@@ -399,7 +400,31 @@ def cmd_receipts_sweep(env: Env) -> Any:
             today=today,
         )
         result = sweeper.run("backfill" if a.backfill else "sweep", max_orders=a.max_orders)
-    return asdict(result)
+        out = asdict(result)
+        # §4.9: the Subscribe & Save list, unless the orders already hit a sign-in page or a bot
+        # check (loading more pages only makes a check worse) or this is a capped run.
+        if env.cfg.receipts.sync_subscriptions and a.max_orders is None and not result.errors:
+            try:
+                out["subscriptions"] = subscriptions.as_dict(
+                    subscriptions.sync(
+                        env.api,
+                        cast(subscriptions.SubscriptionsDriver, driver),
+                        env.cfg.receipts,
+                        member,
+                        env.tel,
+                        today=today,
+                        sleep=time.sleep,
+                    )
+                )
+            except Challenged:
+                out["errors"].append(
+                    {"error": "amazon_challenge", "profile": member.profile_name()}
+                )
+            except NotSignedIn:
+                out["errors"].append({"error": "not_signed_in", "profile": member.profile_name()})
+            except guard.UnsafeUrl as err:
+                out["errors"].append({"error": f"refused_{err.reason}", "url": err.url})
+    return out
 
 
 def _costco_sweep(env: Env) -> Any:

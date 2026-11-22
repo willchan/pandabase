@@ -137,6 +137,10 @@ class ReceiptsConfig(BaseModel):
         default_factory=lambda: ["https://www.amazon.com/your-orders/orders?timeFilter=year-{year}"]
     )
     order_details_url: str = "https://www.amazon.com/your-orders/order-details?orderID={order_id}"
+    # DESIGN §4.9: after the orders, an Amazon sweep reads the member's Subscribe & Save page
+    # (one more page load) and syncs the list, so the cart leaves those items out.
+    sync_subscriptions: bool = True
+    subscriptions_url: str = "https://www.amazon.com/auto-deliveries"
     costco: CostcoReceiptsConfig = Field(default_factory=CostcoReceiptsConfig)
 
 

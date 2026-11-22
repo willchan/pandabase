@@ -116,6 +116,13 @@ COSTCO_CARDS = {
     "warehouse": "[id^='viewRecieptBtn_']",
 }
 COSTCO_LIST_WAIT_MS = 8_000
+# Subscribe & Save (`subscriptions`): the "Your Subscriptions" grid and its category pills render
+# after the page's frame; wait (bounded) for a tile's edit link, then for the pills.
+SUBSCRIPTIONS_READY = (
+    "[data-edit-url*='/auto-deliveries/ajax/subscription/']",
+    "[data-category-id]",
+)
+SUBSCRIPTIONS_WAIT_MS = 15_000
 
 
 def buy_box_bound(
@@ -492,6 +499,19 @@ class CdpDriver:
             self.page.wait_for_selector(
                 "table[aria-label='spanning table']", state="detached", timeout=COSTCO_WAIT_MS
             )
+        return self._snapshot()
+
+    def subscriptions_ready(self) -> Snapshot:
+        """After `open` on the Subscribe & Save page: the snapshot once a subscription tile and the
+        category pills have rendered, or after a bounded wait and a network settle (the parser's
+        count check decides whether the list is whole). Nothing is clicked."""
+        from playwright.sync_api import TimeoutError as PlaywrightTimeout
+
+        try:
+            for selector in SUBSCRIPTIONS_READY:
+                self.page.wait_for_selector(selector, timeout=SUBSCRIPTIONS_WAIT_MS)
+        except PlaywrightTimeout:
+            self._settle()
         return self._snapshot()
 
     def _settle(self) -> None:

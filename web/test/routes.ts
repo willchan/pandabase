@@ -29,6 +29,7 @@ import * as predictions from "@/app/api/predictions/route";
 import * as productReject from "@/app/api/products/[id]/reject/route";
 import * as receiptsCursor from "@/app/api/receipts/cursor/route";
 import * as receiptsIngest from "@/app/api/receipts/ingest/route";
+import * as subscriptionsSync from "@/app/api/subscriptions/sync/route";
 import * as telemetry from "@/app/api/telemetry/route";
 
 export const HANDLERS: Record<RouteName, Record<string, unknown>> = {
@@ -61,6 +62,7 @@ export const HANDLERS: Record<RouteName, Record<string, unknown>> = {
   predictions,
   productReject,
   receiptsCursor,
+  subscriptionsSync,
   receiptsIngest,
   telemetry,
 };

@@ -23,9 +23,10 @@ member (Sunday 21:00), or a member asking to "backfill receipts" / "check my ord
 target. If a post fails, don't run the sweep again (it reloads Amazon pages): end your turn
 saying which post failed.
 
-**Read-only on Amazon.** The tool only opens order-history and order-details pages in the
-member's already-signed-in Chromium (over CDP). It never signs in, stores credentials, or goes
-near checkout; neither do you. If Amazon is signed out, a human signs in on the Mac Mini.
+**Read-only on Amazon.** The tool only opens order-history, order-details and Subscribe & Save
+pages in the member's already-signed-in Chromium (over CDP). It never signs in, stores
+credentials, or goes near checkout; neither do you. If Amazon is signed out, a human signs in
+on the Mac Mini.
 
 ## Sweep
 
@@ -38,6 +39,10 @@ is harmless), and ingests every order in a final state (Delivered / Picked up / 
 oldest first. Output: `{ingested, duplicates, pending, skipped, needs_agent_extraction, held,
 errors, complete}`. `held` lists orders PandaBase stored but didn't apply because their lines
 don't add up to the subtotal; the sweep re-reads them itself next time — do nothing about them.
+After the orders, the sweep reads the member's Subscribe & Save page and syncs that list, so the
+cart leaves those items out (`subscriptions`: `{outcome, found, expected, synced}`). It only syncs
+a list it read completely; any other `outcome` is in telemetry and the weekly diagnostics — say
+nothing about it.
 
 1. **`needs_agent_extraction`** (a details page whose layout had no product links): read
    `text` and build the receipt yourself — one line per purchased product with `raw_text` (the

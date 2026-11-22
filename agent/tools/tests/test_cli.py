@@ -10,7 +10,7 @@ from typing import Any
 
 import httpx
 import pytest
-from conftest import REPO, FakeApi, FakeDriver, FakeShop
+from conftest import REPO, FakeApi, FakeDriver, FakeShop, fixture
 from test_cart_injector import VIEW, line, product
 
 from pandabase_tools import cli, costco_receipts, receipt_parser
@@ -188,12 +188,22 @@ class CycleServer:
                     "needs_price_check_item_ids": [],
                     "costco_trip_date": None,
                     "costco_waiting": [],
+                    "subscribed": [],
                 },
                 "GET /api/grocery/cycle/C1/cart": lambda _: {
                     "cycle_id": "C1",
                     "costco_trip_date": "2026-10-31",
                     "costco_waiting": [
                         {"item_id": "I-rice", "name": "rice", "runout_at": None, "reason": "x"}
+                    ],
+                    "subscribed": [
+                        {
+                            "item_id": "I-soap",
+                            "name": "dish soap",
+                            "asin": "B0SYNTHS01",
+                            "runout_at": None,
+                            "next_delivery_on": "2026-10-29",
+                        }
                     ],
                     "lines": [
                         line("oats", product("P1", "B0SYNTH001"), 2),
@@ -695,6 +705,8 @@ def test_cart_build_reply_is_the_discord_summary(config: Path) -> None:
     # §4.8: a Costco item left out for the planned trip is named, so nobody adds it by hand.
     assert "🏬 **Waiting for the Costco trip (Sat Oct 31):** rice" in out
     assert "↪️ **Bought now, usually from Costco:** towels" in out
+    # §4.9: a due item Subscribe & Save delivers is named too, so nobody adds it by hand.
+    assert "🔁 **Left out, coming by Subscribe & Save:** dish soap" in out
     # The tier-2 job reads what's left without touching the browser or re-running the build.
     code, pending = run(config, ["cart", "pending"], server.api)
     assert code == 0 and pending["status"] == "needs_agent"
@@ -1098,3 +1110,65 @@ def test_amazon_sweep_still_needs_a_member(config: Path) -> None:
     assert code == 2 and "--member" in out["error"]
     code, out = run(config, ["receipts", "sweep", "--member", "will", "--due"], FakeApi({}))
     assert code == 2
+
+
+# --- `receipts sweep`: orders, then the Subscribe & Save page --------------------------------
+
+SNS_URL = "https://www.amazon.com/auto-deliveries"
+SNS_PAGE = fixture("subscriptions.html")
+SNS_SYNCED = {
+    "account_member_id": "m1",
+    "synced_at": "2026-11-22T18:00:00.000Z",
+    "active": 4,
+    "added": 4,
+    "ended": 0,
+    "reopened": 0,
+}
+ORDERS = "https://www.amazon.com/your-orders/orders?timeFilter=months-3"
+NO_ORDERS = (
+    "<html><body><h1>Your Orders</h1><p>0 orders placed in the past 3 months</p></body></html>"
+)
+CURSOR = {
+    "account_member_id": "m1",
+    "external_order_id": None,
+    "acquired_at": None,
+    "ordered_at": None,
+}
+
+
+def _no_throttle(config: Path) -> None:
+    data = json.loads(config.read_text())
+    data.setdefault("receipts", {})["throttle_seconds"] = 0
+    config.write_text(json.dumps(data))
+
+
+def test_amazon_sweep_syncs_subscriptions_after_the_orders(config: Path) -> None:
+    _no_throttle(config)
+    api = FakeApi(
+        {
+            "GET /api/receipts/cursor": lambda _: CURSOR,
+            "POST /api/subscriptions/sync": lambda _: SNS_SYNCED,
+            "POST /api/telemetry": lambda _: {"accepted": 1},
+        }
+    )
+    driver = FakeDriver({ORDERS: (ORDERS, NO_ORDERS), SNS_URL: (SNS_URL, SNS_PAGE)})
+    code, out = run(config, ["receipts", "sweep", "--member", "will"], api, driver)
+    assert code == 0, out
+    assert driver.opened == [ORDERS, SNS_URL]
+    assert out["subscriptions"]["outcome"] == "synced"
+    assert len(api.bodies("POST /api/subscriptions/sync")[0]["subscriptions"]) == 4
+
+
+def test_amazon_sweep_skips_subscriptions_after_a_bot_check(config: Path) -> None:
+    _no_throttle(config)
+    api: dict[str, Any] = {
+        "GET /api/receipts/cursor": lambda _: CURSOR,
+        "POST /api/telemetry": lambda _: {"accepted": 1},
+    }
+    checkpoint = "https://www.amazon.com/checkpoint?x=1"
+    driver = FakeDriver({ORDERS: (checkpoint, "<html></html>")})
+    code, out = run(config, ["receipts", "sweep", "--member", "will"], FakeApi(api), driver)
+    assert driver.opened == [ORDERS]
+    assert "subscriptions" not in out
+    assert out["errors"][0]["error"] == "amazon_challenge"
+    del code

@@ -1413,3 +1413,28 @@ This Week with a planned trip; the prod copy for the store split of the real cat
     totals check (lines vs "Item(s) Subtotal") hadn't been measured on the prod copy when this
     shipped (the copy couldn't be pulled from that session) — check §3's held count after the
     first week. Does not fix the six receipts already applied: those still need a reset.
+
+---
+
+## After M10.3 — Subscribe & Save
+
+Not a milestone: one PR (branch `claude/serene-brahmagupta-dug10o`, DESIGN §4.9, §10 #85).
+
+**Notes:**
+
+- Reported by the household (2026-11-22): the Amazon cart was full of one-time buys of items it
+  already gets on Subscribe & Save. On the prod copy, 19 of the 22 subscriptions are catalog items,
+  and the week's plan had 4 of them among its 5 Amazon lines; with the list synced, none is in the
+  plan.
+- The parser was checked against one saved live `/auto-deliveries` page (22 tiles, pill counts
+  22, every tile with title, next delivery and schedule); that page was deleted after a synthetic
+  fixture (`subscriptions.html`) was shaped like it. **Not yet run live through CDP:**
+  `CdpDriver.subscriptions_ready` waits for the tiles to render, which only a real sweep shows.
+  After the first sweep on the Mac Mini, check its `subscriptions.outcome` (and the weekly
+  report's §7 line) — `no_tiles` / `incomplete` there means the wait or the page needs a look.
+- Migration `0005_subscriptions` (new table only). Contract changes (regenerated):
+  `SubscriptionSyncRequest/Response`, `SubscribedLine`; `PredictionsResponse.subscribed` and
+  `CartResponse.subscribed` (required), `CartResult.subscribed_item_ids` (optional). The agent's
+  sweep output gains `subscriptions`; the build message a 🔁 line. Touched M2 (schema), M3
+  (`predictions.ts`, `subscriptions.ts`), M4 (route, contracts), M7 (tools, the receipt skill).
+

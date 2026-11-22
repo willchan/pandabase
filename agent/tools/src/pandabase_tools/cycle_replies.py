@@ -135,6 +135,9 @@ def build(res: Mapping[str, Any], cycle: c.Cycle | None) -> str:
         trip = res.get("costco_trip_date")
         when = f" ({_day(date.fromisoformat(trip))})" if trip else ""
         out.append(f"🏬 **Waiting for the Costco trip{when}:** {_names(waiting)}")
+    subscribed = list(res.get("subscribed") or [])
+    if subscribed:
+        out.append(f"🔁 **Left out, coming by Subscribe & Save:** {_names(subscribed)}")
     bridged = list(res.get("costco_bridged") or [])
     if bridged:
         out.append(f"↪️ **Bought now, usually from Costco:** {_names(bridged)}")

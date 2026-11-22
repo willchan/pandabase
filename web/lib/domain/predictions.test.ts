@@ -473,3 +473,86 @@ describe("planCart — Costco items (DESIGN §4.8)", () => {
     expect(p.costcoWaiting.map((w) => w.itemId)).toEqual(["eggs"]);
   });
 });
+
+// Regression (2026-11): the Amazon cart filled with one-time buys of items the household already
+// gets on Subscribe & Save — S&S deliveries import as ordinary purchases, so the planner saw them
+// running out like anything else.
+describe("planCart — Subscribe & Save (DESIGN §4.9)", () => {
+  const sub = { asin: "B0SYNTHS01", nextDeliveryOn: "2026-10-29" };
+  const soap: PlanItemInput = {
+    itemId: "soap",
+    item: { ...eggs, emaDays: 10 },
+    baseUnit: "bottle",
+    switchThreshold: 0.15,
+    estimate: { onHand: 0, runoutAt: at("2026-10-23"), status: "out" },
+    products: [prod("soap-refill", { vendor: "amazon", unitQuantity: 1 })],
+    subscription: sub,
+  };
+  const milk: PlanItemInput = {
+    itemId: "milk",
+    item: eggs,
+    baseUnit: "gal",
+    switchThreshold: 0.15,
+    estimate: { onHand: 0, runoutAt: at("2026-10-23"), status: "out" },
+    products: [prod("milk-1", { unitQuantity: 1 })],
+  };
+  const plan = (overrides: CycleOverride[] = [], items = [soap, milk]) =>
+    planCart({ items, overrides, vendors: ["wholefoods", "amazon"], now, config });
+  const o = (kind: CycleOverride["kind"], extra: Partial<CycleOverride> = {}): CycleOverride => ({
+    kind,
+    itemId: "soap",
+    freeText: null,
+    quantity: null,
+    productId: null,
+    ...extra,
+  });
+
+  it("leaves a subscribed item out of the cart", () => {
+    const p = plan();
+    expect(p.lines.map((l) => l.itemId)).toEqual(["milk"]);
+    expect(p.subscribed).toEqual([
+      {
+        itemId: "soap",
+        runoutAt: at("2026-10-23"),
+        asin: "B0SYNTHS01",
+        nextDeliveryOn: "2026-10-29",
+      },
+    ]);
+    // Not a store decision, and not a skip a human made.
+    expect(p.storeChoices.map((c) => c.itemId)).toEqual(["milk"]);
+    expect(p.skippedItemIds).toEqual([]);
+  });
+
+  it("only lists subscribed items the restock rule flagged", () => {
+    const stocked = {
+      ...soap,
+      estimate: { onHand: 3, runoutAt: at("2026-11-20"), status: "stocked" as const },
+    };
+    expect(plan([], [stocked, milk]).subscribed).toEqual([]);
+  });
+
+  it("an urgent override (critical / consumed) still waits for the subscription", () => {
+    const critical = { ...soap, estimate: { ...soap.estimate, status: "critical" as const } };
+    expect(plan([], [critical]).lines).toEqual([]);
+  });
+
+  it.each(["add", "qty"] as const)("an %s override puts it back this week", (kind) => {
+    const p = plan([o(kind, { quantity: 2 })]);
+    const line = p.lines.find((l) => l.itemId === "soap");
+    expect(line).toMatchObject({ reason: "runout", quantity: 2, overrides: [kind] });
+    expect(line?.product?.id).toBe("soap-refill");
+    expect(p.subscribed).toEqual([]);
+  });
+
+  it("a product override puts it back too", () => {
+    const p = plan([o("product", { productId: "soap-refill" })]);
+    expect(p.lines.find((l) => l.itemId === "soap")?.overrides).toEqual(["product"]);
+    expect(p.subscribed).toEqual([]);
+  });
+
+  it("a skip on a subscribed item changes nothing", () => {
+    const p = plan([o("skip")]);
+    expect(p.subscribed.map((s) => s.itemId)).toEqual(["soap"]);
+    expect(p.skippedItemIds).toEqual([]);
+  });
+});

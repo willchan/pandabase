@@ -995,6 +995,11 @@ export async function renderWeekly(
   const layoutAlerts = metric("cart_layout_alert");
   const probes = metric("cart_probe");
   const probeMisses = probes.filter((t) => t.p.found !== true);
+  // §4.9 Subscribe & Save: the sweep's page reads (agent), syncs and the items builds left out.
+  const snsReads = metric("subscription_page");
+  const snsRefused = snsReads.filter((t) => t.p.outcome !== "synced");
+  const snsSyncs = metric("subscription_sync");
+  const snsLeftOut = metric("subscription_left_out");
   const reasonList = (v: unknown) =>
     Object.entries(asRecord(v))
       .map(([r, c]) => `${r} ${num(n(c))}`)
@@ -1011,14 +1016,27 @@ export async function renderWeekly(
       text: `Weekly add-button check failed: ${s(t.p.store) ?? "?"} ${s(t.p.asin) ?? ""} (${s(t.p.reason) ?? "not found"}).`,
     });
   }
-  extracts["cart_injection.jsonl"] = [...cartLines, ...toolErrors, ...probes, ...layoutAlerts].map(
-    (t) => ({
-      at: t.at,
-      metric: t.metric,
-      source: t.source,
-      ...t.p,
-    }),
-  );
+  for (const [outcome, c] of countBy(snsRefused, (t) => s(t.p.outcome) ?? "?")) {
+    findings.push({
+      score: 4,
+      text: `The Subscribe & Save list wasn't refreshed ${c} time(s) (${outcome}) — subscribed items may land in the cart once it goes stale.`,
+    });
+  }
+  extracts["cart_injection.jsonl"] = [
+    ...cartLines,
+    ...toolErrors,
+    ...probes,
+    ...layoutAlerts,
+    ...snsReads,
+    ...snsSyncs,
+    ...snsLeftOut,
+  ].map((t) => ({
+    at: t.at,
+    metric: t.metric,
+    source: t.source,
+    ...(s(t.p.itemId) ? { item: itemName(t.p) } : {}),
+    ...t.p,
+  }));
   const outcomeCount = (o: string) => cartLines.filter((t) => t.p.outcome === o).length;
   const tier1 = outcomeCount("tier1");
   const failedCart = cartLines.filter((t) => t.p.outcome === "failed");
@@ -1045,6 +1063,16 @@ export async function renderWeekly(
       }.`,
       "",
       `Layout alerts: ${layoutAlerts.length}. Weekly add-button checks: ${probes.length} pages, ${probeMisses.length} without an add button.`,
+      "",
+      `Subscribe & Save: ${snsLeftOut.length} item(s) left out of builds; ${snsSyncs.length} sync(s) (${num(
+        snsSyncs.at(-1) ? n(snsSyncs.at(-1)!.p.active) : 0,
+      )} active after the last), ${snsRefused.length} page read(s) not synced${
+        snsRefused.length
+          ? ` (${countBy(snsRefused, (t) => s(t.p.outcome) ?? "?")
+              .map(([o, c]) => `${o} ${c}`)
+              .join(", ")})`
+          : ""
+      }.`,
       ...(probes.length
         ? [
             "",
@@ -1074,6 +1102,18 @@ export async function renderWeekly(
         (t) =>
           `Add button not found: ${s(t.p.store) ?? "?"} ${s(t.p.asin) ?? ""} — ${s(t.p.reason) ?? "?"}`,
       ),
+      ...snsLeftOut
+        .slice(0, 5)
+        .map(
+          (t) =>
+            `Left out (Subscribe & Save): ${itemName(t.p)}${s(t.p.nextDeliveryOn) ? ` — next delivery ${s(t.p.nextDeliveryOn)}` : ""}`,
+        ),
+      ...snsRefused
+        .slice(0, 3)
+        .map(
+          (t) =>
+            `Subscribe & Save page not synced (${s(t.p.member) ?? "?"}): ${s(t.p.outcome) ?? "?"} — ${num(n(t.p.tiles))} tiles, ${num(n(t.p.expected))} expected`,
+        ),
     ]),
     [
       ...(failedCart.length || metric("selector_error").length
@@ -1083,6 +1123,11 @@ export async function renderWeekly(
       probeMisses.some((t) => ["no_add_form", "not_product_page"].includes(s(t.p.reason) ?? ""))
         ? [
             "Amazon's layout probably changed: save the failing product page (scrub it into a synthetic fixture) and update `cart_add.add_control` against it. Ask before any live Amazon run.",
+          ]
+        : []),
+      ...(snsRefused.some((t) => t.p.outcome === "incomplete" || t.p.outcome === "no_tiles")
+        ? [
+            "The Subscribe & Save page may have changed: save it (scrub it into a synthetic fixture) and update `pandabase_tools.subscriptions` against it.",
           ]
         : []),
     ],

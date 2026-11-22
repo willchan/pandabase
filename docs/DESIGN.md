@@ -228,6 +228,14 @@ Needs `item_id`, or `kind = add` with `free_text`.
 **idempotency_key** — pk (`key`, `scope`), `response_status`, `response_body` (json), `created_at`.
 Retained 24h.
 
+### 2.8 Subscribe & Save
+
+**subscription** — `member_id` (fk), `vendor` (`amazon`), `asin`, `title`, `next_delivery_on`
+(household-local date, nullable), `schedule` (the page's text, "3 units every 3 weeks"),
+`first_seen_at`, `last_seen_at` (the last sync that listed it), `ended_at` (a later sync didn't;
+CHECK `ended_at >= last_seen_at`). Unique (`member_id`, `vendor`, `asin`): re-subscribing reopens
+the row. §4.9.
+
 ## 3. API
 
 All routes under `/web/app/api`. Payloads defined once as **Zod schemas** in `web/lib/contracts/`.
@@ -312,6 +320,7 @@ All routes under `/web/app/api`. Payloads defined once as **Zod schemas** in `we
 | `POST /api/products/{id}/reject` | agent | "Never buy X": stance `rejected` + `reject` preference event |
 | `GET /api/receipts/cursor?account=` | agent | Last ingested `external_order_id`/date for a member's account |
 | `POST /api/receipts/ingest` | agent | Digital/manual receipt JSON → resolve, apply, EMA |
+| `POST /api/subscriptions/sync` | agent | A member's whole Subscribe & Save list (`account`, `subscriptions[]`: `asin`, `title`, `next_delivery_on`, `schedule`) replaces the stored one: new ASINs added, listed ones refreshed / reopened, unlisted open ones ended; returns `active`/`added`/`ended`/`reopened` (§4.9). `GET /api/predictions` and the cycle cart return the items it left out as `subscribed` |
 | `POST /api/catalog/merge-suggestions/run` | agent | Queue `merge_suggest` jobs over the unverified catalog (§4.5); the receipt-scraper skill calls it once at the end of a backfill. Idempotent: while one is queued/claimed it returns those (`skipped: already_queued`); `no_candidates` when nothing is unverified |
 | `POST /api/media/upload-url` | agent | R2 presigned PUT for a new media key |
 | `POST /api/jobs` | agent | Create audit job (`media_r2_key` must be a `media/…` key from upload-url) |
@@ -444,6 +453,10 @@ it ran out and was never bought again, so the household stopped buying it or buy
 don't see. It isn't planned or put on *please check*; buying it again (a new runout) or an `add`
 override brings it back. The build logs each lapsed item once per cycle (`item_lapsed`, weekly
 report §2) when the cycle moves to `building` (§10 #61).
+
+**Subscribe & Save** (§4.9): a flagged item an active subscription delivers is left out of the
+plan and off *please check* (`subscribed`, before store choice), even when critical; an `add`,
+`qty` or `product` override puts it back for the week, and a `skip` changes nothing.
 
 then apply cycle overrides (skip removes, qty replaces, add inserts including free text).
 Quantity: velocity → enough purchase units of the chosen product to cover `ema`-based need until
@@ -875,6 +888,39 @@ CDP, like Amazon; the agent itself has no browser, §10 #52). Page shapes are in
 - **Trips:** see *Receipt link* above. "Back from Costco" still closes the trip at once (the weekly
   cart stops waiting); its receipt links the next morning.
 
+### 4.9 Subscribe & Save
+
+Items the household gets on Amazon Subscribe & Save arrive as ordinary orders, so the receipt import
+learns their usage and the plan (§4.3) would buy each one again as it runs low: a redundant
+one-time line in the cart (seen live 2026-11: 4 of a week's 5 Amazon lines). `web/lib/domain/
+subscriptions.ts`, service `web/lib/services/subscriptions.ts`, table §2.8, tunable
+`subscriptions.staleAfterDays` (21).
+
+- **Source:** after each Amazon `receipts sweep`, the agent reads the member's Subscribe & Save page
+  (`receipts.subscriptions_url`, `/auto-deliveries`; read-only, nothing clicked) and posts the whole
+  list to `POST /api/subscriptions/sync`. A subscription is an element whose `data-edit-url` is the
+  page's subscription editor (`/auto-deliveries/ajax/subscription/`) with `subAsin=`; the
+  upcoming-delivery cards, the "Subscribe now" recommendations (`data-asin`, `/dp/` links) and the
+  page chrome are not. Title from the tile image's `alt`, "Next delivery: Mon D" (a date more than
+  31 days back is next year's), "N units every M weeks/months".
+- **Only a whole list is synced:** the category pills above the grid count the subscriptions
+  ("Grocery (1)"); the sync is sent only when the tiles found equal their sum (`outcome`
+  `synced`), because a sync ends every open subscription it doesn't list. `incomplete` (fewer
+  tiles than counted), `no_count` (no pills) and `no_tiles` (nothing found, layout changed — or no
+  subscriptions, which can't be told apart) post nothing. A sign-in page or bot check stops it as
+  for orders; a sweep that already hit one, or a capped `--max-orders` run, doesn't load it.
+- **Active** = not ended and `last_seen_at` within `staleAfterDays` (household-local dates): a
+  sync that keeps failing, or a member who cancelled everything, stops hiding items after three
+  weeks — a missed one-time line is the worse failure, the household notices a doubled one.
+- **Matching:** an item is subscribed when any of its products' ASINs (any vendor) has an active
+  subscription, from any member's account; the soonest `next_delivery_on` is reported.
+- **Plan:** §4.3. The weekly message names them ("🔁 Left out, coming by Subscribe & Save"), the
+  cart result stores `subscribed_item_ids`, and builds log `subscription_left_out` per item. The
+  Costco trip list (§4.8) doesn't use it.
+- **Telemetry:** agent `subscription_page` (`outcome`, `tiles`, `found`, `expected`), State Engine
+  `subscription_sync` (`active`, `added`, `ended`, `reopened`) and `subscription_left_out`; weekly
+  report §7.
+
 ## 5. Media pipeline
 
 1. User posts a photo in `#pandabase`. `discord-intake` classifies (`paper_receipt` | `trash_cam`)
@@ -1072,6 +1118,10 @@ JSON on stdout; exit 0 ok, 1 error, 2 usage, 3 profile locked, 4 refused URL):
   cancellation), and so are orders refunded in full ("Refund Total" ≥ the grand total; reason
   `returned`). Zero ASINs on a final order → `needs_agent_extraction` with page text, and
   `selector_error`; the skill ingests its own extraction with `receipts ingest`.
+- `subscriptions.py` — the Subscribe & Save step of an Amazon `receipts sweep` (§4.9): opens
+  `/auto-deliveries` (`CdpDriver.subscriptions_ready` waits, bounded, for a tile and the category
+  pills), parses the tiles, and syncs the list when it is whole. Output `subscriptions`:
+  `{outcome, found, expected, synced, errors}`.
 - `costco_receipts.py` (`receipts sweep --vendor costco [--backfill | --due] [--reply]`, M10.3) —
   Costco's Orders & Purchases on the cart member's (`pandabase`) profile: Online tab cards (read
   once a card has rendered, or after a bounded wait: the SPA draws each tab's frame first), then a
@@ -1224,7 +1274,9 @@ sha, outcome, previous_sha?, reason?, run_url?, host?}` — posted with the agen
    signed-out / challenged Costco sweep; `receipt_sweep` (Costco), `costco_trip_receipt` and
    `costco_item_renamed` rows join the `store_choice` extract
 7. Cart injection (tier-1 success, tier-2 fallbacks, failures with selector/error, layout alerts
-   and the weekly add-button check)
+   and the weekly add-button check; Subscribe & Save: items left out of builds, syncs and page
+   reads not synced, a finding per outcome that wasn't synced; those rows join the
+   `cart_injection` extract)
 8. UX friction (expired items, answered reviews by kind/outcome with median age, clarifying
    questions, slow routes)
 9. Deploys (per component: deploys, succeeded, failed/rolled back; Mac Mini rollbacks; every
@@ -1564,3 +1616,4 @@ docker-compose.yml (+ docker-compose.build.yml), Makefile, CLAUDE.md, README.md,
 | 82 | A Costco instant saving comes off the line of the item it names (line total and unit price); an online item's fee is added to its item's line total; an online "Discount on Order" isn't spread over the lines | The coupon row names its item number, so the paid price is known exactly: store choice then compares what the household paid, and the lines add up to SUBTOTAL. A receipt-level `discount_cents` (Amazon's way) would leave every Costco price high. A fee belongs to buying that item, but isn't its price per unit. An order discount names no item; with several items any split would be a guess, so it only switches off the subtotal + tax = total check |
 | 83 | A digital receipt whose totals check fails is held — stored, not applied — until a re-read of the order adds up, or for 14 days, then applied as read (§4.5 *Held receipts*) | In the first Costco sweep (2026-11-16) the two receipts with wrong lines were exactly the two whose totals failed, and applying them changed shared items (buy streaks, stances, usage rates) that an order-id-deduped re-ingest can't correct; `db:reset-imports --vendor` then refused because those items were shared with Amazon's import. Holding costs nothing when the parser is fixed in time. Never applying would lose the purchase for good (the item looks unbought and is ordered again), and both live failures had their items right, so the default after two weeks is to apply as read. A separate `receipt_hold` table, not a `held` receipt status: widening `receipt.status`'s CHECK would rebuild `receipt` |
 | 84 | Server functions leave out sharp (§8 *Function size*) | Function Storage on the free Vercel team (shared with Bamboo) reached 75% of 10 GB in 2026-11; every kept deployment holds its functions, and sharp was over half of each one while nothing here uses it. Previews stay on (tier A′ needs them); the team's retention policy deletes old deployments |
+| 85 | Subscribe & Save items are read from the member's `/auto-deliveries` page each sweep and left out of the cart; only a list whose tiles match the page's category counts is synced, and a subscription not confirmed for 21 days stops counting (§4.9) | The household's carts filled with one-time buys of items already delivered by subscription (2026-11). Flagging S&S lines on order pages would miss subscriptions until they deliver and never notice a cancellation; a manual per-item switch would need the household to keep it in step with Amazon. The page is the source of truth and costs one read-only load per sweep. Replacing the list makes cancellations visible, so a short read would wrongly end live subscriptions: hence the count check. The stale window bounds the opposite failure (a broken sync hiding items for good) |
