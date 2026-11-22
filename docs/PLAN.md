@@ -77,7 +77,7 @@ pnpm install && pnpm lint && pnpm typecheck && pnpm test && pnpm --filter web bu
 
 *Versions chosen (checked 2026-10-20):* Node **24.22.0** (Active LTS "Krypton"; `.nvmrc` = `24`,
 `engines.node` = `>=24 <25`), pnpm **12.14.0** (pinned via `packageManager`), Next.js **16.4.2**
-(App Router, Turbopack, scaffolded with `create-next-app@16.4.2`), React **19.3.0**, Tailwind
+(16.4.6 since 2026-11-21: seven moderate advisories, fixed in 16.4.5; App Router, Turbopack, scaffolded with `create-next-app@16.4.2`), React **19.3.0**, Tailwind
 **4.3**, TypeScript **6.0.3**, ESLint **9.39**, typescript-eslint **8.71**, Prettier **3.9**,
 Vitest **5.0**. Python **3.14** (3.14.6; 3.15 is still beta), uv **0.13.3** (pinned in CI),
 ruff **0.17**, mypy **2.4** (strict), pytest **9.1**.
@@ -85,7 +85,7 @@ ruff **0.17**, mypy **2.4** (strict), pytest **9.1**.
 *Deviations / choices:*
 - **TypeScript 6, not 7.** TS 7 (native/Go) is out but typescript-eslint's peer range is
   `<6.1.0` and Next's build type-check uses the JS compiler API; revisit when both support 7.
-- **ESLint 9, not 10.** eslint-config-next 16.4.2 pulls `eslint-plugin-react`/`-import`/
+- **ESLint 9, not 10.** eslint-config-next 16.4 pulls `eslint-plugin-react`/`-import`/
   `-jsx-a11y`, which don't accept ESLint 10 yet.
 - **typescript-eslint 8.71.2, not 8.72.0.** pnpm 12 enforces a minimum release age; 8.72.0 was
   under a day old and pnpm offered to add exclusions. Kept the guard and used the prior minor —
@@ -837,7 +837,7 @@ envelope when unset); `config file --json` → `{path}`; the gateway loads `~/.o
 (never overriding set vars); `automations list --all --json`, `add`, `edit <id>` (same flags),
 `--command` runs `sh -lc` inside the gateway; `tools.media.models` + `models.providers.ollama.
 models[{input: ["text","image"]}]` (OpenClaw's own Ollama-vision example, plus `OLLAMA_API_KEY=
-ollama-local`); `models.providers.*.models.*.input: ["text"]` → images are not injected into that
+ollama-local`, which is no longer written: see the 2026-11-19 note below); `models.providers.*.models.*.input: ["text"]` → images are not injected into that
 model's turns; multi-agent `bindings[]` with `match.peer {kind: "channel", id}`.
 
 *Deviations / choices (DESIGN §1.2, §6, §8 "Mac Mini operations", §9, §10 #41–43 updated):*
@@ -937,6 +937,21 @@ crashed under macOS bash 3.2 (`set -u` + empty array); the gateway patch's
 the Discord channel is an OpenClaw plugin to install. Bats tests for the two scripts run under
 `/bin/bash`. Also seen: Amazon's tier-1 `add.html` now redirects straight to the cart (handled
 by the tier-2 PR).
+
+*2026-11-19 — no more placeholder `OLLAMA_API_KEY`:* `install-agent-skills` had written
+`OLLAMA_API_KEY=ollama-local` into `~/.openclaw/.env` since 2026-10-20, following OpenClaw's
+Ollama-vision example. In OpenClaw 2026.10.10 any `OLLAMA_API_KEY` also switches on the bundled
+hosted `ollama-cloud` provider (default model `kimi-k2.6`, talks to ollama.com), and
+`openclaw models status --probe` failed it with a 401 on the placeholder. Nothing uses that
+provider. Local Ollama doesn't need the env var: the installed plugin counts the `ollama` provider
+as configured when `models.providers.ollama.apiKey` is set (openclaw.json already has
+`"ollama-local"` there), and the media-understanding provider has no auth of its own, so image
+description goes through that provider entry (OpenClaw's docs: the env var only stands in when
+the provider `apiKey` is omitted). ✅ Run on the Mac 2026-11-19: the line deleted from
+`~/.openclaw/.env` (backup kept beside it), the gateway restarted, `openclaw models list` shows
+no `ollama-cloud/` models and `ollama/qwen3.8:27b` still authenticated, and a photo sent by
+Discord DM to a `qwen3.8:27b` agent was described correctly. The installer no longer adds the key and its bats test checks it doesn't; it doesn't
+delete an existing one either (that's the one-off host step). The tier B eval drops it too.
 
 *For M9:*
 - `make update` → `scripts/ops/update.sh` is the procedure to wrap; it needs a clean tracked tree

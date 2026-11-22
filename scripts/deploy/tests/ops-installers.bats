@@ -43,7 +43,10 @@ JSON
 # Bug: PandaBase's token and settings lived in OpenClaw's ~/.openclaw/.env, which the gateway
 # hands to every app's tools (Bamboo read PandaBase's AGENT_API_TOKEN from it). They now go to
 # PandaBase's own agent.env (dir 700, file 600); OpenClaw's file loses them, prefixed or not, and
-# keeps other apps' lines and the shared OLLAMA_API_KEY.
+# keeps other apps' lines.
+# Bug: the installer also wrote a placeholder OLLAMA_API_KEY=ollama-local there, which in OpenClaw
+# 2026.10.10 switches on the hosted ollama-cloud provider (`models status --probe` 401s on it). It
+# must not add one.
 # Regression: with two agents configured, `openclaw skills check` without --agent failed and
 # stopped `make mac-rollout` before install-agent-cron ran.
 @test "install-agent-skills checks the skills for --agent main" {
@@ -61,9 +64,10 @@ JSON
   grep -q '^PANDABASE_CONFIG=' "$PANDABASE_AGENT_ENV"
   [ -n "$(find "$PANDABASE_AGENT_ENV" -perm 600)" ] # find: same on macOS and Linux
   [ -n "$(find "$(dirname "$PANDABASE_AGENT_ENV")" -maxdepth 0 -perm 700)" ]
-  ! grep -qE '^(AGENT_API_TOKEN|PANDABASE_[A-Z_]+)=' "$OPENCLAW_ENV"
+  # grep -c, not `! grep`: bats' set -e ignores a negated command, so `! grep` never fails a test.
+  [ "$(grep -cE '^(AGENT_API_TOKEN|PANDABASE_[A-Z_]+)=' "$OPENCLAW_ENV")" = 0 ]
   grep -qx 'BAMBOO_API_URL=https://bamboo.test' "$OPENCLAW_ENV"
-  grep -qx 'OLLAMA_API_KEY=ollama-local' "$OPENCLAW_ENV"
+  [ "$(grep -c '^OLLAMA_API_KEY=' "$OPENCLAW_ENV")" = 0 ]
   # A second run changes nothing.
   run /bin/bash "$ROOT_DIR/scripts/ops/install-agent-skills.sh"
   [ "$status" -eq 0 ]
