@@ -44,7 +44,7 @@ contracts.
 | M8 Ops, compose, README | done | #11 |
 | M9 Continuous deployment | done | #14 |
 | M10 Costco | in progress (M10.1–M10.3 done; M10.4 not started) | #66, #67, #68, #71 |
-| M11 Receipts as the source of truth | in review (M11.1 done; M11.2 in review; M11.3 not started) | #88 (M11.1), #M112 (M11.2) |
+| M11 Receipts as the source of truth | in review (M11.1 done; M11.2 in review; M11.3 not started) | #88 (M11.1), #89 (M11.2) |
 
 ---
 
