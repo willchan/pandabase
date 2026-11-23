@@ -7,6 +7,7 @@
     ".": "./src/index.ts",
     "./seed": "./src/seed.ts",
     "./rebuild-state": "./src/rebuild-state.ts",
+    "./rebuild-learning": "./src/rebuild-learning.ts",
     "./reset-imports": "./src/reset-imports.ts"
   },
   "scripts": {
@@ -23,6 +24,7 @@
     "seed": "tsx src/seed.ts",
     "reset": "tsx src/reset.ts",
     "rebuild-state": "tsx src/rebuild-state.ts",
+    "rebuild-learning": "tsx src/rebuild-learning.ts",
     "migrations-status": "tsx src/migrations-status.ts",
     "prod-copy": "NODE_USE_ENV_PROXY=1 tsx src/prod-copy.ts"
   },

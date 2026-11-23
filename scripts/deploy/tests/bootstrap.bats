@@ -164,11 +164,28 @@ member() {
   [ "$(cat "$STUB/calls")" = "[db:rename-items][--apply]" ]
 }
 
+@test "rebuild-learning counts by default and writes only with apply" {
+  export BOOTSTRAP_ACTION=rebuild-learning
+  bootstrap
+  [ "$status" -eq 0 ]
+  [ "$(cat "$STUB/calls")" = "[db:rebuild-learning]" ]
+  : >"$STUB/calls"
+  export RESET_APPLY=true
+  bootstrap
+  [ "$status" -eq 0 ]
+  [ "$(cat "$STUB/calls")" = "[db:rebuild-learning][--apply]" ]
+  : >"$STUB/calls"
+  export RESET_APPLY=maybe
+  bootstrap
+  [ "$status" -eq 2 ]
+  [ ! -s "$STUB/calls" ]
+}
+
 @test "unknown action is rejected" {
   export BOOTSTRAP_ACTION=seed
   bootstrap
   [ "$status" -eq 2 ]
-  [[ "$output" == *"action must be migrate, add-member, reset-imports or rename-items"* ]]
+  [[ "$output" == *"action must be migrate, add-member, reset-imports, rename-items or rebuild-learning"* ]]
   [ ! -s "$STUB/calls" ]
 }
 
@@ -214,7 +231,7 @@ member() {
 
 @test "bootstrap.yml offers the actions and targets the script accepts" {
   local wf="$REPO_SRC/.github/workflows/bootstrap.yml"
-  grep -qF 'options: [migrate, add-member, reset-imports, rename-items]' "$wf"
+  grep -qF 'options: [migrate, add-member, reset-imports, rename-items, rebuild-learning]' "$wf"
   grep -qF 'RESET_APPLY: ${{ inputs.apply }}' "$wf"
   [ "$(grep -cF 'RESET_VENDOR: ${{ inputs.vendor }}' "$wf")" -eq 2 ]
   grep -qF 'options: [all, amazon, wholefoods, costco]' "$wf"

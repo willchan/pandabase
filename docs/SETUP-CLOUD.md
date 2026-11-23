@@ -453,6 +453,13 @@ brand as their name ("365 By Whole Foods Market"). Unticked **apply**
 counts them; ticked renames them. Names someone changed or confirmed are
 left alone.
 
+Action `rebuild-learning` recomputes what PandaBase learned from receipts
+(times bought, buy streaks, last prices, the "usual" product, usage rates,
+switch thresholds) from the receipts themselves (DESIGN §4.10). Unticked
+**apply** counts, per value, how many items and products would change and
+why; ticked writes the rebuilt values. Receipts and anything a person
+decided are never changed.
+
 ### Finding a Discord user id
 
 1. Discord app → your avatar (bottom right) → **Settings** (gear) →

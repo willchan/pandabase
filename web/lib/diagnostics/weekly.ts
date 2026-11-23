@@ -344,6 +344,8 @@ export async function renderWeekly(
       .orderBy(asc(receiptHold.expiresAt), asc(receiptHold.id))
   ).filter((h) => h.status === "held" || (h.resolvedAt !== null && h.resolvedAt >= end));
   const releasedBy = (o: string) => released.filter((t) => t.p.outcome === o).length;
+  // §4.10: `db:rebuild-learning --apply` runs (one summary row each).
+  const rebuilds = metric("learning_rebuilt");
   if (stillHeld.length) {
     findings.push({
       score: 3,
@@ -509,6 +511,14 @@ export async function renderWeekly(
       `Held receipts (totals don't add up, not applied): ${stillHeld.length} held at the end of the week, ` +
         `${newHolds.length} newly held, ${releasedBy("totals_pass") + releasedBy("unchecked")} applied after a re-read, ` +
         `${expiredHolds} applied as read on expiry.`,
+      ...(rebuilds.length
+        ? [
+            "",
+            `Learning rebuilt from receipts (db:rebuild-learning): ${rebuilds.length} run(s), ` +
+              `${sum(rebuilds, "itemsChanged")} item(s) and ${sum(rebuilds, "productsChanged")} product(s) changed, ` +
+              `${sum(rebuilds, "eventItems")} item(s) with regenerated preference events.`,
+          ]
+        : []),
       "",
       "Suggested merges:",
       "",

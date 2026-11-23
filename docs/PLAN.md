@@ -44,7 +44,7 @@ contracts.
 | M8 Ops, compose, README | done | #11 |
 | M9 Continuous deployment | done | #14 |
 | M10 Costco | in progress (M10.1–M10.3 done; M10.4 not started) | #66, #67, #68, #71 |
-| M11 Receipts as the source of truth | planned (owner agreed the direction 2026-11-22) | — |
+| M11 Receipts as the source of truth | in review (M11.1 in review; M11.2–M11.3 not started) | #88 (M11.1) |
 
 ---
 
@@ -1516,6 +1516,44 @@ doesn't change how purchases are recorded. M10.4 (freezer question) can come aft
 reads receipts.
 
 **Notes:**
+
+- **M11.1 (2026-11-23).** Step 0 audit — every writer of a derived column, and the input it
+  leaves:
+  - `services/receipts.ts` (`applyReceipt` → `persistReceiptEffects`): product stats, auto
+    stances, EMA columns, static → velocity, the implicit-swap threshold, `auto_promote` /
+    `implicit_swap` events. Inputs: receipts, lines, `acquired` events, cycle carts.
+  - `cycles.ts learnFromProductOverride`: `switch_threshold` and **`preference_score`** (missing
+    from the table above; now derived too), leaving an `override_*` event with its products.
+  - `inventory.ts rejectProductById`: stance, leaving a `reject` event. No un-reject path exists.
+  - `reviews.ts mergeItems`: moves products, lines and events (rescaled) to the target and resets
+    moved stances to acceptable, but re-keys neither `preference_event.item_id` nor
+    `cart_result` lines, and recomputes nothing on the target. The rebuild resolves both through
+    the merge chain and folds the merged history as one item (DESIGN §10 #88).
+  - `reviews.ts answerReceiptReview` changes lines and events but re-runs no learning: the
+    rebuild picks those answers up (cause `edited_after_ingest`).
+  - `cycles.ts logSwitches` writes `switch` events that change no derived value: kept, not
+    regenerated (a deviation from the table above). Settings, store pins, renames,
+    `db:reset-imports` and `db:rename-items` write no derived column.
+  - So every human decision already leaves an input row: **no migration**. Prod copy: 494 items,
+    all receipt-created; 0 merges, 0 item settings, 0 human preference events (107
+    `auto_promote`), 2 built cycles, 1 cart pause.
+- **Prod-copy dry run (2026-11-23, counts only):** 494 items / 494 products checked; **1 item
+  would change** (`current_ema_days` 1) and **1 product** (`last_bought_at` 1); 0 preference
+  events (the 107 `auto_promote` rows match); causes: `late_receipt` 1, `costco` 1, unexplained 0.
+  It is a Costco delivery receipt acquired before two warehouse receipts of the same item but
+  read after them: ingest skipped its EMA step and moved `last_bought_at` back to its older date.
+  The rebuild puts it in place. EMA replay: 182 initialized (= the 182 velocity items), 323
+  updated, 131 outliers rejected, 14 accepted, 0 paused (the pause starts 2026-11-22, after the
+  last acquisition). Nothing was applied to production.
+- The expected "two misread Costco receipts' effects" don't show: those two orders are held
+  (#83, 2 `receipt_hold` rows), never applied. Note too that a rebuild reproduces a misread
+  receipt faithfully: correcting one needs M11.2's re-read-replaces.
+- A seeded `db/dev.db` differs widely (37 changed items with no known cause): `db:seed` writes synthetic
+  stats directly rather than folding its receipts. Expected; don't read it as a bug.
+- For M11.2: ingest moving `last_bought_at` backwards on a late receipt is a live bug that
+  rebuilding at ingest fixes; `web/lib/services/learning.test.ts` has the regression.
+  `planLearningRebuild` reads every table whole (fine for a CLI). Ingest needs a per-item
+  loader inside §8's round-trip rule.
 
 ---
 

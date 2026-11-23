@@ -2,10 +2,11 @@ name: Bootstrap
 
 # Database steps without a terminal (docs/SETUP-CLOUD.md): migrate a Turso database, add / update
 # a household member (`pnpm db:add-member`), reset the digital receipt import
-# (`pnpm db:reset-imports`, DESIGN §4.5) or re-name brand-named items (`pnpm db:rename-items`),
+# (`pnpm db:reset-imports`, DESIGN §4.5), re-name brand-named items (`pnpm db:rename-items`) or
+# recompute what was learned from receipts (`pnpm db:rebuild-learning`, DESIGN §4.10),
 # using the chosen GitHub environment's TURSO_* secrets. Run it from GitHub (web or app):
-# Actions → Bootstrap → Run workflow. Every action is idempotent; reset-imports and rename-items
-# only count unless `apply` is ticked, and print counts only (never names). Inputs are validated
+# Actions → Bootstrap → Run workflow. Every action is idempotent; reset-imports, rename-items and
+# rebuild-learning only count unless `apply` is ticked, and print counts only (never names). Inputs are validated
 # by scripts/deploy/bootstrap.sh (dry run: validate only). This repo is public, so its run logs
 # are too: no email is ever an input (the member is picked by position in the environment's
 # ALLOWED_EMAILS secret), and the Discord id is masked before any step's env could print it.
@@ -14,9 +15,9 @@ on:
   workflow_dispatch:
     inputs:
       action:
-        description: "migrate = create/update tables; add-member = add or update one member; reset-imports = undo the digital receipt import; rename-items = re-name brand-named items"
+        description: "migrate = create/update tables; add-member = add or update one member; reset-imports = undo the digital receipt import; rename-items = re-name brand-named items; rebuild-learning = recompute product stats, stances and usage rates from receipts"
         type: choice
-        options: [migrate, add-member, reset-imports, rename-items]
+        options: [migrate, add-member, reset-imports, rename-items, rebuild-learning]
         default: migrate
       target:
         description: "Which database (GitHub environment)"
@@ -52,7 +53,7 @@ on:
         options: [all, amazon, wholefoods, costco]
         default: all
       apply:
-        description: "reset-imports / rename-items: really change (unticked = count only)"
+        description: "reset-imports / rename-items / rebuild-learning: really change (unticked = count only)"
         type: boolean
         default: false
       dry_run:
