@@ -109,6 +109,12 @@ ROUTES: dict[str, Route] = {
         Route("GET", "/api/receipts/cursor", c.ReceiptCursorResponse, query=c.ReceiptCursorQuery),
         Route(
             "POST",
+            "/api/subscriptions/sync",
+            c.SubscriptionSyncResponse,
+            body=c.SubscriptionSyncRequest,
+        ),
+        Route(
+            "POST",
             "/api/receipts/ingest",
             c.ReceiptIngestResponse,
             c.ReceiptIngestRequest,
@@ -306,6 +312,11 @@ class ApiClient:
     ) -> c.ReceiptIngestResponse:
         res = self.call("POST", "/api/receipts/ingest", body=body, idempotency_key=key)
         assert isinstance(res, c.ReceiptIngestResponse)
+        return res
+
+    def sync_subscriptions(self, body: c.SubscriptionSyncRequest) -> c.SubscriptionSyncResponse:
+        res = self.call("POST", "/api/subscriptions/sync", body=body)
+        assert isinstance(res, c.SubscriptionSyncResponse)
         return res
 
     def upload_url(self, content_type: str, ext: str) -> c.UploadUrlResponse:

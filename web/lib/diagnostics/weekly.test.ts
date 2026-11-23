@@ -244,6 +244,38 @@ describe("weekly diagnostics", () => {
     expect(report.markdown).toContain("| ema_paused | 2 |");
   });
 
+  it("reports Subscribe & Save: items left out, syncs, and page reads not synced (§4.9)", async () => {
+    const soap = await h.itemId("Eggs");
+    const t = (i: number, source: string, metricType: string, payload: Record<string, unknown>) => ({
+      id: `01S${String(i).padStart(23, "0")}`,
+      source,
+      metricType,
+      payload,
+      createdAt: "2026-10-24T17:10:00.000Z",
+    });
+    await h.db.insert(systemTelemetry).values([
+      t(1, "agent", "subscription_page", { member: "alex", outcome: "synced", tiles: 3, expected: 3 }),
+      t(2, "state_engine", "subscription_sync", { memberId: "m", active: 3, added: 3, ended: 0 }),
+      t(3, "agent", "subscription_page", { member: "sam", outcome: "incomplete", tiles: 2, expected: 5 }),
+      t(4, "state_engine", "subscription_left_out", {
+        cycleId: "C1",
+        itemId: soap,
+        asin: "B0SYNTHS01",
+        nextDeliveryOn: "2026-10-29",
+      }),
+    ]);
+    const md = (
+      await renderWeekly(h.db, "2026-W43", { now: "2026-10-26T20:00:00.000Z", config: DEFAULT_CONFIG })
+    ).markdown;
+    expect(md).toContain(
+      "Subscribe & Save: 1 item(s) left out of builds; 1 sync(s) (3 active after the last), 1 page read(s) not synced (incomplete 1).",
+    );
+    expect(md).toContain("The Subscribe & Save list wasn't refreshed 1 time(s) (incomplete)");
+    expect(md).toContain("Left out (Subscribe & Save): Eggs — next delivery 2026-10-29");
+    expect(md).toContain("Subscribe & Save page not synced (sam): incomplete — 2 tiles, 5 expected");
+    expect(md).toContain("The Subscribe & Save page may have changed");
+  });
+
   it("reports suggested merges and worker health (heartbeats, Ollama, gaps)", async () => {
     // W43 runs 2026-10-19T07:00Z → 2026-10-26T07:00Z; heartbeats every 10 min except a 2h silence.
     const start = Date.parse("2026-10-19T07:00:00.000Z");

@@ -28,6 +28,7 @@ import type {
   ProductRef,
   PlanStore,
   CostcoWaitingLine,
+  SubscribedLine,
 } from "../contracts";
 import type { CartResultT } from "../contracts/cycle";
 import {
@@ -48,6 +49,7 @@ import {
   type StoreNote,
 } from "../domain/predictions";
 import { ITEM_REVIEW_KINDS, reprioritize } from "../domain/review";
+import type { ItemSubscription } from "../domain/subscriptions";
 import {
   candidatesFor,
   learnFromOverride,
@@ -62,6 +64,7 @@ import { awayPeriods, loadEstimates, pausePeriods, type ItemEstimate } from "../
 import { emitTelemetry } from "../telemetry";
 import { freezerAging, toItemEstimate } from "./inventory";
 import { newId } from "./receipts";
+import { subscribedItemsFor } from "./subscriptions";
 import { isoUtc, type ServiceCtx } from "./types";
 
 type ReadCtx = Pick<ServiceCtx, "now" | "config">;
@@ -196,6 +199,8 @@ export async function setCycleStatus(
           "state_engine",
           [
             ...plan.lapsed.map((x) => ({ metric: "item_lapsed", cycleId, ...x })),
+            // §4.9: flagged items left out because Subscribe & Save delivers them.
+            ...plan.subscribed.map((x) => ({ metric: "subscription_left_out", cycleId, ...x })),
             // §4.8, once per planned item per build: where it comes from and why.
             ...plan.storeChoices.map((c) => ({
               metric: "store_choice",
@@ -234,10 +239,12 @@ export async function plannedTrip(q: Q) {
   return row ?? null;
 }
 
-/** `planCart` / `costcoTripList` inputs from read-time estimates and products. */
+/** `planCart` / `costcoTripList` inputs from read-time estimates and products (and, for the
+ * weekly cart, the items Subscribe & Save delivers, §4.9). */
 export const planItems = (
   estimates: Map<string, ItemEstimate>,
   products: Map<string, ProductRow[]>,
+  subscribed: ReadonlyMap<string, ItemSubscription> = new Map(),
 ): PlanItemInput[] =>
   [...estimates.values()].map((e) => ({
     itemId: e.item.id,
@@ -247,6 +254,7 @@ export const planItems = (
     estimate: e.estimate,
     products: (products.get(e.item.id) ?? []).map(toCandidate),
     storePin: e.item.storePin ?? null,
+    subscription: subscribed.get(e.item.id) ?? null,
   }));
 
 async function overridesOf(q: Q, cycleId: string) {
@@ -282,8 +290,9 @@ export async function planFor(q: Q, cycle: CycleRow | null, ctx: ReadCtx): Promi
     : [];
   const quotes = cycle ? await quotesOf(q, cycle.id) : {};
   const costcoTripDate = (await plannedTrip(q))?.plannedFor ?? null;
+  const subscribed = await subscribedItemsFor(q, products, ctx);
   const plan = planCart({
-    items: planItems(estimates, products),
+    items: planItems(estimates, products, subscribed),
     overrides,
     vendors: ctx.config.cartVendors,
     quotes,
@@ -355,6 +364,7 @@ export async function predictions(
     needs_price_check_item_ids: s.plan.needsPriceCheckItemIds,
     costco_trip_date: s.costcoTripDate,
     costco_waiting: costcoWaiting(s),
+    subscribed: subscribedLines(s),
   };
 }
 
@@ -372,6 +382,15 @@ const costcoWaiting = (s: PlanState): z.input<typeof CostcoWaitingLine>[] =>
     name: s.estimates.get(w.itemId)?.item.canonicalName ?? w.itemId,
     runout_at: w.runoutAt,
     reason: w.store.reason,
+  }));
+
+const subscribedLines = (s: PlanState): z.input<typeof SubscribedLine>[] =>
+  s.plan.subscribed.map((x) => ({
+    item_id: x.itemId,
+    name: s.estimates.get(x.itemId)?.item.canonicalName ?? x.itemId,
+    asin: x.asin,
+    runout_at: x.runoutAt,
+    next_delivery_on: x.nextDeliveryOn,
   }));
 
 const shortDate = (d: string) =>
@@ -408,6 +427,7 @@ export async function cart(
     cycle_id: cycle.id,
     costco_trip_date: s.costcoTripDate,
     costco_waiting: costcoWaiting(s),
+    subscribed: subscribedLines(s),
     lines: s.plan.lines.map((l) => {
       const row = rowOf(s, l);
       const picked = l.overrides.includes("product");
@@ -456,6 +476,8 @@ function pleaseCheck(s: PlanState, ctx: ReadCtx) {
     ...s.plan.skippedItemIds,
     // Waiting for the Costco trip (§4.8): planned, just not in this cart.
     ...s.plan.costcoWaiting.map((w) => w.itemId),
+    // Subscribe & Save delivers it (§4.9): nothing for the household to check.
+    ...s.plan.subscribed.map((x) => x.itemId),
   ]);
   const candidates = [...s.estimates.values()].flatMap((e) => {
     const reason = pleaseCheckReason({
@@ -738,6 +760,7 @@ export async function recordCartResult(
         .filter((l) => l.store?.timing === "bridge" && l.itemId)
         .map((l) => l.itemId!),
       costco_waiting_item_ids: s.plan.costcoWaiting.map((w) => w.itemId),
+      subscribed_item_ids: s.plan.subscribed.map((x) => x.itemId),
     };
     await tx
       .update(groceryCycle)

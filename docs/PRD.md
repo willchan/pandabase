@@ -70,7 +70,9 @@ A Discord **thread per cycle** in `#pandabase`, acting as a running grocery list
   be skipped or made up.
   Builds from predictions alone if nobody replied. Something we ran out of more than two months
   ago and never bought again is left out (we stopped buying it); adding it to the list brings it
-  back. If most of the lines it tried (and at least
+  back. Something we get on Amazon **Subscribe & Save** is left out too — the subscription brings
+  it — and named in the summary ("🔁 Left out, coming by Subscribe & Save"); asking for it on the
+  list ("add soap") still buys it that week. If most of the lines it tried (and at least
   two) fail because the product page wasn't what the tools expect, it also posts one ⚠️ to the
   ops channel: Amazon's layout probably changed.
 - **Friday afternoon add-button check:** before the build, one Amazon and one Whole Foods product
@@ -94,7 +96,10 @@ A Discord **thread per cycle** in `#pandabase`, acting as a running grocery list
   Delivery, pickup and phone-linked in-store purchases. An order is ingested once
   delivered/picked up (or, for an old order whose page no longer says, a week after it was
   placed); orders returned in full are skipped. Re-ingesting is harmless. If Amazon shows a bot
-  check, the import stops and asks in the ops channel for someone to clear it.
+  check, the import stops and asks in the ops channel for someone to clear it. Each sweep also
+  reads the Subscribe & Save page (no clicks) to learn what Amazon already delivers on a schedule,
+  and stays silent about it. It only updates the list when it read all of it; if it can't for three
+  weeks, those items are bought normally again rather than silently missed.
 - **Paper receipts:** photo in Discord → local VLM transcribes → app matches lines to items using
   store-specific aliases → one review item per receipt in the web UI. Exact known matches apply
   immediately; strong guesses apply provisionally; weak ones wait 14 days then expire.

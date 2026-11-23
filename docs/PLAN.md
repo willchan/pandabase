@@ -1516,3 +1516,28 @@ doesn't change how purchases are recorded. M10.4 (freezer question) can come aft
 reads receipts.
 
 **Notes:**
+
+---
+
+## After M10.3 — Subscribe & Save
+
+Not a milestone: one PR (branch `claude/serene-brahmagupta-dug10o`, DESIGN §4.9, §10 #87).
+
+**Notes:**
+
+- Reported by the household (2026-11-22): the Amazon cart was full of one-time buys of items it
+  already gets on Subscribe & Save. On the prod copy, 19 of the 22 subscriptions are catalog items,
+  and the week's plan had 4 of them among its 5 Amazon lines; with the list synced, none is in the
+  plan.
+- The parser was checked against one saved live `/auto-deliveries` page (22 tiles, pill counts
+  22, every tile with title, next delivery and schedule); that page was deleted after a synthetic
+  fixture (`subscriptions.html`) was shaped like it. **Not yet run live through CDP:**
+  `CdpDriver.subscriptions_ready` waits for the tiles to render, which only a real sweep shows.
+  After the first sweep on the Mac Mini, check its `subscriptions.outcome` (and the weekly
+  report's §7 line) — `no_tiles` / `incomplete` there means the wait or the page needs a look.
+- Migration `0006_subscriptions` (new table only). Contract changes (regenerated):
+  `SubscriptionSyncRequest/Response`, `SubscribedLine`; `PredictionsResponse.subscribed` and
+  `CartResponse.subscribed` (required), `CartResult.subscribed_item_ids` (optional). The agent's
+  sweep output gains `subscriptions`; the build message a 🔁 line. Touched M2 (schema), M3
+  (`predictions.ts`, `subscriptions.ts`), M4 (route, contracts), M7 (tools, the receipt skill).
+

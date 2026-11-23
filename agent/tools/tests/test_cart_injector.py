@@ -59,7 +59,13 @@ def line(name: str, prod: dict[str, Any] | None, qty: float = 1, **kw: Any) -> d
 
 def cart(*lines: dict[str, Any]) -> c.CartResponse:
     return c.CartResponse.model_validate(
-        {"cycle_id": "C1", "lines": list(lines), "costco_trip_date": None, "costco_waiting": []}
+        {
+            "cycle_id": "C1",
+            "lines": list(lines),
+            "costco_trip_date": None,
+            "costco_waiting": [],
+            "subscribed": [],
+        }
     )
 
 
@@ -251,6 +257,7 @@ def test_price_checks_quote_candidates_and_log_failures(no_sleep: Callable[[floa
             "skipped_item_ids": [],
             "costco_trip_date": None,
             "costco_waiting": [],
+            "subscribed": [],
             "lines": [
                 {
                     "item_id": "I-eggs",
@@ -300,6 +307,7 @@ def test_no_asin_candidates_dont_use_up_the_price_check_budget(
             "skipped_item_ids": [],
             "costco_trip_date": None,
             "costco_waiting": [],
+            "subscribed": [],
             "lines": [
                 {
                     "item_id": "I-eggs",

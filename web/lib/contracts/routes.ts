@@ -8,6 +8,7 @@ import * as inv from "./inventory";
 import * as jobs from "./jobs";
 import * as platform from "./platform";
 import * as receipts from "./receipts";
+import * as subs from "./subscriptions";
 
 /** `session` = a signed-in household member (Auth.js); sessions pass every non-cron scope. */
 export type Scope = "agent" | "worker" | "session" | "cron";
@@ -244,6 +245,15 @@ export const ROUTES = {
     scopes: agent,
     body: receipts.ReceiptIngestRequest,
     response: receipts.ReceiptIngestResponse,
+  }),
+  subscriptionsSync: route({
+    operationId: "syncSubscriptions",
+    method: "POST",
+    path: "/api/subscriptions/sync",
+    summary: "Replace a member's Subscribe & Save list (the sweep read it completely)",
+    scopes: agent,
+    body: subs.SubscriptionSyncRequest,
+    response: subs.SubscriptionSyncResponse,
   }),
   mediaUploadUrl: route({
     operationId: "createUploadUrl",

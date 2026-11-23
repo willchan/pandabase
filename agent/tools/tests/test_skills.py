@@ -129,6 +129,7 @@ def test_every_agent_route_is_used_by_some_skill_or_tool() -> None:
         "POST /api/grocery/cycle/{id}/cart-result",
         "GET /api/receipts/cursor",
         "POST /api/receipts/ingest",
+        "POST /api/subscriptions/sync",  # `receipts sweep` (Subscribe & Save, DESIGN §4.9)
         "POST /api/media/upload-url",
         "POST /api/jobs",
         "GET /api/jobs/notifications",
