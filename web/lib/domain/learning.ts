@@ -1,4 +1,4 @@
-// DESIGN §4.9 — what PandaBase learns from receipts, recomputed from its inputs (PLAN M11).
+// DESIGN §4.10 — what PandaBase learns from receipts, recomputed from its inputs (PLAN M11).
 //
 // Ingest applies each receipt once, as in-place edits to shared rows (`applyReceipt`). The rebuild
 // folds an item's *inputs* in time order instead — its receipts' lines, its non-expired `acquired`
@@ -211,10 +211,7 @@ type Entry =
   | { at: string; order: 1; tie: string; human: HumanPreferenceEvent };
 
 /** The cart a receipt ingested at `createdAt` compared with: the last cycle built by then. */
-function cartAtIngest(
-  cycles: readonly LearningCycle[],
-  r: LearningReceipt,
-): LearningCycle | null {
+function cartAtIngest(cycles: readonly LearningCycle[], r: LearningReceipt): LearningCycle | null {
   let best: LearningCycle | null = null;
   for (const c of cycles) {
     if (c.builtAt > r.createdAt) continue;
@@ -258,17 +255,13 @@ function foldProducts(input: LearningInput) {
   };
 
   const entries: Entry[] = [
-    ...input.receipts.map(
-      (receipt): Entry => ({
-        at: receipt.acquiredAt,
-        order: 0,
-        tie: `${receipt.createdAt} ${receipt.id}`,
-        receipt,
-      }),
-    ),
-    ...input.humanEvents.map(
-      (human): Entry => ({ at: human.at, order: 1, tie: human.id, human }),
-    ),
+    ...input.receipts.map((receipt): Entry => ({
+      at: receipt.acquiredAt,
+      order: 0,
+      tie: `${receipt.createdAt} ${receipt.id}`,
+      receipt,
+    })),
+    ...input.humanEvents.map((human): Entry => ({ at: human.at, order: 1, tie: human.id, human })),
   ].sort(
     (a, b) =>
       Date.parse(a.at) - Date.parse(b.at) || a.order - b.order || a.tie.localeCompare(b.tie),

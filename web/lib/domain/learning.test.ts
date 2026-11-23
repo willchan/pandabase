@@ -170,8 +170,14 @@ describe("rebuildItemLearning — product stats and preferences (§4.4)", () => 
       input({
         products: [{ ...A, vendor: "costco" }],
         receipts: [
-          receipt(day(0), [{ productId: "PA", cents: 1199 }], { ...costco, fulfillment: "in_store" }),
-          receipt(day(5), [{ productId: "PA", cents: 1499 }], { ...costco, fulfillment: "delivery" }),
+          receipt(day(0), [{ productId: "PA", cents: 1199 }], {
+            ...costco,
+            fulfillment: "in_store",
+          }),
+          receipt(day(5), [{ productId: "PA", cents: 1499 }], {
+            ...costco,
+            fulfillment: "delivery",
+          }),
         ],
       }),
     );
@@ -188,15 +194,45 @@ describe("rebuildItemLearning — product stats and preferences (§4.4)", () => 
       input({
         receipts: [receipt(day(0), [{ productId: "PA" }]), receipt(day(20), [{ productId: "PA" }])],
         humanEvents: [
-          { id: "H1", kind: "override_to_cheaper", fromProductId: "PA", toProductId: "PB", at: day(5) },
-          { id: "H2", kind: "override_to_preferred", fromProductId: "PB", toProductId: "PA", at: day(6) },
-          { id: "H3", kind: "override_to_preferred", fromProductId: "PB", toProductId: "PA", at: day(7) },
+          {
+            id: "H1",
+            kind: "override_to_cheaper",
+            fromProductId: "PA",
+            toProductId: "PB",
+            at: day(5),
+          },
+          {
+            id: "H2",
+            kind: "override_to_preferred",
+            fromProductId: "PB",
+            toProductId: "PA",
+            at: day(6),
+          },
+          {
+            id: "H3",
+            kind: "override_to_preferred",
+            fromProductId: "PB",
+            toProductId: "PA",
+            at: day(7),
+          },
           { id: "H4", kind: "reject", fromProductId: "PB", toProductId: null, at: day(8) },
           { id: "H5", kind: "reject", fromProductId: "PB", toProductId: null, at: day(9) },
           // Not this item's products (moved away by a merge): ignored.
           { id: "H6", kind: "reject", fromProductId: "PZ", toProductId: null, at: day(9) },
-          { id: "H7", kind: "override_to_cheaper", fromProductId: "PA", toProductId: "PZ", at: day(9) },
-          { id: "H8", kind: "override_to_cheaper", fromProductId: null, toProductId: "PB", at: day(9) },
+          {
+            id: "H7",
+            kind: "override_to_cheaper",
+            fromProductId: "PA",
+            toProductId: "PZ",
+            at: day(9),
+          },
+          {
+            id: "H8",
+            kind: "override_to_cheaper",
+            fromProductId: null,
+            toProductId: "PB",
+            at: day(9),
+          },
         ],
       }),
     );
@@ -225,7 +261,11 @@ describe("rebuildItemLearning — product stats and preferences (§4.4)", () => 
           receipt(day(3), [{ productId: "PB" }]),
           receipt(day(4), [{ productId: "PA" }]), // the cart's product: no swap
         ],
-        cycles: [cycle(), cycle({ id: "C0", builtAt: day(1) }), cycle({ id: "C9", builtAt: day(30) })],
+        cycles: [
+          cycle(),
+          cycle({ id: "C0", builtAt: day(1) }),
+          cycle({ id: "C9", builtAt: day(30) }),
+        ],
       }),
     );
     expect(r.events).toEqual([
@@ -280,7 +320,13 @@ describe("comparing stored and rebuilt values", () => {
       thresholdAfter: 0.15,
       cycleId: null,
     };
-    const f = { ...e, toProductId: "PB", thresholdBefore: null, thresholdAfter: null, cycleId: "C" };
+    const f = {
+      ...e,
+      toProductId: "PB",
+      thresholdBefore: null,
+      thresholdAfter: null,
+      cycleId: "C",
+    };
     expect(eventKey(f)).toBe("auto_promote||PB|||C");
     expect(eventsDiffer([e, f], [f, { ...e }])).toBe(false);
     expect(eventsDiffer([e], [e, f])).toBe(true);

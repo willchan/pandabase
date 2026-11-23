@@ -1,7 +1,7 @@
 // `pnpm db:rebuild-learning [--items ID,…] [--apply]`: recompute what PandaBase learned from
 // receipts — product stats and stances, the item EMA columns, static → velocity promotion, the
 // switch threshold and the `auto_promote` / `implicit_swap` preference events — from the inputs
-// they came from (DESIGN §4.9, PLAN M11), with the fold in `web/lib/domain/learning.ts`. Imported
+// they came from (DESIGN §4.10, PLAN M11), with the fold in `web/lib/domain/learning.ts`. Imported
 // by relative path, like `rebuild-state.ts`: `@pandabase/db` can't depend on `web`.
 //
 // Without --apply it only counts: per derived column, how many rows would change, and for the
@@ -82,7 +82,11 @@ export interface LearningRebuildPlan {
   itemColumns: Record<ItemColumn, number>;
   productsChanged: number;
   productColumns: Record<ProductColumn, number>;
-  events: { items: number; deleted: Record<RebuiltKind, number>; inserted: Record<RebuiltKind, number> };
+  events: {
+    items: number;
+    deleted: Record<RebuiltKind, number>;
+    inserted: Record<RebuiltKind, number>;
+  };
   /** Changed items per cause; `unexplained` = changed items with none. */
   causes: Record<Cause | "unexplained", number>;
   /** EMA step outcomes of the replay, summed over the items. */
@@ -288,7 +292,10 @@ export async function planLearningRebuild(
       const cols = changedColumns(stored, rebuilt, PRODUCT_COLUMNS);
       if (cols.length === 0) continue;
       for (const c of cols) plan.productColumns[c]++;
-      productChanges.push({ id: p.id, patch: Object.fromEntries(cols.map((c) => [c, rebuilt[c]])) });
+      productChanges.push({
+        id: p.id,
+        patch: Object.fromEntries(cols.map((c) => [c, rebuilt[c]])),
+      });
     }
     const stored = storedByItem.get(it.id) ?? [];
     const eventChange = eventsDiffer(stored, res.events)
@@ -317,7 +324,10 @@ export async function planLearningRebuild(
       if (day > latestDay) latestDay = day;
     }
     if (late) causes.push("late_receipt");
-    if (myLines.some((l) => l.updatedAt > l.createdAt) || myEvents.some((e) => e.updatedAt > e.createdAt)) {
+    if (
+      myLines.some((l) => l.updatedAt > l.createdAt) ||
+      myEvents.some((e) => e.updatedAt > e.createdAt)
+    ) {
       causes.push("edited_after_ingest");
     }
     if (myEvents.some((e) => e.trust === "expired")) causes.push("expired_acquisition");
@@ -349,10 +359,20 @@ export async function applyLearningRebuild(
   const writes = [];
   for (const c of plan.changes) {
     if (c.item) {
-      writes.push(db.update(item).set({ ...c.item, updatedAt: now }).where(eq(item.id, c.itemId)));
+      writes.push(
+        db
+          .update(item)
+          .set({ ...c.item, updatedAt: now })
+          .where(eq(item.id, c.itemId)),
+      );
     }
     for (const p of c.products) {
-      writes.push(db.update(product).set({ ...p.patch, updatedAt: now }).where(eq(product.id, p.id)));
+      writes.push(
+        db
+          .update(product)
+          .set({ ...p.patch, updatedAt: now })
+          .where(eq(product.id, p.id)),
+      );
     }
     if (c.events) {
       if (c.events.deleteIds.length > 0) {
@@ -429,7 +449,7 @@ const COLUMN_NAMES: Record<ItemColumn | ProductColumn, string> = {
 };
 
 export function formatLearningPlan(plan: LearningRebuildPlan, applied: boolean): string {
-  const row = (label: string, n: number | string) => `  ${label.padEnd(40)}${n}`;
+  const row = (label: string, n: number | string) => `  ${label.padEnd(46)}${n}`;
   const verb = applied ? "changed" : "would change";
   const out = [
     `Learning rebuild — ${applied ? "APPLIED" : "dry run"}`,

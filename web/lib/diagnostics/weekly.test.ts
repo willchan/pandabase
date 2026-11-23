@@ -620,7 +620,7 @@ describe("weekly diagnostics", () => {
     expect(dq).toContain('"check":"receipt_hold_released"');
   });
 
-  it("counts learning rebuilds (§4.9) only in weeks that had one", async () => {
+  it("counts learning rebuilds (§4.10) only in weeks that had one", async () => {
     await h.db.insert(systemTelemetry).values({
       id: "01KREBUILD0000000000000000",
       source: "state_engine",

@@ -1,13 +1,7 @@
 // PLAN M11.1: `db:rebuild-learning` against receipts written by the real ingest path (in-memory
 // libSQL). Receipts that arrive in order rebuild to exactly what ingest wrote; a late receipt is
 // the difference the rebuild exists for.
-import {
-  groceryCycle,
-  item,
-  preferenceEvent,
-  product,
-  systemTelemetry,
-} from "@pandabase/db";
+import { groceryCycle, item, preferenceEvent, product, systemTelemetry } from "@pandabase/db";
 import {
   applyLearningRebuild,
   formatLearningPlan,
@@ -45,7 +39,12 @@ let order = 0;
 async function buy(
   at: string,
   lines: { asin?: string; sku?: string; title: string; qty?: number; cents?: number }[],
-  o: { vendor?: string; fulfillment?: "delivery" | "in_store"; orderId?: string; now?: string } = {},
+  o: {
+    vendor?: string;
+    fulfillment?: "delivery" | "in_store";
+    orderId?: string;
+    now?: string;
+  } = {},
 ) {
   return ingestReceipt(
     h.db,

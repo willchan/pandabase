@@ -344,7 +344,7 @@ export async function renderWeekly(
       .orderBy(asc(receiptHold.expiresAt), asc(receiptHold.id))
   ).filter((h) => h.status === "held" || (h.resolvedAt !== null && h.resolvedAt >= end));
   const releasedBy = (o: string) => released.filter((t) => t.p.outcome === o).length;
-  // §4.9: `db:rebuild-learning --apply` runs (one summary row each).
+  // §4.10: `db:rebuild-learning --apply` runs (one summary row each).
   const rebuilds = metric("learning_rebuilt");
   if (stillHeld.length) {
     findings.push({

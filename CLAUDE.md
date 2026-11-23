@@ -78,6 +78,9 @@ pnpm db:rename-items [--apply]    # re-name auto-created items named after a sto
 pnpm db:generate             # after editing db/src/schema/*: new migration in db/migrations (commit it)
 pnpm db:migrate              # apply migrations; db:migrate:prod for Turso (needs TURSO_AUTH_TOKEN)
 pnpm db:rebuild-state        # recompute inventory_state from inventory_event (§4.2 projection)
+pnpm db:rebuild-learning [--items ID,…] [--apply]   # recompute product stats, stances, EMA, tracking
+                             # promotion, switch thresholds from receipts (counts per column + causes
+                             # without --apply; DESIGN §4.10). No terminal: Bootstrap rebuild-learning
 pnpm drizzle-kit check       # migration consistency (any drizzle-kit command works this way)
 pnpm --filter @pandabase/db test   # schema smoke + seed tests (in-memory libSQL)
 pnpm --filter web test -- lib/domain   # domain tests + coverage (≥ 95% lines on lib/domain enforced)

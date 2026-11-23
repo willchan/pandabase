@@ -676,6 +676,8 @@ Implementation notes (`web/lib/domain/receipts.ts`):
   the merge_suggest jobs, deleting only the merge reviews naming one of its items on either side
   (`item_id` or `merge_into_item_id`), clears only its own (and its held) orders' `receipt:…:{order id}` replies,
   and also refuses if another store's imported lines name an item or product it would delete.
+  Its shared-item blockers that come from learning side effects go once the reset rebuilds
+  learning instead (§4.10, PLAN M11.2).
 
 ### 4.6 Review expiry & trust
 
@@ -946,6 +948,56 @@ subscriptions.ts`, service `web/lib/services/subscriptions.ts`, table §2.8, tun
 - **Telemetry:** agent `subscription_page` (`outcome`, `tiles`, `found`, `expected`), State Engine
   `subscription_sync` (`active`, `added`, `ended`, `reopened`) and `subscription_left_out`; weekly
   report §7.
+
+### 4.10 Learning rebuild (M11)
+
+What PandaBase *learns* from receipts is derived from inputs that are kept, so it can be
+recomputed: `rebuildItemLearning` (`web/lib/domain/learning.ts`, pure) folds one item's inputs in
+time order and returns its derived values; `pnpm db:rebuild-learning [--items ID,…] [--apply]`
+(`db/src/rebuild-learning.ts`; Bootstrap action `rebuild-learning`, input `apply`) runs it over
+every unmerged item and compares with what is stored. The derived columns stay where they are, as
+a cache the rebuild owns: nothing that reads them changes. From M11.2 ingest rebuilds the items a
+receipt touched instead of patching them (PLAN M11).
+
+| Inputs (kept) | Derived (rebuilt) |
+|---|---|
+| `receipt` + its lines with an item, not ignored (current item / product / trust, after merges and review answers) | `product.times_bought`, `consecutive_buys`, `last_bought_at`, `last_price_cents`, `last_price_at`, `last_price_fulfillment`, `stance`, `preference_score` |
+| Non-expired `acquired` events; `away_period`, `pause_period` | `item.current_ema_days`, `ema_outlier_streak`, `ema_outlier_direction`, `tracking_type` (promotion only) |
+| `preference_event` of kind `override_to_preferred`, `override_to_cheaper`, `reject` (human) | `item.switch_threshold` |
+| Built cycles' `cart_result` (implicit swaps) | `preference_event` of kind `auto_promote`, `implicit_swap` (replaced) |
+| Item settings (`default_ema_days`, `reorder_threshold`), products' `unit_quantity`, merges | — |
+
+- **Velocity** (§4.1): same-day-merged acquisitions in time order through `updateVelocity`, with
+  away periods and cart pauses as at ingest (a step across a pause is `paused`). Every item a
+  receipt creates starts `static`; a second purchase within `promoteToVelocityWithinDays`
+  promotes it (`shouldPromoteToVelocity`, never with a reorder threshold) and EMA learning starts
+  there. An item that is `velocity` now but that the replay never promotes was created that way
+  (the seed) and learns from its first acquisition. The rebuild never demotes.
+- **Products** (§4.4): receipts by `acquired_at` (ties by ingest time) and human preference events
+  by `created_at`, in one timeline, from `NEW_PRODUCT_STANCE`, score 0, no stats and the default
+  switch threshold. A receipt: `recordPurchase` per distinct confirmed product of its lines (§4.8
+  warehouse-price rule included), then an implicit swap if the last cycle built *before the
+  receipt was ingested* (`created_at`) had this order's cart (`receiptMatchesCycleOrder`) with
+  another product of the item — what `applyReceipt` saw. A rejection: `rejectProduct`. An override:
+  `learnFromOverride` in its recorded direction (the kind is the human's choice, not today's
+  preferred product). Human events' own rows are kept; only their effects are replayed.
+- **Merges** are folded as if the items had always been one: the target's history includes every
+  merged item's lines, events, preference events (by their products' current item) and cart
+  lines. The merge's stance reset (moved products become acceptable) isn't replayed — the
+  combined history decides stances. `switch` events are a log of what a cart build chose (they
+  change no derived value), so they are kept, not regenerated.
+- **Dry run** (default): counts per derived column of the rows that would change, the preference
+  events that would be removed / added per kind, the EMA replay's step outcomes, and for each
+  changed item the known causes its history shows — `late_receipt` (ingested after a receipt
+  acquired later: ingest skipped its EMA step and moved `last_bought_at` back),
+  `edited_after_ingest` (lines or events changed later, e.g. review answers, which re-run no
+  learning at ingest), `expired_acquisition`, `merged`, `human_events`, `paused_step` and `costco`;
+  `unexplained` counts changed items with none. Reals compare within 1e-9. Counts only (Actions
+  logs are public). `--apply` writes every change in one batch and emits one `learning_rebuilt`
+  row (the counts; weekly report §3). Telemetry is never replayed.
+- A database whose learning was written directly (`db:seed`) differs everywhere: the seed's stats
+  are synthetic, not folded from its receipts. Production's 494 items rebuilt with one difference
+  (2026-11-23, a late Costco delivery receipt).
 
 ## 5. Media pipeline
 
@@ -1256,7 +1308,9 @@ raised, lowered}`, `review_resolved {reviewId, kind, outcome,
 impactScore, ageHours, …line counts}`, `item_merged {itemId, intoItemId, reviewKind, eventScale}`,
 `item_settings_changed {itemId, fields}`, `settings_changed {keys}`, `presumed_discarded`,
 `maintenance_run`, `settings_rejected {keys}`, `receipt_held` / `receipt_hold_released` (§4.5
-*Held receipts*; report §3), `merge_suggest_requested {trigger: backfill|cron,
+*Held receipts*; report §3), `learning_rebuilt {scope, items, itemsChanged, itemColumns,
+productsChanged, productColumns, eventItems, eventsDeleted, eventsInserted, causes}` (§4.10,
+one per `db:rebuild-learning --apply`; report §3), `merge_suggest_requested {trigger: backfill|cron,
 jobIds, candidates, items}`, `merge_suggestions_created {jobId, items, suggestions, created,
 duplicate, low_confidence, merged, self, unknown, both_confirmed}` (accepted / dismissed / expired
 suggestions are the `review_resolved` / `review_expired` rows of kind `merge_suggestion`); source `session`: `ui_action {action, ok, latencyMs,
@@ -1657,5 +1711,6 @@ docker-compose.yml (+ docker-compose.build.yml), Makefile, CLAUDE.md, README.md,
 | 83 | A Costco (`receipts.holdVendors`) digital receipt whose totals check fails is held — stored, not applied — until a re-read of the order adds up, or for 14 days, then applied as read (§4.5 *Held receipts*) | In the first Costco sweep (2026-11-16) the two receipts with wrong lines were exactly the two whose totals failed, and applying them changed shared items (buy streaks, stances, usage rates) that an order-id-deduped re-ingest can't correct; `db:reset-imports --vendor` then refused because those items were shared with Amazon's import. Holding costs nothing when the parser is fixed in time. Never applying would lose the purchase for good (the item looks unbought and is ordered again), and both live failures had their items right, so the default after two weeks is to apply as read. Costco only for now: 33 of 35 checked Whole Foods orders failed the check because the parser misread the item grid (§6), so holding them would have held nearly every order, the weekly cart's included. A separate `receipt_hold` table, not a `held` receipt status: widening `receipt.status`'s CHECK would rebuild `receipt` |
 | 84 | Server functions leave out sharp (§8 *Function size*) | Function Storage on the free Vercel team (shared with Bamboo) reached 75% of 10 GB in 2026-11; every kept deployment holds its functions, and sharp was over half of each one while nothing here uses it. Previews stay on (tier A′ needs them); the team's retention policy deletes old deployments |
 | 85 | A cart pause is its own period, not an away period: no cart, no Friday check-in, no EMA learning across it, days still count as eating | Parental leave (2026-11): home all day and shopping at 99 Ranch without receipts. An away period would subtract those days and make rates look faster afterwards; letting the EMA run would accept three "slow" gaps in a row as a habit change. Freezing keeps the pre-leave rates, which are the best guess for when life is back to normal |
-| 86 | Learning from receipts is derived, not accumulated: product stats, auto-promoted stances, usage rates, tracking promotion and switch thresholds are recomputed from receipts and recorded human decisions (`db:rebuild-learning`), with the columns kept as a cache (PLAN M11, planned) | Receipts are applied once as in-place edits and ingest dedupes on the order id, so a misread receipt can't be corrected and one store's import can't be removed once it touched a shared item: Amazon needed a full reset (#62), and Costco's reset refuses on production because two misread receipts moved Amazon products' buy streaks and stances (2026-11-16). Every new store's parser is wrong at first on live pages, so this recurs per store. Inventory already works this way (`db:rebuild-state`); the learning functions are pure, so replaying them is mostly bookkeeping. Kept the columns (expand-only) so nothing that reads them changes |
+| 86 | Learning from receipts is derived, not accumulated: product stats, auto-promoted stances, usage rates, tracking promotion and switch thresholds are recomputed from receipts and recorded human decisions (`db:rebuild-learning`, §4.10), with the columns kept as a cache (PLAN M11: the rebuild in M11.1, ingest and reset use it from M11.2) | Receipts are applied once as in-place edits and ingest dedupes on the order id, so a misread receipt can't be corrected and one store's import can't be removed once it touched a shared item: Amazon needed a full reset (#62), and Costco's reset refuses on production because two misread receipts moved Amazon products' buy streaks and stances (2026-11-16). Every new store's parser is wrong at first on live pages, so this recurs per store. Inventory already works this way (`db:rebuild-state`); the learning functions are pure, so replaying them is mostly bookkeeping. Kept the columns (expand-only) so nothing that reads them changes |
 | 87 | Subscribe & Save items are read from the member's `/auto-deliveries` page each sweep and left out of the cart; only a list whose tiles match the page's category counts is synced, and a subscription not confirmed for 21 days stops counting (§4.9) | The household's carts filled with one-time buys of items already delivered by subscription (2026-11). Flagging S&S lines on order pages would miss subscriptions until they deliver and never notice a cancellation; a manual per-item switch would need the household to keep it in step with Amazon. The page is the source of truth and costs one read-only load per sweep. Replacing the list makes cancellations visible, so a short read would wrongly end live subscriptions: hence the count check. The stale window bounds the opposite failure (a broken sync hiding items for good) |
+| 88 | The learning rebuild folds merged items as one item, replays a human override in its recorded direction, compares an implicit swap with the cart built before the receipt was ingested, treats every receipt-created item as born `static`, and keeps `switch` events (§4.10) | Each choice reproduces what ingest did for a history that arrived in order — on the production copy (2026-11-23) 493 of 494 items rebuilt to exactly their stored values, the one difference a late receipt — while letting a late or corrected receipt take its place. A merge's stance reset was a side effect of moving products, not a preference; replaying "the item as it is now" is what a rebuild after any merge needs anyway. The override kind is the human's choice; recomputing "toward preferred" from rebuilt stances could flip its sign. No input records an item's original tracking type, and ingest only ever creates `static` items. `switch` events change no derived value and need the build's quotes to regenerate |

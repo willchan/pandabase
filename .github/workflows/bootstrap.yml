@@ -3,7 +3,7 @@ name: Bootstrap
 # Database steps without a terminal (docs/SETUP-CLOUD.md): migrate a Turso database, add / update
 # a household member (`pnpm db:add-member`), reset the digital receipt import
 # (`pnpm db:reset-imports`, DESIGN §4.5), re-name brand-named items (`pnpm db:rename-items`) or
-# recompute what was learned from receipts (`pnpm db:rebuild-learning`, DESIGN §4.9),
+# recompute what was learned from receipts (`pnpm db:rebuild-learning`, DESIGN §4.10),
 # using the chosen GitHub environment's TURSO_* secrets. Run it from GitHub (web or app):
 # Actions → Bootstrap → Run workflow. Every action is idempotent; reset-imports, rename-items and
 # rebuild-learning only count unless `apply` is ticked, and print counts only (never names). Inputs are validated

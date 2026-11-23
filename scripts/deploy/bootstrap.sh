@@ -13,7 +13,7 @@
 #   RESET_APPLY        true | false                     reset-imports / rename-items /
 #                      rebuild-learning: false (default) only counts; true deletes the digital
 #                      receipt import (refused if human data is found) / renames brand-named
-#                      auto-created items / writes the rebuilt learning (DESIGN §4.9)
+#                      auto-created items / writes the rebuilt learning (DESIGN §4.10)
 #   RESET_VENDOR       all | amazon | wholefoods | costco   reset-imports: one store's import only
 #                      (all = every store, the default)
 #   DRY_RUN=1          validate and print the command; touch nothing
