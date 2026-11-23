@@ -36,4 +36,5 @@ form's `action`, `ASIN.n` inputs, and visible text.
 | `product_jsonld.html`, `product_offscreen.html`, `product_no_price.html` | price checks |
 | `order_details_live_instore_purchased_at.html` | live Whole Foods in-store purchase (`/fopo/`): "Purchased at <store>" / "Purchased on <date>", no "in store" wording |
 | `order_details_live_pickup_undated.html` | live Whole Foods pickup (`/uff/`) a year on: "Ordered on", no "Picked up" anywhere, hidden alert boilerplate ("could not be cancelled", "in process") |
+| `order_details_live_pickup_grid.html` | live Whole Foods item grid (Quantity \| Weight \| Total, `{ASIN}-item-grid-row` / `-item-priced-by-quantity` / `-item-total-price`): a weighed item ordered by count, one ordered by weight, a bare quantity of 2, a refunded unit, an out-of-stock item, a plain line |
 | `order_details_live_returned.html` | Amazon order returned in full: "Refund Total" equal to the grand total, "Return complete" |

@@ -1412,9 +1412,17 @@ This Week with a planned trip; the prod copy for the store split of the real cat
     `receipt_sweep.held`; weekly report §3 counts them. Does not fix the six receipts already
     applied: those still need a reset.
   - **Costco only (2026-11-17, the day #78 shipped):** the prod copy showed 33 of 35 checked Whole
-    Foods orders failing the totals check (weighed produce, ~6% either way) and 11 of 163 Amazon
+    Foods orders failing the totals check (~6% either way) and 11 of 163 Amazon
     ones, so #78 would have held nearly every Whole Foods order, the weekly cart's included. Holds
     now apply only to `receipts.holdVendors` (`costco`). The `--vendor costco` reset of the six
     applied receipts is still blocked on production (14 other-store lines name Costco-created
     items; 4 Costco lines matched items an earlier import created); only the all-stores reset is
     unblocked.
+  - **Whole Foods item grid (2026-11-22):** the failures weren't the store's: two saved live
+    orders add up to their subtotal to the cent. The parser misread the grid's Quantity | Weight |
+    Total cells — a weighed item's per-lb price as its price, a bare "2" as 1 (multi-unit buys
+    undercounted in inventory), out-of-stock and refunded units as bought. It now reads the grid by
+    its ids (DESIGN §6 *Whole Foods item grid*; synthetic fixture
+    `order_details_live_pickup_grid.html`). Orders already imported keep their old lines until
+    they're re-imported (the all-stores reset, still the owner's call). Next: importers declare
+    whether their totals are exact (replacing `holdVendors`), so a new store needs no list edit.
