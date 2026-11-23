@@ -10,6 +10,7 @@ import {
   Timestamp,
 } from "./common";
 import { CostcoWaitingLine, PlanStore } from "./costco";
+import { SubscribedLine } from "./subscriptions";
 import { named } from "./registry";
 
 export const CartResultLine = named(
@@ -40,6 +41,8 @@ export const CartResult = named(
     costco_bridged_item_ids: z.array(z.string()).optional(),
     /** §4.8 Costco items left out for the planned trip (`wait`); absent before M10.2. */
     costco_waiting_item_ids: z.array(z.string()).optional(),
+    /** §4.9 items left out because Subscribe & Save delivers them; absent before then. */
+    subscribed_item_ids: z.array(z.string()).optional(),
   }),
 );
 
@@ -245,6 +248,8 @@ export const PredictionsResponse = named(
     costco_trip_date: LocalDate.nullable(),
     /** Costco items left out of this cart until that trip. */
     costco_waiting: z.array(CostcoWaitingLine),
+    /** Items left out because Subscribe & Save delivers them (§4.9). */
+    subscribed: z.array(SubscribedLine),
   }),
 );
 
@@ -294,6 +299,8 @@ export const CartResponse = named(
     costco_trip_date: LocalDate.nullable(),
     /** Costco items left out of this cart until the planned trip (§4.8 `wait`). */
     costco_waiting: z.array(CostcoWaitingLine),
+    /** Items left out because Subscribe & Save delivers them (§4.9). */
+    subscribed: z.array(SubscribedLine),
   }),
 );
 

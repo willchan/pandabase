@@ -181,13 +181,20 @@
               "$ref": "#/components/schemas/CartLine"
             },
             "type": "array"
+          },
+          "subscribed": {
+            "items": {
+              "$ref": "#/components/schemas/SubscribedLine"
+            },
+            "type": "array"
           }
         },
         "required": [
           "cycle_id",
           "lines",
           "costco_trip_date",
-          "costco_waiting"
+          "costco_waiting",
+          "subscribed"
         ],
         "type": "object"
       },
@@ -226,6 +233,12 @@
           "recorded_at": {
             "format": "date-time",
             "type": "string"
+          },
+          "subscribed_item_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
           },
           "vendors": {
             "items": {
@@ -2489,6 +2502,12 @@
               "type": "string"
             },
             "type": "array"
+          },
+          "subscribed": {
+            "items": {
+              "$ref": "#/components/schemas/SubscribedLine"
+            },
+            "type": "array"
           }
         },
         "required": [
@@ -2498,7 +2517,8 @@
           "skipped_item_ids",
           "needs_price_check_item_ids",
           "costco_trip_date",
-          "costco_waiting"
+          "costco_waiting",
+          "subscribed"
         ],
         "type": "object"
       },
@@ -3132,6 +3152,143 @@
           "cheaper"
         ],
         "type": "string"
+      },
+      "SubscribedLine": {
+        "properties": {
+          "asin": {
+            "type": "string"
+          },
+          "item_id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "next_delivery_on": {
+            "format": "date",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "runout_at": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "item_id",
+          "name",
+          "asin",
+          "runout_at",
+          "next_delivery_on"
+        ],
+        "type": "object"
+      },
+      "SubscriptionIn": {
+        "properties": {
+          "asin": {
+            "pattern": "^[A-Z0-9]{10}$",
+            "type": "string"
+          },
+          "next_delivery_on": {
+            "format": "date",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "schedule": {
+            "maxLength": 200,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "title": {
+            "maxLength": 500,
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "asin"
+        ],
+        "type": "object"
+      },
+      "SubscriptionSyncRequest": {
+        "properties": {
+          "account": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "subscriptions": {
+            "items": {
+              "$ref": "#/components/schemas/SubscriptionIn"
+            },
+            "maxItems": 500,
+            "type": "array"
+          },
+          "vendor": {
+            "const": "amazon",
+            "default": "amazon",
+            "type": "string"
+          }
+        },
+        "required": [
+          "account",
+          "subscriptions"
+        ],
+        "type": "object"
+      },
+      "SubscriptionSyncResponse": {
+        "properties": {
+          "account_member_id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          },
+          "active": {
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "added": {
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "ended": {
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "reopened": {
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "synced_at": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "account_member_id",
+          "synced_at",
+          "active",
+          "added",
+          "ended",
+          "reopened"
+        ],
+        "type": "object"
       },
       "TelemetryEvent": {
         "properties": {
@@ -6356,6 +6513,104 @@
           }
         ],
         "summary": "Digital/manual receipt → resolve, apply, EMA (deduped)",
+        "x-scopes": [
+          "agent"
+        ]
+      }
+    },
+    "/api/subscriptions/sync": {
+      "post": {
+        "operationId": "syncSubscriptions",
+        "parameters": [
+          {
+            "description": "Replays the stored response for 24h (same key + route + scope).",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "maxLength": 200,
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SubscriptionSyncRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubscriptionSyncResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing or invalid credentials"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Wrong scope, or unknown actor_discord_id"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Not found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Conflict (e.g. invalid cycle transition, stale job attempt)"
+          }
+        },
+        "security": [
+          {
+            "agent": []
+          }
+        ],
+        "summary": "Replace a member's Subscribe & Save list (the sweep read it completely)",
         "x-scopes": [
           "agent"
         ]

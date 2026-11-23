@@ -86,6 +86,10 @@ class FakeDriver:
         page = self.add(asin, qty) if self.add else None
         return self._land(page) if page else checked(Snapshot(self.current or "", self.html))
 
+    def subscriptions_ready(self) -> Snapshot:
+        """What `CdpDriver.subscriptions_ready` returns: the page as it is (fixtures are whole)."""
+        return checked(Snapshot(self.current or "", self.html))
+
     def __enter__(self) -> FakeDriver:
         return self
 

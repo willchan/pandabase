@@ -9,6 +9,7 @@ import {
   type Store,
   type StoreWhy,
 } from "./storeChoice";
+import type { ItemSubscription } from "./subscriptions";
 import { addDays, localDate } from "./time";
 
 export type RestockReason = "runout" | "critical" | "consumed" | "static_threshold";
@@ -113,6 +114,8 @@ export interface PlanItemInput {
   products: readonly ProductCandidate[];
   /** `item.store_pin` (§4.8). */
   storePin?: Store | null;
+  /** An active Subscribe & Save subscription covers it (§4.9, `subscribedItems`). */
+  subscription?: ItemSubscription | null;
 }
 
 /** Why a Costco item stays in the weekly cart (`bridge`, §4.8). */
@@ -169,6 +172,11 @@ export interface CartPlan {
   costcoWaiting: { itemId: string; runoutAt: string | null; store: StoreNote }[];
   /** The store choice of every restock-flagged item (telemetry `store_choice`). */
   storeChoices: ({ itemId: string } & StoreNote)[];
+  /**
+   * Restock-flagged items an active Subscribe & Save subscription delivers (§4.9): left out of
+   * the cart (and off *please check*) unless an override adds them back this week.
+   */
+  subscribed: ({ itemId: string; runoutAt: string | null } & ItemSubscription)[];
 }
 
 /** §4.8 for one restock-flagged item: its store, and for a Costco item the weekly cart's timing. */
@@ -210,6 +218,8 @@ export function storeNote(
  * §4.8: a flagged item whose store is Costco waits for a planned trip that comes before it runs
  * out (left out); otherwise it stays, bridging to Costco. An override on a waiting item puts it
  * back in the weekly cart (a human asked for it this week).
+ * §4.9: a flagged item an active Subscribe & Save subscription delivers is left out the same way
+ * (before store choice: Amazon brings it whatever the store), and an override puts it back too.
  */
 export function planCart(input: {
   items: readonly PlanItemInput[];
@@ -263,9 +273,16 @@ export function planCart(input: {
   const lapsed: CartPlan["lapsed"] = [];
   const waiting = new Map<string, CartPlan["costcoWaiting"][number]>();
   const storeChoices: CartPlan["storeChoices"] = [];
+  const subscribed = new Map<string, CartPlan["subscribed"][number]>();
   for (const i of items) {
     const reason = restockReason(i.item, i.estimate, now, config);
-    if (reason) {
+    if (reason && i.subscription) {
+      subscribed.set(i.itemId, {
+        itemId: i.itemId,
+        runoutAt: i.estimate.runoutAt,
+        ...i.subscription,
+      });
+    } else if (reason) {
       const store = storeNote(i, tripDate, quotes, config);
       storeChoices.push({ itemId: i.itemId, ...store });
       if (store.timing === "wait") {
@@ -298,15 +315,18 @@ export function planCart(input: {
       let line = lines.get(o.itemId!);
       if (!line) {
         const wait = waiting.get(o.itemId!);
+        // Flagged but set aside (Costco wait or Subscribe & Save): the restock reason still holds.
+        const flagged = wait ?? subscribed.get(o.itemId!);
         line = known
           ? lineFor(
               known,
-              wait ? (restockReason(known.item, known.estimate, now, config) ?? null) : null,
+              flagged ? (restockReason(known.item, known.estimate, now, config) ?? null) : null,
             )
           : bare(o.itemId!);
         // A human asked for a waiting Costco item this week: it bridges after all.
         if (wait) line.store = { ...wait.store, timing: "bridge", bridgeCause: "needed_now" };
         waiting.delete(o.itemId!);
+        subscribed.delete(o.itemId!);
         lines.set(o.itemId!, line);
       }
       skipped.delete(o.itemId!);
@@ -355,5 +375,6 @@ export function planCart(input: {
     needsPriceCheckItemIds: all.filter((l) => l.choice?.needsPriceCheck).map((l) => l.itemId!),
     costcoWaiting: [...waiting.values()],
     storeChoices,
+    subscribed: [...subscribed.values()],
   };
 }

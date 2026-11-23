@@ -560,6 +560,8 @@ def build(
         "costco_trip_date": cart.costco_trip_date.isoformat() if cart.costco_trip_date else None,
         "costco_waiting": [w.name for w in cart.costco_waiting],
         "costco_bridged": [x.name for x in cart.lines if x.bridging_to_costco],
+        # §4.9: due items left out because Subscribe & Save delivers them.
+        "subscribed": [x.name for x in cart.subscribed],
         "result_posted": posted,
         "layout_alert": None if raised else alert,
         "layout_alert_already_raised": bool(raised),

@@ -322,6 +322,36 @@ class StorePinRequest(BaseModel):
     store: Literal["costco", "regular"] | None
 
 
+class SubscribedLine(BaseModel):
+    asin: str
+    item_id: Annotated[str, Field(max_length=64, min_length=1)]
+    name: str
+    next_delivery_on: date_aliased | None
+    runout_at: AwareDatetime | None
+
+
+class SubscriptionIn(BaseModel):
+    asin: Annotated[str, Field(pattern="^[A-Z0-9]{10}$")]
+    next_delivery_on: date_aliased | None = None
+    schedule: Annotated[str | None, Field(max_length=200)] = None
+    title: Annotated[str | None, Field(max_length=500)] = None
+
+
+class SubscriptionSyncRequest(BaseModel):
+    account: Annotated[str, Field(min_length=1)]
+    subscriptions: Annotated[list[SubscriptionIn], Field(max_length=500)]
+    vendor: Literal["amazon"] = "amazon"
+
+
+class SubscriptionSyncResponse(BaseModel):
+    account_member_id: Annotated[str, Field(max_length=64, min_length=1)]
+    active: Annotated[int, Field(ge=0, le=9007199254740991)]
+    added: Annotated[int, Field(ge=0, le=9007199254740991)]
+    ended: Annotated[int, Field(ge=0, le=9007199254740991)]
+    reopened: Annotated[int, Field(ge=0, le=9007199254740991)]
+    synced_at: AwareDatetime
+
+
 class TelemetryEvent(BaseModel):
     metric_type: Annotated[str, Field(pattern="^[a-z][a-z0-9_]{0,63}$")]
     occurred_at: AwareDatetime | None = None
@@ -388,6 +418,7 @@ class CartResponse(BaseModel):
     costco_waiting: list[CostcoWaitingLine]
     cycle_id: Annotated[str, Field(max_length=64, min_length=1)]
     lines: list[CartLine]
+    subscribed: list[SubscribedLine]
 
 
 class CartResult(BaseModel):
@@ -397,6 +428,7 @@ class CartResult(BaseModel):
     order_ids: list[str]
     please_check_item_ids: list[str]
     recorded_at: AwareDatetime
+    subscribed_item_ids: list[str] | None = None
     vendors: list[str]
 
 
@@ -731,3 +763,4 @@ class PredictionsResponse(BaseModel):
     lines: list[PlanLine]
     needs_price_check_item_ids: list[str]
     skipped_item_ids: list[str]
+    subscribed: list[SubscribedLine]

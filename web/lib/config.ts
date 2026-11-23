@@ -145,6 +145,14 @@ export const DEFAULT_CONFIG = {
    */
   receipts: { heldExpireDays: 14, holdVendors: ["costco"] as string[] },
 
+  /**
+   * §4.9 Subscribe & Save: a subscription the agent's sweep last listed more than `staleAfterDays`
+   * ago stops keeping its item out of the cart plan (a broken or paused sync must not hide an item
+   * the household no longer gets on a schedule). Sweeps run daily or weekly, so three weeks is
+   * several missed syncs.
+   */
+  subscriptions: { staleAfterDays: 21 },
+
   /** §4.6 Review expiry windows in days (`null` = never expires). */
   reviewExpiryDays: {
     receipt: 14,
