@@ -1622,6 +1622,46 @@ reads receipts.
   - Still to do: merge suggestions after the import (most Costco abbreviations match no existing
     item), and the held-receipts retirement contract PR (§10 #90). M10.4 can start.
 
+- **Held receipts retired, step 1 — stop holding (2026-11-23, DESIGN §4.5 *Failing totals*,
+  *Held receipts*, §10 #83 superseded by #90).** Expand → contract, two PRs:
+  - Ingest applies a failing digital receipt as read (`status: "applied"`, `totals_check:
+    "fail"`); a later read that differs replaces it (M11.2). `holdsReceipt`,
+    `heldReceiptExpiry`, `receipts.holdVendors` / `heldExpireDays` and `receipt_held` telemetry
+    are removed. Regression: `web/app/api/receipts/totals-fail.test.ts` (was `held.test.ts`).
+  - Both sweeps key the re-read on `totals_check: fail` instead of `status: "held"` (an older
+    State Engine's `held` is treated alike): the order goes to the state file's `recheck` map
+    (old `held` maps load into it), is re-read on every sweep for `RECHECK_DAYS` (14; was: until
+    held no more, forgotten after 60 days), then counted done. Body-hash idempotency keys kept.
+    `receipt_sweep.held` → `totals_fail`; the Costco reply says "stocked it as read".
+    `receipts ingest` (agent extraction) does the same.
+  - Contracts unchanged in shape: `status: "held"` and `held_until` stay, documented as never
+    sent, so the new agent parses the old API during the Mac's update window; the old agent
+    against the new API marks a failing order done (loses only its re-read). No regenerated diff.
+  - **Holds on production — decision: release them.** Prod copy 2026-11-23 (counts only): 2
+    `receipt_hold` rows, both Whole Foods, `held`, from 2026-11-18 and 11-20 (expiring 12-02 and
+    12-04), 3 and 2 reads. `main` already applies a Whole Foods hold on its next re-read (Costco
+    is the only hold vendor), yet the sweeps since 11-22 report 0 held and the rows are still
+    `held`: the Mac's sweeps aren't re-reading them (worth a look at `receipts-<member>.json` on
+    the Mac — not done here). So the daily cron's `releaseHolds` (replacing `applyExpiredHolds`)
+    applies every hold still `held` as read, whatever its expiry, on its first run after this
+    merges. On copies: release → 2 applied, holds `expired`; a re-read → 2 applied, holds
+    `applied`; both change the cart plan identically (the purchases are recorded).
+  - Weekly report §3: the held line is replaced by *Digital receipts whose lines don't add up
+    (applied as read)* (per store; a finding, `totals_fail_applied` in `data_quality`), plus
+    *Held receipts left from before #90* while any hold row touches the week.
+  - **Prod copy (main vs branch, counts only):** re-ingesting all 240 already-seen digital
+    receipts → 240 duplicates on both; cart plan, items and products identical (hashes) on both
+    and before/after; the last 4 weekly reports differ only in the §3 lines above. A synthetic
+    failing Costco order (an existing one with a new id, subtotal + 1¢) on a copy: `main` holds
+    it (0 lines), the branch applies it (6 lines, `fail`). Copies deleted.
+  - **Step 2 (contract PR) — what must be true first:** production has 0 `receipt_hold` rows with
+    status `held` (prod copy; expected after the first daily cron following this merge), and the
+    deployed web is this release (nothing then creates holds; only `releaseHolds`,
+    `resolveHoldIn`, the weekly report and `db:reset-imports` read the table). Then drop
+    `receipt_hold` with a marked contract migration, remove those readers, `applied_held_receipts`
+    (or leave it 0) and `status: "held"` / `held_until` from the contract — the Mac agent from
+    this release no longer needs them.
+
 ---
 
 ## After M10.3 — Subscribe & Save

@@ -604,7 +604,9 @@ describe("weekly diagnostics", () => {
     );
   });
 
-  it("counts held receipts (§4.5) and flags the ones still held at the end of the week", async () => {
+  // §10 #90: failing digital receipts are applied as read, so the report counts them (and any
+  // hold left from before #90, released by the daily cron) instead of holds.
+  it("counts digital receipts whose totals don't add up, and legacy holds released", async () => {
     const ingest = (id: string, subtotal: number) =>
       h.call(HANDLERS.receiptsIngest.POST, "/api/receipts/ingest", {
         body: {
@@ -621,22 +623,30 @@ describe("weekly diagnostics", () => {
           ],
         },
       });
-    await ingest("1000000123", 399); // held, never fixed
-    await ingest("1000000456", 399); // held, then re-read right
+    await ingest("1000000123", 399); // doesn't add up, never fixed
+    await ingest("1000000456", 399); // doesn't add up, then re-read right (replaced)
     await ingest("1000000456", 699);
+    await h.db.insert(systemTelemetry).values({
+      id: "01KHOLDRELEASED00000000000",
+      source: "state_engine",
+      metricType: "receipt_hold_released",
+      payload: { holdId: "01KHOLD", vendor: "wholefoods", outcome: "released", attempts: 3 },
+      createdAt: "2026-10-21T15:00:00.000Z",
+    });
     const report = await renderWeekly(h.db, "2026-W43", {
       ...ctx,
       now: "2026-10-27T16:00:00.000Z",
     });
     expect(report.markdown).toContain(
-      "Held receipts (totals don't add up, not applied): 1 held at the end of the week, 2 newly held, 1 applied after a re-read, 0 applied as read on expiry.",
+      "Digital receipts whose lines don't add up (applied as read): 1 (costco 1).",
     );
-    expect(report.markdown).toContain("1. 1 digital receipt(s) held:");
     expect(report.markdown).toContain(
-      "Held: costco order …000123 (2026-10-20), 1 read(s), applied as read on 2026-11-03",
+      "Held receipts left from before #90: 0 held at the end of the week, 1 applied (1 released as read by the cron).",
     );
+    expect(report.markdown).toMatch(/\d\. 1 digital receipt\(s\) don't add up to their subtotal/);
+    expect(report.markdown).not.toContain("still held");
     const dq = report.extracts.find((e) => e.name === "data_quality.jsonl")!.jsonl;
-    expect(dq).toContain('"check":"receipt_held"');
+    expect(dq).toContain('"check":"totals_fail_applied"');
     expect(dq).toContain('"check":"receipt_hold_released"');
   });
 

@@ -902,25 +902,28 @@ def test_receipts_ingest_gives_the_closed_cycles_discord_thread(config: Path) ->
     assert out["closed_cycle_id"] == "C1" and out["closed_cycle_thread_id"] == "T1"
 
 
-def test_receipts_ingest_leaves_a_held_receipt_for_the_next_sweep(config: Path) -> None:
-    """§4.5: the State Engine held the agent's own extraction (totals don't add up), so the order
-    isn't marked done: the next sweep hands it over again."""
+@pytest.mark.parametrize("status", ["applied", "held"])
+def test_receipts_ingest_leaves_a_failing_receipt_for_the_next_sweep(
+    config: Path, status: str
+) -> None:
+    """§10 #90: the agent's own extraction doesn't add up (`totals_check: fail`) — applied as read,
+    or held by a State Engine from before #90 — so the order isn't marked done: the next sweep
+    hands it over again."""
     (config.parent / "state").mkdir(exist_ok=True)
-    held = {
-        "receipt_id": "H1",
+    failing = {
+        "receipt_id": "R1",
         "duplicate": False,
-        "status": "held",
+        "status": status,
         "totals_check": "fail",
         "lines": [],
         "new_item_ids": [],
         "review_ids": [],
         "closed_cycle_id": None,
-        "held_until": "2026-11-01T19:00:00Z",
     }
     api = FakeApi(
         {
             "GET /api/grocery/cycle/current": lambda _: {"cycle": None},
-            "POST /api/receipts/ingest": lambda _: held,
+            "POST /api/receipts/ingest": lambda _: failing,
         }
     )
     body = {
@@ -933,9 +936,9 @@ def test_receipts_ingest_leaves_a_held_receipt_for_the_next_sweep(config: Path) 
     code, out = run(
         config, ["receipts", "ingest", "--member", "will", "--json", json.dumps(body)], api
     )
-    assert code == 0 and out["status"] == "held"
+    assert code == 0 and out["status"] == status
     state = receipt_parser.SweepState.load(config.parent / "state" / "receipts-will.json")
-    assert state.done == {}
+    assert state.done == {} and "114-0000004-0000004" in state.recheck
 
 
 # Costco trips (DESIGN §4.8) --------------------------------------------------------------------

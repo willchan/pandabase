@@ -170,8 +170,9 @@ naive fold; since M3 it calls `projectInventory` from `web/lib/domain/inventory.
 `total_cents`, `totals_check` (`pass`|`fail`|`n/a`), `job_id`, `status` (`applied`|`pending_review`|`partial`).
 `acquired_at` is required (it feeds the paper dedupe key and the EMA); `ordered_at` is nullable.
 
-**receipt_hold** (§4.5 *Held receipts*, migration `0004_receipt_holds`) — a digital receipt whose
-totals check failed, stored but not applied: `dedupe_key` (unique; the receipt's), `source`,
+**receipt_hold** (§4.5 *Held receipts*, migration `0004_receipt_holds`; **retired**, §10 #90: nothing
+writes a new row, the daily cron releases what's left, and a contract PR drops the table once
+production has none `held`) — a digital receipt whose totals check failed, stored but not applied: `dedupe_key` (unique; the receipt's), `source`,
 `vendor`, `account_member_id`, `external_order_id`, `acquired_at`, `input` (json: the latest
 ingest's `ReceiptInput`), `attempts`, `status` (`held`|`applied`|`expired`), `expires_at`,
 `resolved_at` (set iff not `held`, CHECK), `receipt_id` (the receipt it became). A separate table
@@ -566,43 +567,38 @@ are paper and manual receipts always.
   (`ingest_key`), so a changed read is never answered from the 24 h reply store while the same
   read stays idempotent.
 
-**Held receipts** (to be retired, §10 #90: since M11.2 a re-read replaces an applied misread, so
-holding it is no longer needed; it still works as below until a contract PR removes it)
-(`holdsReceipt` in `web/lib/domain/receipts.ts`; `ingestReceiptIn` in
-`web/lib/services/receipts.ts`): a **digital** receipt from a `receipts.holdVendors` store (`costco`)
-whose totals check fails is stored as a `receipt_hold` and **not applied** — no receipt row, lines, items, products, inventory events,
-item/product/preference changes, reviews, cycle closure or Costco trip link. Its lines are what a
-parser read off a page; once applied (new items, buy streaks, product stances, usage rates), a
-misread can't be corrected by re-reading the order (ingest dedupes on it) without resetting every
-store's import (§10 #83). The response is `status: "held"`, `totals_check: "fail"`, no lines,
-`receipt_id` = the hold's id and `held_until` = its expiry.
-- *Re-ingest* of the same order (same dedupe key) while held: still failing → the hold's `input` is
-  replaced (a newer parser's read), `attempts` += 1, the expiry stays; adding up (or unchecked: a
-  subtotal or line total missing) → applied normally, and the hold becomes `applied` with its
-  `receipt_id`. After that the order is an ordinary duplicate.
-- *Default outcome and expiry:* the daily cron (`applyExpiredHolds`, maintenance
-  `applied_held_receipts`) applies a hold still `held` at `expires_at` (`receipts.heldExpireDays`,
-  14, after it was first held) **as read**, through the same `applyReceipt` path, and marks it
-  `expired`. Nothing waits on a person: a parser fix within two weeks lands the right lines; after
-  that, a lost purchase (the item looks unbought, so the weekly cart buys it again) costs more than
-  one wrong line — both live failures had their items right and a price or quantity off.
-- *Agent:* a held response isn't "done" in the sweep's state file (`held` instead), so every
-  later sweep re-reads the order — Amazon's even once its order list has moved past it — and
-  re-ingests it under `receipt:{discord id}:{body hash}:{order id}` (every ingest's key since
-  M11.2) so a corrected read isn't answered with the held reply stored for the idempotency window
-  (24 h). Entries older than 60
-  days are forgotten (long since applied as read).
-- Paper receipts keep their own review flow, and manual (typed) receipts apply as before.
-- *Only `holdVendors` stores (`costco`):* on the prod copy (2026-11-17) 33 of 35 checked Whole
-  Foods orders and 11 of 163 Amazon ones failed the check. The cause was the parser, not the
-  store — it read a weighed item's per-lb price, a bare quantity "2" as 1, and out-of-stock and
-  refunded units as bought (§6 *Whole Foods item grid*, fixed since) — but holding every one of
-  them would have held the weekly cart's order too (no cycle closure for two weeks). A store joins
-  `holdVendors` once its parser's totals check passes on real orders.
-- *Telemetry:* `receipt_held {holdId, vendor, fulfillment, attempt, lines, replaced, heldUntil}`
-  and `receipt_hold_released {holdId, receiptId, vendor, outcome: totals_pass|unchecked|expired,
-  attempts, heldDays}` → weekly report §3 (held at the end of the week, newly held, applied after a
-  re-read, applied as read; a finding while any are held) and the `data_quality` extract.
+**Failing totals** (§10 #90): a **digital** receipt whose totals check fails is applied **as read**,
+like a passing one (`status: "applied"`, `totals_check: "fail"`). Its lines are what a parser read
+off a page, so some are wrong; a later read of the order that differs replaces it (*Re-read
+orders* above), and the agents' sweeps re-read every failing order for two weeks (§6, §4.8), so a
+parser fix lands without a reset. The weekly report §3 counts them per store, with a finding and
+a `totals_fail_applied` row in the `data_quality` extract.
+
+**Held receipts** (#78/#79, §10 #83 — **retired** by §10 #90; expand → contract). From 2026-11-17
+a failing digital receipt from a `receipts.holdVendors` store was stored as a `receipt_hold`
+and **not applied** (`status: "held"`, `held_until`), until a re-read added up or 14 days passed.
+It existed because an applied misread couldn't be corrected; since M11.2 a re-read replaces one,
+and holding cost a lost purchase for up to two weeks (the cart re-bought the item, the order
+closed no cycle). The retirement, step 1 (this release):
+- Ingest never holds; `holdsReceipt`, `receipts.holdVendors` and `receipts.heldExpireDays` are gone.
+- *Holds left on production* (2 Whole Foods ones from 2026-11-18/20, prod copy 2026-11-23): the
+  daily cron (`releaseHolds`, maintenance `applied_held_receipts`) applies every hold still
+  `held` **as read**, whatever its `expires_at`, through the same ingest path, and marks it
+  `expired`; a sweep that re-reads a held order first applies it and marks it `applied`. Either
+  way the order then behaves like any applied receipt (a fixed read replaces it). Releasing
+  rather than waiting for the expiry (2026-12-02/04) records those purchases now and lets the
+  contract step follow within a day.
+- *Contracts:* `status: "held"` and `held_until` stay in `ReceiptIngestResponse`, never sent, so
+  an agent still parses an older State Engine during the Mac Mini's update window (it treats
+  `held` like `totals_check: "fail"`); an older agent against this API sees `applied` and marks
+  the order done, losing only the re-read.
+- *Telemetry:* `receipt_held` is no longer emitted; `receipt_hold_released {holdId, receiptId,
+  vendor, outcome: released|totals_pass|totals_fail|unchecked, attempts, heldDays}` is, for the
+  last holds (report §3 line *Held receipts left from before #90*, a finding while any is held,
+  and the `data_quality` extract).
+- `db:reset-imports` still deletes a store's holds. Step 2 (contract PR) drops `receipt_hold`, the
+  release, `resolveHoldIn` and these report lines, once production has 0 `held` rows and no
+  deployed code reads the table.
 
 **Paper:** normalize `raw_text` (upper-case, collapse whitespace, strip prices/codes), then:
 
@@ -736,7 +732,7 @@ Run daily by `/api/cron/maintenance`:
 | unverified_item | stays unverified | never expires (low priority) |
 | failed_job | dismiss | 14d |
 | trash_cam (low confidence) | do nothing | 7d |
-| held digital receipt (§4.5; a `receipt_hold`, not a review) | apply it as read | 14d (`receipts.heldExpireDays`) |
+| held digital receipt (§4.5; a `receipt_hold`, not a review; retired, §10 #90) | apply it as read | next daily cron (was 14d) |
 
 Only human actions create `labeled_observation`s. `impact_score` = 10 if the item is in the current
 cart plan, + 3 if in please_check, 1 if neither; Cleanup sorts by it. Reviews scoring above 1 are
@@ -865,7 +861,7 @@ done|cancelled|expired, listLines, bridged, receiptId}` on close (`bridged` = di
 on the receipt, when a receipt closes it); `costco_trip_receipt {tripId, plannedFor, receiptId,
 closedTrip, lines, bought, listLines}` when a receipt links; `costco_item_renamed {itemId,
 changed}`; `receipt_sweep {vendor: "costco", pages, clicks, warehouse, online, duplicates,
-pending, unknown_lines, instant_savings, item_fees, totals_fail, held, trip_receipts, errors, error_kinds, complete}` (no URLs: they
+pending, unknown_lines, instant_savings, item_fees, totals_fail, trip_receipts, errors, error_kinds, complete}` (no URLs: they
 carry the account id); `store_override {itemId, from, to, kind, thresholdBefore, thresholdAfter, store, why}` →
 weekly report §6 *Store choice* and the `store_choice` extract.
 
@@ -948,9 +944,11 @@ CDP, like Amazon; the agent itself has no browser, §10 #52). Page shapes are in
   item on the receipt (or more than that item's line) or a row that isn't an item, multi-buy,
   instant saving or total — are reported, not guessed: the sweep lists them (`unknown_lines`, also "items sold" ≠ units) and doesn't send
   them, so the receipt's lines no longer add up to its subtotal and the totals check fails.
-  A receipt whose totals check fails is **held**, not applied (§4.5 *Held receipts*): the sweep
-  keeps re-reading it (its trip waits for it), says once in the ops channel that it was held, and
-  counts it in `held` and `totals_fail`.
+  A receipt whose totals check fails is applied as read (§4.5 *Failing totals*, §10 #90; it links
+  its trip): it isn't `done` in `receipts-costco.json` but in `recheck`, so the sweep re-reads it
+  for `RECHECK_DAYS` (14) and a fixed read replaces it; it says once in the ops channel that the
+  receipt doesn't add up and counts it in `totals_fail`. (An older State Engine's `held` answer is
+  treated alike, with "held it" in the message; a state file's old `held` map loads as `recheck`.)
 - **Price by channel:** delivered prices run higher than the warehouse's (live: $34.99 vs $29.99
   for the same item number), so a Costco product's `last_price_cents` is its latest **warehouse**
   price: a delivery line's price is written only while `last_price_fulfillment` isn't `in_store`
@@ -1246,6 +1244,13 @@ JSON on stdout; exit 0 ok, 1 error, 2 usage, 3 profile locked, 4 refused URL):
   cancellation), and so are orders refunded in full ("Refund Total" ≥ the grand total; reason
   `returned`). Zero ASINs on a final order → `needs_agent_extraction` with page text, and
   `selector_error`; the skill ingests its own extraction with `receipts ingest`.
+  An order answered `totals_check: "fail"` (applied as read, §4.5 *Failing totals*; or `held` by
+  a State Engine from before §10 #90) isn't `done` but in the state file's `recheck` map, so every
+  sweep re-reads its details page — even once the order list has moved past it — for
+  `RECHECK_DAYS` (14), then counts it done; a read that adds up marks it done at once. Every ingest
+  is keyed `receipt:{discord id}:{body hash}:{order id}`, so a changed read is never answered from
+  the 24 h reply store. `receipt_sweep.totals_fail` counts them. A state file's old `held` map
+  loads as `recheck`.
   **Whole Foods item grid** (live pages, 2026-11; `extract_grid_lines`): one `{ASIN}-item-grid-row`
   per item with Quantity | Weight | Total cells. Read by those ids and the gridcell order (not
   class names): the line total is `{ASIN}-item-total-price` (what was charged: a weighed item's
@@ -1357,8 +1362,8 @@ productId, vendor, outcome, error}`, `cycle_opened`, `cycle_transition`, `job_cr
 raised, lowered}`, `review_resolved {reviewId, kind, outcome,
 impactScore, ageHours, …line counts}`, `item_merged {itemId, intoItemId, reviewKind, eventScale}`,
 `item_settings_changed {itemId, fields}`, `settings_changed {keys}`, `presumed_discarded`,
-`maintenance_run`, `settings_rejected {keys}`, `receipt_held` / `receipt_hold_released` (§4.5
-*Held receipts*; report §3), `learning_rebuilt {scope, items, itemsChanged, itemColumns,
+`maintenance_run`, `settings_rejected {keys}`, `receipt_hold_released` (§4.5 *Held receipts*,
+retired: the last holds; report §3; `receipt_held` is no longer emitted), `learning_rebuilt {scope, items, itemsChanged, itemColumns,
 productsChanged, productColumns, eventItems, eventsDeleted, eventsInserted, causes}` (§4.10,
 one per `db:rebuild-learning --apply` (`scope` all / items), per import reset (`reset`) and per
 ingest whose rebuild differs from in-place patching (`ingest`); report §3), `receipt_replaced
@@ -1376,7 +1381,7 @@ reasons}` (summary finding above all others) and `cart_probe {store, asin, found
 (per-store found / not-found table and a finding per miss; both in the cart-injection extract), `clarifying_question {question}`, `photo_classified {job_type, basis}` and `photo_reclassified
 {to_job_type}` (UX section: photos by classification basis and human re-files). The agent
 tools also emit `receipt_sweep {member, mode, pages, ingested, duplicates, pending, needs_agent,
-held, errors, complete}` (stored for ad-hoc queries; no report section). The worker's `vlm_inference` /
+totals_fail, errors, complete}` (`totals_fail` replaced `held`, §10 #90) (stored for ad-hoc queries; no report section). The worker's `vlm_inference` /
 `vlm_parse_failure` also carry `job_id`, `job_type`, `attempt`, `repaired` and per-type fields
 (receipts `lines`, `discount_lines`, `date_fallback`, `store_missing`; Trash Cam `detections`,
 `top_confidence`; merges `items`, `suggestions`, `dropped`), all copied into the `vlm` extract.
@@ -1760,11 +1765,11 @@ docker-compose.yml (+ docker-compose.build.yml), Makefile, CLAUDE.md, README.md,
 | 80 | The Costco sweep never reads `data-private` content except receipt rows, and an unreadable receipt line is reported (sweep reply, telemetry, failed totals check), never mapped to an item | Member and card numbers, address and contact details are on the same pages; the State Engine needs none of them. No discount line has been seen yet: guessing its format could subtract a saving from the wrong item or drop a purchase silently |
 | 81 | PandaBase's Chrome runs headless (`--headless`, headed Chrome's user agent for the installed major version, a 1920×1080 screen); `HEADED=1 make install-chromium` gives a window for signing in by hand | A headed window in the agent account's background login session stops painting once the display sleeps, so Playwright clicks wait forever for a "stable" element (first Costco sweep, 2026-11-16); pandaden's OpenClaw profile hit the same thing. Chrome 157 headless still says `HeadlessChrome` in its user agent and reports an 800×600 screen, both easy bot-check tells, while its client hints are the normal brands; the launcher reads the version at each start so the user agent keeps matching them after Chrome updates. Anti-backgrounding flags alone were the alternative, but a sleeping display stops frames regardless |
 | 82 | A Costco instant saving comes off the line of the item it names (line total and unit price); an online item's fee is added to its item's line total; an online "Discount on Order" isn't spread over the lines | The coupon row names its item number, so the paid price is known exactly: store choice then compares what the household paid, and the lines add up to SUBTOTAL. A receipt-level `discount_cents` (Amazon's way) would leave every Costco price high. A fee belongs to buying that item, but isn't its price per unit. An order discount names no item; with several items any split would be a guess, so it only switches off the subtotal + tax = total check |
-| 83 | A Costco (`receipts.holdVendors`) digital receipt whose totals check fails is held — stored, not applied — until a re-read of the order adds up, or for 14 days, then applied as read (§4.5 *Held receipts*) | In the first Costco sweep (2026-11-16) the two receipts with wrong lines were exactly the two whose totals failed, and applying them changed shared items (buy streaks, stances, usage rates) that an order-id-deduped re-ingest can't correct; `db:reset-imports --vendor` then refused because those items were shared with Amazon's import. Holding costs nothing when the parser is fixed in time. Never applying would lose the purchase for good (the item looks unbought and is ordered again), and both live failures had their items right, so the default after two weeks is to apply as read. Costco only for now: 33 of 35 checked Whole Foods orders failed the check because the parser misread the item grid (§6), so holding them would have held nearly every order, the weekly cart's included. A separate `receipt_hold` table, not a `held` receipt status: widening `receipt.status`'s CHECK would rebuild `receipt` |
+| 83 | *Superseded by #90.* A Costco (`receipts.holdVendors`) digital receipt whose totals check fails is held — stored, not applied — until a re-read of the order adds up, or for 14 days, then applied as read (§4.5 *Held receipts*) | In the first Costco sweep (2026-11-16) the two receipts with wrong lines were exactly the two whose totals failed, and applying them changed shared items (buy streaks, stances, usage rates) that an order-id-deduped re-ingest can't correct; `db:reset-imports --vendor` then refused because those items were shared with Amazon's import. Holding costs nothing when the parser is fixed in time. Never applying would lose the purchase for good (the item looks unbought and is ordered again), and both live failures had their items right, so the default after two weeks is to apply as read. Costco only for now: 33 of 35 checked Whole Foods orders failed the check because the parser misread the item grid (§6), so holding them would have held nearly every order, the weekly cart's included. A separate `receipt_hold` table, not a `held` receipt status: widening `receipt.status`'s CHECK would rebuild `receipt` |
 | 84 | Server functions leave out sharp (§8 *Function size*) | Function Storage on the free Vercel team (shared with Bamboo) reached 75% of 10 GB in 2026-11; every kept deployment holds its functions, and sharp was over half of each one while nothing here uses it. Previews stay on (tier A′ needs them); the team's retention policy deletes old deployments |
 | 85 | A cart pause is its own period, not an away period: no cart, no Friday check-in, no EMA learning across it, days still count as eating | Parental leave (2026-11): home all day and shopping at 99 Ranch without receipts. An away period would subtract those days and make rates look faster afterwards; letting the EMA run would accept three "slow" gaps in a row as a habit change. Freezing keeps the pre-leave rates, which are the best guess for when life is back to normal |
 | 86 | Learning from receipts is derived, not accumulated: product stats, auto-promoted stances, usage rates, tracking promotion and switch thresholds are recomputed from receipts and recorded human decisions (`db:rebuild-learning`, §4.10), with the columns kept as a cache (PLAN M11: the rebuild in M11.1, ingest and reset use it from M11.2) | Receipts are applied once as in-place edits and ingest dedupes on the order id, so a misread receipt can't be corrected and one store's import can't be removed once it touched a shared item: Amazon needed a full reset (#62), and Costco's reset refuses on production because two misread receipts moved Amazon products' buy streaks and stances (2026-11-16). Every new store's parser is wrong at first on live pages, so this recurs per store. Inventory already works this way (`db:rebuild-state`); the learning functions are pure, so replaying them is mostly bookkeeping. Kept the columns (expand-only) so nothing that reads them changes |
 | 87 | Subscribe & Save items are read from the member's `/auto-deliveries` page each sweep and left out of the cart; only a list whose tiles match the page's category counts is synced, and a subscription not confirmed for 21 days stops counting (§4.9) | The household's carts filled with one-time buys of items already delivered by subscription (2026-11). Flagging S&S lines on order pages would miss subscriptions until they deliver and never notice a cancellation; a manual per-item switch would need the household to keep it in step with Amazon. The page is the source of truth and costs one read-only load per sweep. Replacing the list makes cancellations visible, so a short read would wrongly end live subscriptions: hence the count check. The stale window bounds the opposite failure (a broken sync hiding items for good) |
 | 88 | The learning rebuild folds merged items as one item, replays a human override in its recorded direction, compares an implicit swap with the cart built before the receipt was ingested, treats every receipt-created item as born `static`, and keeps `switch` events (§4.10) | Each choice reproduces what ingest did for a history that arrived in order — on the production copy (2026-11-23) 493 of 494 items rebuilt to exactly their stored values, the one difference a late receipt — while letting a late or corrected receipt take its place. A merge's stance reset was a side effect of moving products, not a preference; replaying "the item as it is now" is what a rebuild after any merge needs anyway. The override kind is the human's choice; recomputing "toward preferred" from rebuilt stances could flip its sign. No input records an item's original tracking type, and ingest only ever creates `static` items. `switch` events change no derived value and need the build's quotes to regenerate |
 | 89 | Ingest, a re-read order and the import reset rebuild the touched items' learning from their receipts instead of patching it; a digital order read again with different content replaces the stored receipt (unchanged lines and their answers kept), and `db:reset-imports` keeps shared items and rebuilds them instead of refusing | A parser fix can now correct a receipt already written and one store's import can be removed alone; a late receipt learns as if it had arrived in order. Rebuilding in the ingest transaction costs one read and one write batch whatever the receipt's size (§8) |
-| 90 | Held receipts (#83) are no longer needed and are to be retired in a later contract PR: apply a failing receipt as read and let the next read of the order replace it | They existed because an applied misread couldn't be corrected (§10 #83); since M11.2 a re-read replaces it. Holding costs a lost purchase for up to 14 days (the cart re-buys the item, no cycle closure). The agent's re-read of a failing order (held orders stay out of `done`) must move to `totals_check: fail` before the hold table goes (expand → contract: stop holding, keep reading the table, then drop it) |
+| 90 | Held receipts (#83) are retired: a failing digital receipt is applied as read, the sweeps re-read a `totals_check: fail` order for 14 days, and a differing read replaces it; holds left on production are released (applied as read) by the next daily cron, then `receipt_hold` is dropped in a contract PR (§4.5 *Failing totals*, *Held receipts*) | They existed because an applied misread couldn't be corrected (§10 #83); since M11.2 a re-read replaces it. Holding costs a lost purchase for up to 14 days (the cart re-buys the item, no cycle closure). Expand → contract: stop holding and move the agent's re-read from `held` to `totals_check: fail` first, keep reading the table, then drop it. Releasing the last holds at once rather than waiting for their expiry: applying as read is what this decision does for every new failing receipt, and it records the purchases ~10 days sooner. The re-read is bounded (14 days, then `done`) because a re-read costs a page load per sweep, and only a deployed parser fix changes the read |

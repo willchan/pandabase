@@ -25,7 +25,7 @@ import { expireCostcoTrips } from "./costco";
 import { openCycle, reprioritizeReviews } from "./cycles";
 import { releaseExpiredLeases } from "./jobs";
 import { scheduledMergeSuggestions } from "./mergeSuggest";
-import { applyExpiredHolds, newId } from "./receipts";
+import { newId, releaseHolds } from "./receipts";
 import type { ServiceCtx } from "./types";
 
 type Location = typeof inventoryEvent.$inferInsert.location;
@@ -137,8 +137,8 @@ export async function runMaintenance(
   // §4.8 default outcome: a trip nobody closed stops holding Costco items out of the cart.
   const expiredTrips = await expireCostcoTrips(db, ctx);
 
-  // §4.5 default outcome: a held receipt nobody's parser fixed is applied as read.
-  const appliedHolds = await applyExpiredHolds(db, sys);
+  // §10 #90: holds left from before ingest stopped holding are applied as read (§4.5).
+  const appliedHolds = await releaseHolds(db, sys);
 
   const merges = await scheduledMergeSuggestions(db, ctx);
   const reprioritized = await db.transaction((tx) => reprioritizeReviews(tx, ctx, "maintenance"));

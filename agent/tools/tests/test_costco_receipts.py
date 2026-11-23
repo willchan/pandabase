@@ -353,7 +353,8 @@ class Server:
     def __init__(self) -> None:
         self.ingested: dict[str, dict[str, Any]] = {}
         self.trip_for: set[str] = set()
-        self.hold: set[str] = set()  # orders the State Engine holds (§4.5: totals don't add up)
+        self.fail: set[str] = set()  # §10 #90: lines don't add up, applied as read
+        self.hold: set[str] = set()  # the same before #90: held, nothing applied
         self.api = FakeApi({"POST /api/receipts/ingest": self.ingest})
 
     def ingest(self, body: dict[str, Any] | None) -> Any:
@@ -378,12 +379,12 @@ class Server:
             "receipt_id": "R-" + oid,
             "duplicate": dup,
             "status": "applied",
-            "totals_check": "pass",
+            "totals_check": "fail" if oid in self.fail else "pass",
             "lines": [],
             "new_item_ids": [],
             "review_ids": [],
             "closed_cycle_id": None,
-            "costco_trip_id": "T1" if oid in self.trip_for else None,
+            "costco_trip_id": "T1" if oid in self.trip_for and not dup else None,
         }
 
 
@@ -513,36 +514,45 @@ def test_an_ingest_error_is_retried_next_sweep(tmp_path: Path) -> None:
     assert len(res.ingested) == 1 and res.complete
 
 
-def test_a_held_receipt_is_re_read_on_later_sweeps_until_it_applies(tmp_path: Path) -> None:
-    """§4.5: a receipt the State Engine holds (its lines don't add up) isn't done — the next
-    sweep opens it again, under a new Idempotency-Key so a corrected read isn't answered with the
-    held reply — and once it applies it's done like any other."""
+# Regression (§10 #90): the sweep re-read only receipts the State Engine *held*; a failing receipt
+# is now applied as read, so the re-read keys on `totals_check: fail`.
+def test_a_failing_receipt_is_applied_and_re_read_on_later_sweeps_until_it_adds_up(
+    tmp_path: Path,
+) -> None:
+    """A receipt whose lines don't add up is applied as read (it stocks the pantry and closes its
+    trip) but isn't done: the next sweep opens it again under a new Idempotency-Key if the read
+    changed, and once a read adds up it's done like any other."""
     server = Server()
-    server.hold.add(FIRST)
+    server.fail.add(FIRST)
+    server.trip_for.add(FIRST)
     res = sweeper(server, FakeCostco(), tmp_path).run("sweep")
-    assert res.complete and [h["kind"] for h in res.held] == ["warehouse"]
-    assert res.held[0]["first"] and res.trip_receipts() == []
-    assert len(res.ingested) == 4 and FIRST not in server.ingested
+    assert res.complete and [h["kind"] for h in res.totals_fail] == ["warehouse"]
+    assert res.totals_fail[0]["first"] and not res.totals_fail[0]["held"]
+    assert len(res.ingested) == 5 and FIRST in server.ingested
+    assert [r["kind"] for r in res.trip_receipts()] == ["warehouse"]
     state = cr.CostcoState.load(cr.state_path(tmp_path))
-    assert f"warehouse:{FIRST}" in state.held and f"warehouse:{FIRST}" not in state.done
+    assert f"warehouse:{FIRST}" in state.recheck and f"warehouse:{FIRST}" not in state.done
+    now = datetime(2026, 11, 8, 17, tzinfo=UTC)
+    reply = cr.sweep_reply(res, cr.CostcoState(), now, last_try=False)
+    assert "doesn't add up to its total, so I've stocked it as read — I'll re-read it" in reply
 
-    # Still held on the next sweep: re-read, but not announced again.
+    # Still failing on the next sweep: re-read, but not announced again.
     driver = FakeCostco()
     s = sweeper(server, driver, tmp_path)
     res = s.run("sweep")
     assert driver.actions == ["tab:warehouse", f"receipt:{FIRST[-4:]}", "close"]
-    assert [h["first"] for h in res.held] == [False]
+    assert [h["first"] for h in res.totals_fail] == [False]
+    assert res.duplicates == [f"warehouse:{FIRST}"]
     (tel,) = s.tel.metrics("receipt_sweep")
-    assert (tel["held"], tel["totals_fail"]) == (1, 1)
-    now = datetime(2026, 11, 8, 17, tzinfo=UTC)
+    assert tel["totals_fail"] == 1 and "held" not in tel
     assert cr.sweep_reply(res, cr.CostcoState(), now, last_try=False) == cr.NO_REPLY
 
-    # A fixed parser: the State Engine applies it; it's done and no longer held.
-    server.hold.clear()
+    # A fixed parser: the read adds up; it's done and no longer re-read.
+    server.fail.clear()
     res = sweeper(server, FakeCostco(), tmp_path).run("sweep")
-    assert [x["kind"] for x in res.ingested] == ["warehouse"] and res.held == []
+    assert res.totals_fail == [] and res.duplicates == [f"warehouse:{FIRST}"]
     state = cr.CostcoState.load(cr.state_path(tmp_path))
-    assert f"warehouse:{FIRST}" in state.done and state.held == {}
+    assert f"warehouse:{FIRST}" in state.done and state.recheck == {}
     keys = [
         r.headers["idempotency-key"]
         for r in server.api.requests
@@ -552,24 +562,41 @@ def test_a_held_receipt_is_re_read_on_later_sweeps_until_it_applies(tmp_path: Pa
     assert len(keys) == 3
 
 
-def test_reply_says_a_receipt_was_held_once(tmp_path: Path) -> None:
+def test_a_held_receipt_from_an_older_state_engine_is_re_read_until_it_applies(
+    tmp_path: Path,
+) -> None:
+    """During the Mac's update window the State Engine may be from before #90 and hold the
+    receipt (nothing applied, no trip link): it's re-read like a failing one, and the reply says
+    it was held."""
     server = Server()
     server.hold.add(FIRST)
     res = sweeper(server, FakeCostco(), tmp_path).run("sweep")
+    assert [h["held"] for h in res.totals_fail] == [True] and res.trip_receipts() == []
+    assert len(res.ingested) == 4 and FIRST not in server.ingested
     now = datetime(2026, 11, 8, 17, tzinfo=UTC)
     state = cr.CostcoState(due_trip="2026-11-07")
     assert cr.sweep_reply(res, state, now, last_try=True) == (
         "🧾 Costco receipt from Sat 11/7 doesn't add up to its total, so I've held it (nothing "
         "stocked yet) — I'll re-read it on later sweeps."
     )
+    assert f"warehouse:{FIRST}" in cr.CostcoState.load(cr.state_path(tmp_path)).recheck
+
+    server.hold.clear()
+    res = sweeper(server, FakeCostco(), tmp_path).run("sweep")
+    assert [x["kind"] for x in res.ingested] == ["warehouse"] and res.totals_fail == []
+    state = cr.CostcoState.load(cr.state_path(tmp_path))
+    assert f"warehouse:{FIRST}" in state.done and state.recheck == {}
 
 
-def test_held_entries_are_forgotten_after_two_months() -> None:
-    from pandabase_tools.receipt_parser import prune_held
-
-    held = {"a": "2026-09-01T00:00:00+00:00", "b": "2026-11-01T00:00:00+00:00"}
-    prune_held(held, datetime(2026, 11, 8, tzinfo=UTC))
-    assert held == {"b": "2026-11-01T00:00:00+00:00"}
+def test_a_state_file_from_before_90_keeps_its_held_receipts_for_re_reading(
+    tmp_path: Path,
+) -> None:
+    path = cr.state_path(tmp_path)
+    path.write_text(json.dumps({"done": {}, "held": {f"warehouse:{FIRST}": "2026-11-16"}}))
+    state = cr.CostcoState.load(path)
+    assert state.recheck == {f"warehouse:{FIRST}": "2026-11-16"}
+    state.save(path)
+    assert "held" not in json.loads(path.read_text())
 
 
 # Scheduling and replies -------------------------------------------------------------------------

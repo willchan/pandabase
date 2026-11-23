@@ -11,15 +11,13 @@ import {
   reviewItem,
   type Db,
 } from "@pandabase/db";
-import { and, asc, eq, inArray, lte, ne } from "drizzle-orm";
+import { and, asc, eq, inArray, ne } from "drizzle-orm";
 import { monotonicFactory } from "ulid";
 import type { ReceiptIngestResponseT } from "../contracts/receipts";
 import { normalizeSku } from "../domain/matching";
 import {
   applyReceipt,
   eventSource,
-  heldReceiptExpiry,
-  holdsReceipt,
   lineBaseUnits,
   receiptDedupeKey,
   reconcileReceiptEvents,
@@ -75,15 +73,18 @@ const dedupeKey = (input: ReceiptInput, ctx: ServiceCtx): string => {
 
 /**
  * Ingest within the caller's transaction (composable with other writes). A digital receipt whose
- * totals check fails is held instead (§4.5 Held receipts); `asIs` applies a held one regardless
- * (its expiry). A digital order already ingested is replaced when its content changed
- * (`replaceReceiptIn`), else answered as a duplicate.
+ * totals check fails is applied as read like any other (§10 #90): a later read of the order that
+ * differs replaces it (`replaceReceiptIn`); the same content again is a duplicate.
+ *
+ * Legacy holds (§4.5 *Held receipts*, retired): an order still held from before #90 resolves its
+ * `receipt_hold` row when it applies — re-read by a sweep, or released by the daily cron
+ * (`release`, `releaseHolds`). Nothing creates a hold any more; the table goes in a contract PR.
  */
 export async function ingestReceiptIn(
   q: Q,
   input: IngestInput,
   ctx: ServiceCtx,
-  opts: { asIs?: boolean } = {},
+  opts: { release?: boolean } = {},
 ): Promise<ReceiptIngestResponseT> {
   const key = dedupeKey(input, ctx);
   const [stored] = await q.select().from(receipt).where(eq(receipt.dedupeKey, key));
@@ -94,137 +95,81 @@ export async function ingestReceiptIn(
       stored.source === "digital" ? await replaceReceiptIn(q, stored, input, ctx) : null;
     return replaced ?? (await existingReceipt(q, key))!;
   }
-  const [hold] = await q.select().from(receiptHold).where(eq(receiptHold.dedupeKey, key));
-  if (!opts.asIs && holdsReceipt(input, ctx.config)) return holdReceiptIn(q, key, input, hold, ctx);
   const fx = await applyReceipt(input, receiptRepository(q), {
     config: ctx.config,
     newId: () => newId(),
     now: ctx.now,
   });
   const out = await persistReceiptEffects(q, input, fx, ctx);
-  if (hold?.status === "held") {
-    const attempts = hold.attempts + (opts.asIs ? 0 : 1);
-    await q
-      .update(receiptHold)
-      .set({
-        status: opts.asIs ? "expired" : "applied",
-        attempts,
-        resolvedAt: ctx.now,
-        receiptId: out.receipt_id,
-        updatedAt: ctx.now,
-      })
-      .where(eq(receiptHold.id, hold.id));
-    await emitTelemetry(
-      q,
-      "state_engine",
-      [
-        {
-          metric: "receipt_hold_released",
-          holdId: hold.id,
-          receiptId: out.receipt_id,
-          vendor: hold.vendor,
-          outcome: opts.asIs
-            ? "expired"
-            : fx.receipt.totalsCheck === "pass"
-              ? "totals_pass"
-              : "unchecked",
-          attempts,
-          heldDays: Math.round((Date.parse(ctx.now) - Date.parse(hold.createdAt)) / 864e5),
-        },
-      ],
-      ctx.now,
-    );
-  }
+  const [hold] = await q
+    .select()
+    .from(receiptHold)
+    .where(and(eq(receiptHold.dedupeKey, key), eq(receiptHold.status, "held")));
+  if (hold) await resolveHoldIn(q, hold, out.receipt_id, fx.receipt.totalsCheck, ctx, opts);
   return out;
 }
 
-/**
- * §4.5 Held receipts: store (or replace) the order's input without applying anything. The expiry
- * is set when the order is first held; a re-ingest replaces the lines but doesn't extend it.
- */
-async function holdReceiptIn(
+/** A legacy hold's order applied: mark it resolved with the receipt it became (§4.5, retired). */
+async function resolveHoldIn(
   q: Q,
-  key: string,
-  input: IngestInput,
-  prev: typeof receiptHold.$inferSelect | undefined,
+  hold: typeof receiptHold.$inferSelect,
+  receiptId: string,
+  totalsCheck: string,
   ctx: ServiceCtx,
-): Promise<ReceiptIngestResponseT> {
-  const { now } = ctx;
-  const stored: IngestInput = { ...input };
-  delete stored.jobId; // digital receipts come from no job
-  const row = {
-    source: input.source,
-    vendor: input.vendor,
-    accountMemberId: input.accountMemberId,
-    externalOrderId: input.externalOrderId,
-    acquiredAt: input.acquiredAt,
-    input: stored,
-    status: "held" as const,
-    resolvedAt: null,
-    receiptId: null,
-    updatedAt: now,
-  };
-  let id: string, attempts: number, expiresAt: string;
-  if (prev) {
-    // A held order read again, or a resolved hold whose receipt was reset away (db:reset-imports).
-    id = prev.id;
-    attempts = prev.status === "held" ? prev.attempts + 1 : 1;
-    expiresAt = prev.status === "held" ? prev.expiresAt : heldReceiptExpiry(now, ctx.config);
-    await q
-      .update(receiptHold)
-      .set({ ...row, attempts, expiresAt })
-      .where(eq(receiptHold.id, id));
-  } else {
-    id = newId();
-    attempts = 1;
-    expiresAt = heldReceiptExpiry(now, ctx.config);
-    await q
-      .insert(receiptHold)
-      .values({ ...row, id, dedupeKey: key, attempts, expiresAt, createdAt: now });
-  }
+  opts: { release?: boolean },
+): Promise<void> {
+  const attempts = hold.attempts + (opts.release ? 0 : 1);
+  await q
+    .update(receiptHold)
+    .set({
+      // `expired`: applied as the hold stored it, not from a new read (the table's CHECK predates
+      // the release).
+      status: opts.release ? "expired" : "applied",
+      attempts,
+      resolvedAt: ctx.now,
+      receiptId,
+      updatedAt: ctx.now,
+    })
+    .where(eq(receiptHold.id, hold.id));
   await emitTelemetry(
     q,
     "state_engine",
     [
       {
-        metric: "receipt_held",
-        holdId: id,
-        vendor: input.vendor,
-        fulfillment: input.fulfillment,
-        attempt: attempts,
-        lines: input.lines.length,
-        replaced: prev?.status === "held" && JSON.stringify(prev.input) !== JSON.stringify(stored),
-        heldUntil: expiresAt,
+        metric: "receipt_hold_released",
+        holdId: hold.id,
+        receiptId,
+        vendor: hold.vendor,
+        outcome: opts.release
+          ? "released"
+          : totalsCheck === "pass"
+            ? "totals_pass"
+            : totalsCheck === "fail"
+              ? "totals_fail"
+              : "unchecked",
+        attempts,
+        heldDays: Math.round((Date.parse(ctx.now) - Date.parse(hold.createdAt)) / 864e5),
       },
     ],
-    now,
+    ctx.now,
   );
-  return {
-    receipt_id: id,
-    duplicate: false,
-    status: "held",
-    totals_check: "fail",
-    lines: [],
-    new_item_ids: [],
-    review_ids: [],
-    closed_cycle_id: null,
-    costco_trip_id: null,
-    held_until: expiresAt,
-  };
 }
 
 /**
- * §4.5 default outcome: holds nobody fixed by `expires_at` are applied as read (daily cron), each
- * in its own transaction, oldest receipt first (a late receipt skips the EMA step, §4.1).
+ * §10 #90: holds left from before ingest stopped holding are applied as read by the daily cron,
+ * whatever their `expires_at`, each in its own transaction, oldest receipt first. A later read of
+ * the order replaces it like any applied receipt. Removed with `receipt_hold` (contract PR).
  */
-export async function applyExpiredHolds(db: Db, ctx: ServiceCtx): Promise<number> {
+export async function releaseHolds(db: Db, ctx: ServiceCtx): Promise<number> {
   const due = await db
     .select({ id: receiptHold.id, input: receiptHold.input })
     .from(receiptHold)
-    .where(and(eq(receiptHold.status, "held"), lte(receiptHold.expiresAt, ctx.now)))
+    .where(eq(receiptHold.status, "held"))
     .orderBy(asc(receiptHold.acquiredAt), asc(receiptHold.id));
   for (const h of due) {
-    await db.transaction((tx) => ingestReceiptIn(tx, h.input as IngestInput, ctx, { asIs: true }));
+    await db.transaction((tx) =>
+      ingestReceiptIn(tx, h.input as IngestInput, ctx, { release: true }),
+    );
   }
   return due.length;
 }

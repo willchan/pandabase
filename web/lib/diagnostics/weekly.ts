@@ -332,9 +332,17 @@ export async function renderWeekly(
       text: `${pendingLines.length} receipt line(s) unmatched, waiting in review.`,
     });
   }
-  // Held receipts (§4.5): digital receipts whose totals check failed, not applied. "Still held" is
-  // as of the end of the week (held then, whatever happened after), so a re-run reads the same.
-  const newHolds = metric("receipt_held").filter((t) => n(t.p.attempt) === 1);
+  // §10 #90: a digital receipt whose totals check fails is applied as read; a later read that
+  // differs replaces it. Counted from this week's receipts (a replaced one keeps its created_at).
+  const failingDigital = receipts.filter(
+    (r) => r.source === "digital" && r.totalsCheck === "fail",
+  );
+  const failingByStore = [...new Set(failingDigital.map((r) => r.vendor))]
+    .sort()
+    .map((v) => `${v} ${failingDigital.filter((r) => r.vendor === v).length}`);
+  // Legacy holds (§4.5 *Held receipts*, retired by #90): nothing creates one any more; the daily
+  // cron releases what's left (applied as read). "Still held" is as of the end of the week, so a
+  // re-run reads the same. Goes with the `receipt_hold` table (contract PR).
   const released = metric("receipt_hold_released");
   const stillHeld = (
     await q
@@ -343,7 +351,6 @@ export async function renderWeekly(
       .where(lt(receiptHold.createdAt, end))
       .orderBy(asc(receiptHold.expiresAt), asc(receiptHold.id))
   ).filter((h) => h.status === "held" || (h.resolvedAt !== null && h.resolvedAt >= end));
-  const releasedBy = (o: string) => released.filter((t) => t.p.outcome === o).length;
   // §4.10: `db:rebuild-learning --apply` runs and import resets (one summary row each), and
   // ingests whose rebuild corrected what in-place patching would have written (PLAN M11.2).
   const rebuiltRows = metric("learning_rebuilt");
@@ -364,14 +371,13 @@ export async function renderWeekly(
   if (stillHeld.length) {
     findings.push({
       score: 3,
-      text: `${stillHeld.length} digital receipt(s) held: their lines don't add up to the total, so nothing was applied (as read on ${localDate(stillHeld[0]!.expiresAt, tz)} unless a fixed parser re-reads them).`,
+      text: `${stillHeld.length} digital receipt(s) still held from before held receipts were retired (§10 #90): the daily cron applies them as read.`,
     });
   }
-  const expiredHolds = releasedBy("expired");
-  if (expiredHolds) {
+  if (failingDigital.length) {
     findings.push({
       score: 2,
-      text: `${expiredHolds} held receipt(s) expired and were applied as read — check their lines.`,
+      text: `${failingDigital.length} digital receipt(s) don't add up to their subtotal (${failingByStore.join(", ")}), applied as read — a parser misread lines; a fixed read of the order replaces them.`,
     });
   }
   const weakFuzzy = lines
@@ -456,7 +462,14 @@ export async function renderWeekly(
     .filter((x) => x !== null)
     .sort((a, b) => b.days - a.days || a.name.localeCompare(b.name));
   extracts["data_quality.jsonl"] = [
-    ...[...newHolds, ...released].map((t) => ({ check: t.metric, at: t.at, ...t.p })),
+    ...failingDigital.map((r) => ({
+      check: "totals_fail_applied",
+      receipt_id: r.id,
+      vendor: r.vendor,
+      fulfillment: r.fulfillment,
+      acquired_at: r.acquiredAt,
+    })),
+    ...released.map((t) => ({ check: t.metric, at: t.at, ...t.p })),
     {
       check: "store_split",
       lines: split.lines,
@@ -523,9 +536,15 @@ export async function renderWeekly(
       `Paper lines matched by exact alias: ${pct(paperExact, paper.length)} (${paperExact}/${paper.length}). ` +
         `Receipt reviews expired this week: ${expiredReceiptReviews}.`,
       "",
-      `Held receipts (totals don't add up, not applied): ${stillHeld.length} held at the end of the week, ` +
-        `${newHolds.length} newly held, ${releasedBy("totals_pass") + releasedBy("unchecked")} applied after a re-read, ` +
-        `${expiredHolds} applied as read on expiry.`,
+      `Digital receipts whose lines don't add up (applied as read): ${failingDigital.length}` +
+        `${failingByStore.length ? ` (${failingByStore.join(", ")})` : ""}.`,
+      ...(stillHeld.length || released.length
+        ? [
+            "",
+            `Held receipts left from before #90: ${stillHeld.length} held at the end of the week, ` +
+              `${released.length} applied (${released.filter((t) => t.p.outcome === "released").length} released as read by the cron).`,
+          ]
+        : []),
       ...(rebuilds.length
         ? [
             "",
@@ -564,7 +583,7 @@ export async function renderWeekly(
         .slice(0, 5)
         .map(
           (h) =>
-            `Held: ${h.vendor} order …${(h.externalOrderId ?? "").slice(-6)} (${localDate(h.acquiredAt, tz)}), ${h.attempts} read(s), applied as read on ${localDate(h.expiresAt, tz)}`,
+            `Held: ${h.vendor} order …${(h.externalOrderId ?? "").slice(-6)} (${localDate(h.acquiredAt, tz)}), ${h.attempts} read(s); released on the next daily cron`,
         ),
       ...pendingLines
         .slice(0, 5)
@@ -586,9 +605,9 @@ export async function renderWeekly(
         .map((x) => `Planned but ran out ${x.days} d ago: ${x.name} (${x.reason ?? "override"})`),
     ]),
     [
-      ...(stillHeld.length
+      ...(failingDigital.length
         ? [
-            "Held receipts: open the order on the store's site, find the line the parser misread (`receipt_held` / sweep `unknown_lines`), fix it with a synthetic fixture first; the next sweep re-reads and applies it.",
+            "Receipts that don't add up: open the order on the store's site, find the line the parser misread (`totals_fail` in the sweep / `unknown_lines`), fix it with a synthetic fixture first; the sweep re-reads failing orders and the fixed read replaces the receipt.",
           ]
         : []),
       ...(pendingLines.length

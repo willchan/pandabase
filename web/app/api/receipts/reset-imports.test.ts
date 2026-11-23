@@ -75,26 +75,40 @@ describe("reset-imports on ingested orders", () => {
     expect(await h.db.select().from(item).where(eq(item.canonicalName, card.raw_text))).toEqual([]);
   });
 
-  it("clears one store's held receipts (§4.5) and their replies, so they're held afresh", async () => {
+  // §10 #90: a failing order applies as read; a hold left from before #90 still goes with its
+  // store's import (the table is dropped in a contract PR).
+  it("resets one store's failing receipts and legacy holds, so they ingest afresh", async () => {
     const c1 = order("C-1", "costco", [floss]);
-    const held = {
+    const failing = {
       // the line says $1.00, the subtotal $9.99
       ...c1,
       subtotal_cents: 999,
       lines: c1.lines.map((l) => ({ ...l, line_total_cents: 100 })),
     };
-    expect((await ingest(held)).body.status).toBe("held");
+    expect((await ingest(failing)).body).toMatchObject({ status: "applied", totals_check: "fail" });
     expect((await ingest(order("111-1", "amazon", [bananas]))).body.status).toBe("applied");
+    const [alex] = await h.db.select().from(member);
+    await h.db.insert(receiptHold).values({
+      id: "01KLEGACYHOLD0000000000000",
+      dedupeKey: `digital:${alex!.id}:C-2`,
+      source: "digital",
+      vendor: "costco",
+      accountMemberId: alex!.id,
+      externalOrderId: "C-2",
+      acquiredAt: "2026-10-20T15:59:00.000Z",
+      input: {},
+      status: "held",
+      expiresAt: "2026-11-03T15:59:00.000Z",
+    });
     const plan = await planImportReset(h.db, { vendor: "costco" });
-    expect(plan.counts).toMatchObject({ receipt: 0, receipt_hold: 1, idempotency_key: 1 });
+    expect(plan.counts).toMatchObject({ receipt: 1, receipt_hold: 1, idempotency_key: 1 });
 
     await applyImportReset(h.db, { vendor: "costco" });
     expect(await h.db.select().from(receiptHold)).toEqual([]);
     expect(await h.db.select().from(receipt)).toHaveLength(1); // Amazon's stays
-    const again = await ingest(held);
-    expect(again.body).toMatchObject({ status: "held", duplicate: false });
+    const again = await ingest(failing);
+    expect(again.body).toMatchObject({ status: "applied", duplicate: false });
     expect(again.headers.get("idempotent-replayed")).toBeNull();
-    expect((await h.db.select().from(receiptHold))[0]!.attempts).toBe(1);
   });
 
   it("refuses once someone has answered a review about the import", async () => {

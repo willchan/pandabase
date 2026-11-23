@@ -426,7 +426,7 @@ def ingest_request(order: ParsedOrder, member: Member, tz: str) -> c.ReceiptInge
 
 def ingest_key(discord_id: str, order_id: str, body: c.ReceiptIngestRequest) -> str:
     """The ingest `Idempotency-Key`: `receipt:{discord id}:{body hash}:{order id}`. The request's
-    hash is in it so a read that changed (a fixed parser, a held receipt re-read) is never answered
+    hash is in it so a changed read (a fixed parser re-reading a failing order) is never answered
     with the stored reply of an earlier read for 24 h: the State Engine replaces the order with it
     (DESIGN §4.5 *Re-read orders*), and the same read again stays idempotent. `db:reset-imports`
     reads the order id after the last colon."""
@@ -434,15 +434,23 @@ def ingest_key(discord_id: str, order_id: str, body: c.ReceiptIngestRequest) -> 
     return f"receipt:{discord_id}:{digest}:{order_id}"
 
 
-HELD_FORGET_DAYS = 60  # a held order the pages no longer list: the State Engine applied it long ago
+RECHECK_DAYS = 14  # how long an order whose lines don't add up is re-read on every sweep
 
 
-def prune_held(held: dict[str, str], now: datetime) -> None:
-    """Drop held entries older than `HELD_FORGET_DAYS` (applied as read by the State Engine's
-    expiry long since; a sweep that still lists the order finds it a duplicate)."""
-    for key, since in list(held.items()):
-        if now - datetime.fromisoformat(since) > timedelta(days=HELD_FORGET_DAYS):
-            del held[key]
+def prune_recheck(recheck: dict[str, str], done: dict[str, str], now: datetime) -> None:
+    """Orders re-read for `RECHECK_DAYS` without adding up count as done: they were applied as
+    read (DESIGN §10 #90), and re-reading them on every sweep costs a page load each. After a
+    parser fix, `db:reset-imports` or removing their `done` entries brings them back."""
+    for key, since in list(recheck.items()):
+        if now - datetime.fromisoformat(since) > timedelta(days=RECHECK_DAYS):
+            del recheck[key]
+            done.setdefault(key, now.isoformat())
+
+
+def load_recheck(data: dict[str, Any]) -> dict[str, str]:
+    """`recheck`, plus `held` from a state file written before §10 #90 (orders the State Engine
+    held: their totals didn't add up either)."""
+    return {**dict(data.get("held", {})), **dict(data.get("recheck", {}))}
 
 
 # Sweep / backfill -----------------------------------------------------------------------------
@@ -456,8 +464,10 @@ class SweepState:
 
     done: dict[str, str] = field(default_factory=dict)  # order_id → ingested_at
     run: dict[str, Any] | None = None
-    # order_id → first held (§4.5: totals didn't add up; not done, re-read on every sweep)
-    held: dict[str, str] = field(default_factory=dict)
+    # order_id → first read whose lines didn't add up to the subtotal (`totals_check: fail`,
+    # DESIGN §4.5, §10 #90): applied as read but not done, so every sweep re-reads it for
+    # `RECHECK_DAYS` and a fixed parser's read replaces the receipt
+    recheck: dict[str, str] = field(default_factory=dict)
 
     @classmethod
     def load(cls, path: Path) -> SweepState:
@@ -465,14 +475,12 @@ class SweepState:
             data = json.loads(path.read_text())
         except FileNotFoundError:
             return cls()
-        return cls(
-            done=dict(data.get("done", {})), run=data.get("run"), held=dict(data.get("held", {}))
-        )
+        return cls(done=dict(data.get("done", {})), run=data.get("run"), recheck=load_recheck(data))
 
     def save(self, path: Path) -> None:
         tmp = path.with_suffix(".tmp")
         tmp.write_text(
-            json.dumps({"done": self.done, "run": self.run, "held": self.held}, indent=1)
+            json.dumps({"done": self.done, "run": self.run, "recheck": self.recheck}, indent=1)
         )
         tmp.replace(path)
 
@@ -490,7 +498,8 @@ class SweepResult:
     skipped: list[dict[str, str]] = field(default_factory=list)
     needs_agent_extraction: list[dict[str, Any]] = field(default_factory=list)
     errors: list[dict[str, str]] = field(default_factory=list)
-    held: list[str] = field(default_factory=list)  # §4.5: stored, not applied; re-read next time
+    # §10 #90: orders whose lines don't add up (`totals_check: fail`); re-read next time
+    totals_fail: list[str] = field(default_factory=list)
 
 
 class Sweeper:
@@ -593,7 +602,7 @@ class Sweeper:
             for o in run["collected"].values()
             if o["status"] in ("final", "unknown")
             and o["order_id"] not in self.state.done
-            and o["order_id"] not in self.state.held
+            and o["order_id"] not in self.state.recheck
             and o["order_id"] not in run["fallback"]
         ]
         result.complete = bool(run["collect_done"]) and not remaining and not result.errors
@@ -609,7 +618,7 @@ class Sweeper:
             duplicates=len(result.duplicates),
             pending=len(result.pending),
             needs_agent=len(result.needs_agent_extraction),
-            held=len(result.held),
+            totals_fail=len(result.totals_fail),
             errors=len(result.errors),
             complete=result.complete,
         )
@@ -643,10 +652,10 @@ class Sweeper:
             run["collect_done"] = True
 
     def _process(self, run: dict[str, Any], result: SweepResult, max_orders: int | None) -> None:
-        # Held orders (§4.5) are re-read on every sweep, even once the order list's window has
-        # moved past them; their details page is enough.
-        prune_held(self.state.held, self.now())
-        for oid, since in self.state.held.items():
+        # Orders whose lines didn't add up (§10 #90) are re-read on every sweep, even once the
+        # order list's window has moved past them; their details page is enough.
+        prune_recheck(self.state.recheck, self.state.done, self.now())
+        for oid, since in self.state.recheck.items():
             run["collected"].setdefault(
                 oid,
                 {"order_id": oid, "ordered_on": since[:10], "status": "final", "details_url": ""},
@@ -698,14 +707,18 @@ class Sweeper:
             except (ApiError, ValueError) as err:
                 result.errors.append({"order_id": oid, "error": str(err)[:300]})
                 continue
-            if res.status == "held":  # §4.5: not done; the next sweep reads it again
-                self.state.held.setdefault(oid, self.now().isoformat())
-                self.state.save(self.path)
-                result.held.append(oid)
-                continue
-            self.state.held.pop(oid, None)
-            self.state.done[oid] = self.now().isoformat()
+            if res.totals_check == "fail":
+                # §4.5 / §10 #90: applied as read (a State Engine from before #90 answers `held`
+                # and applies nothing). Not done: the next sweep reads it again, and a fixed
+                # parser's read replaces the receipt.
+                self.state.recheck.setdefault(oid, self.now().isoformat())
+                result.totals_fail.append(oid)
+            else:
+                self.state.recheck.pop(oid, None)
+                self.state.done[oid] = self.now().isoformat()
             self.state.save(self.path)
+            if res.status == "held":
+                continue
             if res.duplicate:
                 result.duplicates.append(oid)
             else:

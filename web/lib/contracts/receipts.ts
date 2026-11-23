@@ -72,7 +72,7 @@ export const ReceiptLineOut = named(
 export const ReceiptIngestResponse = named(
   "ReceiptIngestResponse",
   z.object({
-    /** The receipt's id, or for a `held` receipt the hold's (§4.5 Held receipts). */
+    /** The receipt's id (a State Engine before §10 #90 answered a `held` receipt with the hold's). */
     receipt_id: Id,
     /** The receipt was already ingested (same dedupe key); nothing changed. */
     duplicate: z.boolean(),
@@ -82,9 +82,12 @@ export const ReceiptIngestResponse = named(
      */
     replaced: z.boolean().optional(),
     /**
-     * `held`: a digital receipt whose totals check failed was stored but not applied (no lines,
-     * items, events or trip link). Ingest the order again once it reads right; at `held_until` it
-     * is applied as read.
+     * A digital receipt whose totals check fails is applied as read (§10 #90): read the order
+     * again once a parser reads it right, and the new read replaces it (`replaced`).
+     * `held` is never sent any more; it stays in the enum so a client still parses the answer
+     * of a State Engine from before #90 (a digital receipt stored but not applied, `held_until`),
+     * e.g. during the Mac Mini's update window. Clients treat `totals_check: "fail"` alike either
+     * way. Removed with the `receipt_hold` table (contract PR).
      */
     status: z.enum(["applied", "pending_review", "partial", "held"]),
     totals_check: z.enum(["pass", "fail", "n/a"]),
@@ -95,7 +98,7 @@ export const ReceiptIngestResponse = named(
     closed_cycle_id: Id.nullable(),
     /** A Costco warehouse receipt linked to this Costco trip (and closed it if planned; §4.8). */
     costco_trip_id: Id.nullable().optional(),
-    /** A held receipt: when the daily cron applies it as read unless a re-ingest adds up first. */
+    /** Never sent since §10 #90 (a `held` receipt's expiry, before #90); kept for old servers. */
     held_until: Timestamp.nullable().optional(),
   }),
 );

@@ -200,9 +200,11 @@ if we use it up, so PandaBase decides per item where it comes from and keeps a l
   choice uses warehouse prices (delivered prices run higher); the weekly diagnostics show the
   delivery premium per item bought both ways. A receipt line PandaBase can't read (e.g. a
   discount) is reported, never guessed. A receipt whose lines don't add up to its total (a misread
-  page) is **held**: nothing is stocked from it, the ops channel says so once, the next sweeps read
-  it again, and it goes in once it adds up — or, if nobody fixes the reader within two weeks, as it
-  was read. The weekly diagnostics count held receipts. The sweep only reads pages: it can't reach a
+  page) is stocked **as read** and the ops channel says so once; the next sweeps (for two weeks)
+  read it again, and once the reader is fixed the corrected read replaces it — the pantry, prices
+  and learning follow the corrected lines. The weekly diagnostics count receipts that don't add
+  up. (Until 2026-11 such a receipt was *held* — nothing stocked for up to two weeks, so the cart
+  bought the item again; a correction can now undo a misread, so holding is retired.) The sweep only reads pages: it can't reach a
   Costco cart.
 - **After a trip (M10.4, not yet):** one Discord question about bulk perishables ("froze any of the chicken /
   bread?"). A reply moves that amount to the freezer; no reply changes nothing and the question
