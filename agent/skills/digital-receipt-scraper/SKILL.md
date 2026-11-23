@@ -36,9 +36,10 @@ pandabase-tools receipts sweep --member <member name>
 
 It reads the member's cursor, walks orders newer than it (with a 2-week overlap — re-ingesting
 is harmless), and ingests every order in a final state (Delivered / Picked up / in-store)
-oldest first. Output: `{ingested, duplicates, pending, skipped, needs_agent_extraction, held,
-errors, complete}`. `held` lists orders PandaBase stored but didn't apply because their lines
-don't add up to the subtotal; the sweep re-reads them itself next time — do nothing about them.
+oldest first. Output: `{ingested, duplicates, pending, skipped, needs_agent_extraction,
+totals_fail, errors, complete}`. `totals_fail` lists orders whose lines don't add up to the
+subtotal: PandaBase applied them as read and the sweep re-reads them itself next time — do
+nothing about them.
 After the orders, the sweep reads the member's Subscribe & Save page and syncs that list, so the
 cart leaves those items out (`subscriptions`: `{outcome, found, expected, synced}`). It only syncs
 a list it read completely; any other `outcome` is in telemetry and the weekly diagnostics — say
@@ -61,8 +62,8 @@ nothing about it.
    ```
 
    If the text is unreadable, skip it — it'll be offered again on the next sweep. If
-   `receipts ingest` answers `"status": "held"`, your lines don't add up to the order's
-   subtotal: nothing was applied and the order comes back on the next sweep — say nothing.
+   `receipts ingest` answers `"totals_check": "fail"` (or `"status": "held"`), your lines don't
+   add up to the order's subtotal: the order comes back on the next sweep — say nothing.
 2. **`ingested[].closed_cycle_id`** set → that order closed the grocery cycle. Post in the
    cycle's thread (`target` = `channels.cycle_channel`, `threadId` =
    `ingested[].closed_cycle_thread_id`; if that is null, post in `cycle_channel` itself):

@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Callable
-from datetime import date
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
 
@@ -23,6 +23,7 @@ from pandabase_tools.receipt_parser import (
     order_status,
     parse_order_details,
     parse_order_list,
+    prune_recheck,
 )
 from pandabase_tools.telemetry import Telemetry
 
@@ -167,7 +168,8 @@ class Server:
         self.cursor = cursor_ordered_at
         self.ingested: dict[str, dict[str, Any]] = {}
         self.fail_once: set[str] = set()
-        self.hold: set[str] = set()  # §4.5: orders whose totals don't add up
+        self.fail: set[str] = set()  # §10 #90: orders whose lines don't add up (applied as read)
+        self.hold: set[str] = set()  # the same before #90: held, nothing applied
         self.api = FakeApi(
             {
                 "GET /api/receipts/cursor": lambda _: {
@@ -204,7 +206,7 @@ class Server:
             "receipt_id": "R-" + oid,
             "duplicate": dup,
             "status": "applied",
-            "totals_check": "n/a",
+            "totals_check": "fail" if oid in self.fail else "n/a",
             "lines": [],
             "new_item_ids": [],
             "review_ids": [],
@@ -276,34 +278,91 @@ def test_second_sweep_skips_done_orders(tmp_path: Path) -> None:
     assert res.pending == ["111-0000001-0000001"]
 
 
-def test_a_held_order_is_re_read_on_later_sweeps_until_it_applies(tmp_path: Path) -> None:
-    """§4.5: a held order (totals don't add up) isn't done; later sweeps open its details page
-    again — even once the list's window has moved past it — until the State Engine applies it."""
-    held = "114-0000004-0000004"  # Oct 12, delivered
+# Regression (§10 #90): the sweep used to re-read only orders the State Engine *held*; it now
+# applies a failing order as read, so the sweep keys the re-read on `totals_check: fail`.
+def test_a_failing_order_is_applied_and_re_read_on_later_sweeps_until_it_adds_up(
+    tmp_path: Path,
+) -> None:
+    """A failing order (lines don't add up) is ingested — applied as read — but isn't done;
+    later sweeps open its details page again, even once the list's window has moved past it,
+    until a read adds up (a fixed parser's read replaces the receipt)."""
+    oid = "114-0000004-0000004"  # Oct 12, delivered
+    server = Server("2026-10-01T19:00:00Z")
+    server.fail.add(oid)
+    s = sweeper(server, FakeDriver(site), tmp_path, lambda _: None)
+    res = s.run("sweep")
+    assert oid in server.ingested and oid in [x["order_id"] for x in res.ingested]
+    assert res.totals_fail == [oid]
+    assert res.complete  # a failing order isn't unfinished business for the run
+    assert s.tel.metrics("receipt_sweep")[0]["totals_fail"] == 1
+    state = SweepState.load(tmp_path / "receipts-will.json")
+    assert oid in state.recheck and oid not in state.done
+
+    server.cursor = "2026-11-01T19:00:00Z"  # window: since Oct 18 — the list no longer has it
+    driver = FakeDriver(site)
+    res = sweeper(server, driver, tmp_path, lambda _: None).run("sweep")
+    assert details_url(oid) in driver.opened  # still failing: re-read, still not done
+    assert res.totals_fail == [oid] and res.duplicates == [oid]
+    assert oid in SweepState.load(tmp_path / "receipts-will.json").recheck
+
+    server.fail.clear()  # a fixed parser: the read adds up
+    res = sweeper(server, FakeDriver(site), tmp_path, lambda _: None).run("sweep")
+    assert res.totals_fail == [] and res.duplicates == [oid]
+    state = SweepState.load(tmp_path / "receipts-will.json")
+    assert oid in state.done and state.recheck == {}
+    keys = [
+        r.headers["Idempotency-Key"]
+        for r in server.api.requests
+        if r.method == "POST" and oid in r.headers["Idempotency-Key"]
+    ]
+    assert all(re.fullmatch(rf"receipt:1001:[0-9a-f]{{12}}:{oid}", k) for k in keys)
+
+
+def test_a_held_order_from_an_older_state_engine_is_re_read_until_it_applies(
+    tmp_path: Path,
+) -> None:
+    """During the Mac's update window the State Engine may still be from before #90 and answer
+    `held` (nothing applied): the order is re-read like a failing one."""
+    held = "114-0000004-0000004"
     server = Server("2026-10-01T19:00:00Z")
     server.hold.add(held)
     s = sweeper(server, FakeDriver(site), tmp_path, lambda _: None)
     res = s.run("sweep")
-    assert res.held == [held] and held not in server.ingested
-    assert res.complete  # held isn't unfinished business for the run
-    assert s.tel.metrics("receipt_sweep")[0]["held"] == 1
+    assert res.totals_fail == [held] and held not in server.ingested
+    assert held not in [x["order_id"] for x in res.ingested]
     state = SweepState.load(tmp_path / "receipts-will.json")
-    assert held in state.held and held not in state.done
+    assert held in state.recheck and held not in state.done
 
-    server.cursor = "2026-11-01T19:00:00Z"  # window: since Oct 18 — the list no longer has it
+    server.cursor = "2026-11-01T19:00:00Z"
     server.hold.clear()
     driver = FakeDriver(site)
     res = sweeper(server, driver, tmp_path, lambda _: None).run("sweep")
     assert details_url(held) in driver.opened
-    assert [x["order_id"] for x in res.ingested] == [held] and res.held == []
+    assert [x["order_id"] for x in res.ingested] == [held] and res.totals_fail == []
     state = SweepState.load(tmp_path / "receipts-will.json")
-    assert held in state.done and state.held == {}
-    keys = [
-        r.headers["Idempotency-Key"]
-        for r in server.api.requests
-        if r.method == "POST" and held in r.headers["Idempotency-Key"]
-    ]
-    assert all(re.fullmatch(rf"receipt:1001:[0-9a-f]{{12}}:{held}", k) for k in keys)
+    assert held in state.done and state.recheck == {}
+
+
+def test_a_state_file_from_before_90_keeps_its_held_orders_for_re_reading(tmp_path: Path) -> None:
+    path = tmp_path / "receipts-will.json"
+    path.write_text(json.dumps({"done": {"a": "x"}, "run": None, "held": {"b": "2026-11-18"}}))
+    state = SweepState.load(path)
+    assert state.recheck == {"b": "2026-11-18"}
+    state.save(path)
+    assert json.loads(path.read_text()) == {
+        "done": {"a": "x"},
+        "run": None,
+        "recheck": state.recheck,
+    }
+
+
+def test_an_order_that_never_adds_up_is_done_after_the_recheck_window() -> None:
+    recheck = {"a": "2026-10-20T00:00:00+00:00", "b": "2026-11-01T00:00:00+00:00"}
+    done: dict[str, str] = {}
+    now = datetime(2026, 11, 8, tzinfo=UTC)
+    prune_recheck(recheck, done, now)
+    assert recheck == {"b": "2026-11-01T00:00:00+00:00"}
+    assert done == {"a": now.isoformat()}
 
 
 def test_no_cursor_uses_initial_window(tmp_path: Path) -> None:
