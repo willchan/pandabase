@@ -1423,7 +1423,7 @@ This Week with a planned trip; the prod copy for the store split of the real cat
 
 ## After M10.3 — Subscribe & Save
 
-Not a milestone: one PR (branch `claude/serene-brahmagupta-dug10o`, DESIGN §4.9, §10 #85).
+Not a milestone: one PR (branch `claude/serene-brahmagupta-dug10o`, DESIGN §4.9, §10 #86).
 
 **Notes:**
 
@@ -1437,7 +1437,7 @@ Not a milestone: one PR (branch `claude/serene-brahmagupta-dug10o`, DESIGN §4.9
   `CdpDriver.subscriptions_ready` waits for the tiles to render, which only a real sweep shows.
   After the first sweep on the Mac Mini, check its `subscriptions.outcome` (and the weekly
   report's §7 line) — `no_tiles` / `incomplete` there means the wait or the page needs a look.
-- Migration `0005_subscriptions` (new table only). Contract changes (regenerated):
+- Migration `0006_subscriptions` (new table only). Contract changes (regenerated):
   `SubscriptionSyncRequest/Response`, `SubscribedLine`; `PredictionsResponse.subscribed` and
   `CartResponse.subscribed` (required), `CartResult.subscribed_item_ids` (optional). The agent's
   sweep output gains `subscriptions`; the build message a 🔁 line. Touched M2 (schema), M3

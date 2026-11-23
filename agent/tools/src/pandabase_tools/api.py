@@ -95,6 +95,10 @@ ROUTES: dict[str, Route] = {
         Route(
             "POST", "/api/away-periods", c.AwayPeriodResponse, c.AwayPeriodRequest, actor="required"
         ),
+        Route("POST", "/api/pauses", c.PauseResponse, c.PauseRequest, actor="required"),
+        Route(
+            "POST", "/api/pauses/{id}/end", c.PauseEndResponse, c.PauseEndRequest, actor="required"
+        ),
         Route(
             "POST",
             "/api/products/{id}/reject",

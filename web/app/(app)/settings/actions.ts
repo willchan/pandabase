@@ -4,6 +4,7 @@ import { signOut } from "@/auth";
 import { num, runAction, str, type ActionResult } from "@/lib/actions";
 import { badRequest } from "@/lib/http";
 import { createAwayPeriod } from "@/lib/services/inventory";
+import { createPause, endPause } from "@/lib/services/pauses";
 import {
   deleteAwayPeriod,
   setCartAccount,
@@ -31,6 +32,23 @@ export async function addAwayAction(_: ActionResult, f: FormData): Promise<Actio
 export async function deleteAwayAction(_: ActionResult, f: FormData): Promise<ActionResult> {
   return runAction("delete_away_period", async ({ db, ctx }) => {
     await deleteAwayPeriod(db, need(str(f, "id"), "Away period"), ctx);
+  });
+}
+
+export async function addPauseAction(_: ActionResult, f: FormData): Promise<ActionResult> {
+  return runAction("add_cart_pause", async ({ db, ctx }) => {
+    const startsOn = need(str(f, "pauseStartsOn"), "Start date");
+    const endsOn = need(str(f, "pauseEndsOn"), "End date");
+    if (!DATE.test(startsOn) || !DATE.test(endsOn)) throw badRequest("Dates must be YYYY-MM-DD");
+    await createPause(db, { startsOn, endsOn, note: str(f, "pauseNote") }, ctx);
+    return "Carts paused — no weekly cart, and usage rates stay as they are until then.";
+  });
+}
+
+export async function endPauseAction(_: ActionResult, f: FormData): Promise<ActionResult> {
+  return runAction("end_cart_pause", async ({ db, ctx }) => {
+    const { pause } = await endPause(db, need(str(f, "id"), "Pause"), ctx);
+    return pause ? "Carts resumed — the next Saturday builds a cart." : "Pause removed.";
   });
 }
 

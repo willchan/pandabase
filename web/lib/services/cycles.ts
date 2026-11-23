@@ -60,7 +60,7 @@ import { badRequest, conflict } from "../http";
 import { getItem, productsByItem, toCandidate, type ProductRow } from "../repo/catalog";
 import { activeCycle, getCycle, toCycle, type CycleRow } from "../repo/cycles";
 import type { Q } from "../repo/db";
-import { awayPeriods, loadEstimates, type ItemEstimate } from "../repo/inventory";
+import { awayPeriods, loadEstimates, pausePeriods, type ItemEstimate } from "../repo/inventory";
 import { emitTelemetry } from "../telemetry";
 import { freezerAging, toItemEstimate } from "./inventory";
 import { newId } from "./receipts";
@@ -164,12 +164,15 @@ export async function setCycleStatus(
     const c = await getCycle(tx, cycleId);
     const res = transition(c, { type: STATUS_EVENTS[input.status] }, ctx.now, {
       away: await awayPeriods(tx),
+      paused: await pausePeriods(tx),
       config: ctx.config,
     });
     if (!res.ok) throw conflict(res.error);
     if (!res.noop) {
       const patch = { ...res.patch };
-      if (patch.closeReason && input.reason) patch.closeReason = input.reason;
+      // A build skipped for an away period / pause keeps that reason (`away` / `paused`).
+      if (patch.closeReason && input.reason && input.status !== "building")
+        patch.closeReason = input.reason;
       await tx
         .update(groceryCycle)
         .set({ ...patch, updatedAt: ctx.now })
@@ -721,6 +724,7 @@ export async function recordCartResult(
     let cycle = await getCycle(tx, cycleId);
     activeOr409(cycle);
     const away = await awayPeriods(tx);
+    const paused = await pausePeriods(tx);
     const firstBuild = cycle.builtAt === null;
     for (const type of ["build", "built"] as const) {
       if (
@@ -728,10 +732,14 @@ export async function recordCartResult(
         (type === "built" && cycle.status !== "building")
       )
         continue;
-      const res = transition(cycle, { type }, ctx.now, { away, config: ctx.config });
+      const res = transition(cycle, { type }, ctx.now, { away, paused, config: ctx.config });
       if (!res.ok) throw conflict(res.error);
       if (res.to === "skipped")
-        throw conflict("an away period covers the build date: cycle skipped");
+        throw conflict(
+          res.patch.closeReason === "paused"
+            ? "carts are paused on the build date: cycle skipped"
+            : "an away period covers the build date: cycle skipped",
+        );
       cycle = { ...cycle, ...res.patch };
     }
 

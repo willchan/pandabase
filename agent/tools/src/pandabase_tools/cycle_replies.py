@@ -92,11 +92,23 @@ def nudge(cycle: c.Cycle, checkin: c.CheckinResponse, web_url: str | None) -> st
     return "\n".join(lines)
 
 
-def build(res: Mapping[str, Any], cycle: c.Cycle | None) -> str:
-    """The Saturday 10:00 message for `cart build`'s result."""
+def paused(pause: c.CartPause) -> str:
+    """The Saturday message while carts are paused (PRD §4.1 paused weeks)."""
+    end = f"{pause.ends_on:%b} {pause.ends_on.day}"
+    return (
+        f"⏸️ Carts are paused until {end} — no cart this week. "
+        'Say "resume carts" here to start again sooner.'
+    )
+
+
+def build(res: Mapping[str, Any], cycle: c.Cycle | None, pause: c.CartPause | None = None) -> str:
+    """The Saturday 10:00 message for `cart build`'s result. `pause`: the cart pause on
+    `cycle/current` (it, not an away period, is why a build was skipped)."""
     status = res.get("status")
     if status == "already_built":
         return NO_REPLY
+    if status == "skipped" and pause is not None:
+        return paused(pause)
     if status in ("no_cycle", "not_current"):
         return "⚠️ No grocery list was open this week, so no cart was built."
     if status == "skipped":

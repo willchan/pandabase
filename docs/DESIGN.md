@@ -100,6 +100,12 @@ UI can edit. Code defaults live in `web/lib/config.ts`; a row overrides.
 
 **away_period** — `starts_on`, `ends_on` (dates, household TZ), `note`, `created_by_member_id`.
 
+**pause_period** — cart pauses: the same columns as `away_period`. A build date inside one skips
+the cycle (§4.7) and an EMA step across one doesn't learn (§4.1); unlike away, its days still count
+as eating, so the inventory projection ignores it. Rows are kept after they end ("resume" moves
+`ends_on` to yesterday; one that hasn't started yet is deleted) because they keep freezing the EMA
+steps that cross them.
+
 ### 2.2 Catalog
 
 **item** — the *need* ("Eggs").
@@ -300,7 +306,7 @@ All routes under `/web/app/api`. Payloads defined once as **Zod schemas** in `we
 
 | Method & path | Scope | Purpose |
 |---|---|---|
-| `GET /api/grocery/cycle/current` | agent | Current non-closed cycle (or null) |
+| `GET /api/grocery/cycle/current` | agent | Current non-closed cycle (or null), plus `pause`: the cart pause covering today or the cycle's build date (or null) |
 | `POST /api/grocery/cycle/open` | agent | Open a new cycle (idempotent: returns the active cycle, filling in its thread if the cron opened it); body: `discord_thread_id` |
 | `POST /api/grocery/cycle/{id}/overrides` | agent | add/skip/qty/product; free-text adds allowed; a `product` override that differs from the plan's choice teaches the switch threshold (§4.4) |
 | `POST /api/grocery/cycle/{id}/status` | agent | §4.7 transitions: `nudged` / `building` (→ `skipped` if away) / `ready` / `skipped` / `other_store` / `closed`, optional reason; invalid → 409 |
@@ -317,6 +323,8 @@ All routes under `/web/app/api`. Payloads defined once as **Zod schemas** in `we
 | `POST /api/inventory/events` | agent | Counts (`observed`), `critical` flags, `consumed` ("we're out"), `discarded`, `moved` ("froze the chicken"), text purchases (`acquired` → a manual receipt through `applyReceipt`). `discarded` / `moved` without a `quantity` take everything estimated at `location` |
 | `GET /api/freezer/aging?limit=` | agent | Oldest freezer stock |
 | `POST /api/away-periods` | agent | Create away period (re-projects `inventory_state`) |
+| `POST /api/pauses` | agent | "Pause carts until Mar 1": create a cart pause (`ends_on` ≥ today) |
+| `POST /api/pauses/{id}/end` | agent | "Resume carts": a started pause ends yesterday (`pause` returned), one not started before today is removed (`pause: null`); an ended one 409 |
 | `POST /api/products/{id}/reject` | agent | "Never buy X": stance `rejected` + `reject` preference event |
 | `GET /api/receipts/cursor?account=` | agent | Last ingested `external_order_id`/date for a member's account |
 | `POST /api/receipts/ingest` | agent | Digital/manual receipt JSON → resolve, apply, EMA |
@@ -382,6 +390,12 @@ ema = 0.7 × ema + 0.3 × observed
 - Thresholds are strict: `observed` exactly 3× or 0.25× the EMA is not an outlier. A streak in the
   other direction restarts at 1. Telemetry: `ema_updated`, `ema_outlier_rejected`,
   `ema_outlier_accepted` (the third-in-a-row habit change).
+- **Cart pauses:** a step whose interval (`prev` date → this date, inclusive) touches a
+  `pause_period` returns `paused`: EMA and outlier streak unchanged, telemetry `ema_paused`. The
+  purchase still anchors inventory. Paused days are *not* subtracted like away days — the household
+  is home and eating, often more, and buying at stores PandaBase doesn't see — so neither the
+  interval nor a subtracted one would be a steady-state measurement. The first interval wholly
+  after the pause learns again.
 - Backfill replays receipts chronologically through the same function (`replayVelocity`).
 - Static items never use EMA.
 - A one-off product (bought once in the 12-month backfill) creates a `static` item; a second
@@ -704,7 +718,9 @@ closed/skipped/other_store ──▶ engine opens the next cycle at once if its 
 ```
 
 Opening is idempotent per `week_label`. If an away period covers the build date, the build is a no-op
-and the cycle becomes `skipped`.
+and the cycle becomes `skipped` (reason `away`); a cart pause does the same with reason `paused`.
+While `cycle/current` reports a `pause`, `cycle nudge` prints `NO_REPLY` (no check-in), `cart probe`
+loads no page, and `cart build --reply` posts "⏸️ Carts are paused until …".
 
 Details (`web/lib/domain/cycle.ts`): `building ──(cart filled)──▶ ready` is an explicit `built`
 event. "skip" and "other store" are accepted from any active state (a built cart can be abandoned —
@@ -1622,4 +1638,5 @@ docker-compose.yml (+ docker-compose.build.yml), Makefile, CLAUDE.md, README.md,
 | 82 | A Costco instant saving comes off the line of the item it names (line total and unit price); an online item's fee is added to its item's line total; an online "Discount on Order" isn't spread over the lines | The coupon row names its item number, so the paid price is known exactly: store choice then compares what the household paid, and the lines add up to SUBTOTAL. A receipt-level `discount_cents` (Amazon's way) would leave every Costco price high. A fee belongs to buying that item, but isn't its price per unit. An order discount names no item; with several items any split would be a guess, so it only switches off the subtotal + tax = total check |
 | 83 | A Costco (`receipts.holdVendors`) digital receipt whose totals check fails is held — stored, not applied — until a re-read of the order adds up, or for 14 days, then applied as read (§4.5 *Held receipts*) | In the first Costco sweep (2026-11-16) the two receipts with wrong lines were exactly the two whose totals failed, and applying them changed shared items (buy streaks, stances, usage rates) that an order-id-deduped re-ingest can't correct; `db:reset-imports --vendor` then refused because those items were shared with Amazon's import. Holding costs nothing when the parser is fixed in time. Never applying would lose the purchase for good (the item looks unbought and is ordered again), and both live failures had their items right, so the default after two weeks is to apply as read. Costco only: Whole Foods' weighed lines fail the check on nearly every correct order (33 of 35 on the prod copy). A separate `receipt_hold` table, not a `held` receipt status: widening `receipt.status`'s CHECK would rebuild `receipt` |
 | 84 | Server functions leave out sharp (§8 *Function size*) | Function Storage on the free Vercel team (shared with Bamboo) reached 75% of 10 GB in 2026-11; every kept deployment holds its functions, and sharp was over half of each one while nothing here uses it. Previews stay on (tier A′ needs them); the team's retention policy deletes old deployments |
-| 85 | Subscribe & Save items are read from the member's `/auto-deliveries` page each sweep and left out of the cart; only a list whose tiles match the page's category counts is synced, and a subscription not confirmed for 21 days stops counting (§4.9) | The household's carts filled with one-time buys of items already delivered by subscription (2026-11). Flagging S&S lines on order pages would miss subscriptions until they deliver and never notice a cancellation; a manual per-item switch would need the household to keep it in step with Amazon. The page is the source of truth and costs one read-only load per sweep. Replacing the list makes cancellations visible, so a short read would wrongly end live subscriptions: hence the count check. The stale window bounds the opposite failure (a broken sync hiding items for good) |
+| 85 | A cart pause is its own period, not an away period: no cart, no Friday check-in, no EMA learning across it, days still count as eating | Parental leave (2026-11): home all day and shopping at 99 Ranch without receipts. An away period would subtract those days and make rates look faster afterwards; letting the EMA run would accept three "slow" gaps in a row as a habit change. Freezing keeps the pre-leave rates, which are the best guess for when life is back to normal |
+| 86 | Subscribe & Save items are read from the member's `/auto-deliveries` page each sweep and left out of the cart; only a list whose tiles match the page's category counts is synced, and a subscription not confirmed for 21 days stops counting (§4.9) | The household's carts filled with one-time buys of items already delivered by subscription (2026-11). Flagging S&S lines on order pages would miss subscriptions until they deliver and never notice a cancellation; a manual per-item switch would need the household to keep it in step with Amazon. The page is the source of truth and costs one read-only load per sweep. Replacing the list makes cancellations visible, so a short read would wrongly end live subscriptions: hence the count check. The stale window bounds the opposite failure (a broken sync hiding items for good) |

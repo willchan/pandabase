@@ -59,3 +59,22 @@ export const awayPeriod = sqliteTable(
   },
   (t) => [check("away_period_range_check", sql`${col(t.endsOn)} >= ${col(t.startsOn)}`)],
 );
+
+/**
+ * A cart pause (PRD §4.1 "Paused weeks", DESIGN §4.1/§4.7): weekly cart builds inside it are
+ * skipped and consumption rates don't learn from purchases around it (life isn't in a steady
+ * state — e.g. parental leave). Unlike `away_period`, days still count as eating.
+ */
+export const pausePeriod = sqliteTable(
+  "pause_period",
+  {
+    ...baseColumns(),
+    /** Household-TZ date, `YYYY-MM-DD`, inclusive. */
+    startsOn: text("starts_on").notNull(),
+    /** Household-TZ date, `YYYY-MM-DD`, inclusive. Ending a pause early moves this to yesterday. */
+    endsOn: text("ends_on").notNull(),
+    note: text("note"),
+    createdByMemberId: text("created_by_member_id").references(() => member.id),
+  },
+  (t) => [check("pause_period_range_check", sql`${col(t.endsOn)} >= ${col(t.startsOn)}`)],
+);

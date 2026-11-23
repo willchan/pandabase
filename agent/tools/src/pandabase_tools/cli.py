@@ -154,10 +154,14 @@ def _member(env: Env, name: str | None) -> config_mod.Member:
         raise CliError({"error": str(err).strip("'\"")}) from err
 
 
-def _current_cycle(env: Env) -> contracts.Cycle | None:
+def _current(env: Env) -> contracts.CycleCurrentResponse:
     cur = env.api.call("GET", "/api/grocery/cycle/current")
     assert isinstance(cur, contracts.CycleCurrentResponse)
-    return cur.cycle
+    return cur
+
+
+def _current_cycle(env: Env) -> contracts.Cycle | None:
+    return _current(env).cycle
 
 
 def cmd_cart_build(env: Env) -> Any:
@@ -165,7 +169,8 @@ def cmd_cart_build(env: Env) -> Any:
     turn; `cycle_replies.build`)."""
     a = env.args
     member = _member(env, a.member)
-    cycle = _current_cycle(env)
+    cur = _current(env)
+    cycle = cur.cycle
     cycle_id = a.cycle_id or (cycle.id if cycle else None)
     if not cycle_id:
         res: dict[str, Any] = {"status": "no_cycle"}
@@ -189,7 +194,7 @@ def cmd_cart_build(env: Env) -> Any:
             f"⚠️ The cart wasn't built: the cart browser was busy ({err.owner}). "
             "Run `pandabase-tools cart build --reply` on the Mac mini once it's free."
         )
-    return cycle_replies.build(res, cycle) if a.reply else res
+    return cycle_replies.build(res, cycle, cur.pause) if a.reply else res
 
 
 def cmd_cart_pending(env: Env) -> Any:
@@ -212,8 +217,12 @@ def cmd_cart_pending(env: Env) -> Any:
 
 def cmd_cycle_nudge(env: Env) -> Any:
     """Friday 18:00: record the nudge and print the check-in for OpenClaw to announce (a command
-    automation, no model turn). `NO_REPLY` when this cycle was already nudged."""
-    cycle = _current_cycle(env)
+    automation, no model turn). `NO_REPLY` when this cycle was already nudged, or while carts
+    are paused (Saturday's message says so; nobody needs a check-in for a cart that won't come)."""
+    cur = _current(env)
+    cycle = cur.cycle
+    if cur.pause is not None:
+        return cycle_replies.NO_REPLY
     if cycle is None:
         return "⚠️ No grocery list is open this week, so there is no Friday check-in."
     if cycle.nudge_sent_at is not None:
@@ -345,8 +354,15 @@ def cmd_cart_add(env: Env) -> Any:
 def cmd_cart_probe(env: Env) -> Any:
     """Weekly check: open one Amazon and one Whole Foods product page and confirm each ASIN's add
     control is still found (`layout_watch.probe`). Clicks nothing. `--reply`: one line for the
-    ops channel, or `NO_REPLY` (an OpenClaw command payload)."""
+    ops channel, or `NO_REPLY` (an OpenClaw command payload). While carts are paused it loads
+    nothing (`{"status": "paused"}`): no build needs the button, and each load risks a bot check."""
     a = env.args
+    try:
+        paused = _current(env).pause is not None
+    except api_mod.ApiError:
+        paused = False  # best effort: an API outage shouldn't hide a layout change
+    if paused:
+        return cycle_replies.NO_REPLY if a.reply else {"status": "paused"}
     member = _member(env, a.member)
     profile = env.loaded.profile(member)
     cfg = env.cfg.cart

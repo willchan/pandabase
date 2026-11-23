@@ -11,6 +11,8 @@ import {
   isoWeekLabel,
   isoWeekday,
   localDate,
+  overlapsPeriod,
+  periodOn,
   zonedToUtc,
 } from "./time";
 
@@ -134,4 +136,24 @@ describe("away days", () => {
       awayDaysBetween(at("01"), at("11"), [{ startsOn: "2026-10-07", endsOn: "2026-10-05" }], TZ),
     ).toBe(0);
   });
+});
+
+describe("cart pause periods", () => {
+  const p1 = { startsOn: "2026-11-23", endsOn: "2027-03-01", note: "leave" };
+  const p2 = { startsOn: "2026-12-01", endsOn: "2026-12-10", note: null };
+  it.each([
+    ["2026-11-22", null],
+    ["2026-11-23", p1],
+    ["2026-12-05", p1],
+    ["2027-03-01", p1],
+    ["2027-03-02", null],
+  ])("periodOn(%s)", (d, out) => expect(periodOn(d, [p2, p1])).toEqual(out));
+
+  it.each([
+    ["2026-11-01", "2026-11-22", false],
+    ["2026-11-01", "2026-11-23", true],
+    ["2027-03-01", "2027-04-01", true],
+    ["2027-03-02", "2027-04-01", false],
+    ["2026-12-01", "2026-12-02", true],
+  ])("overlapsPeriod(%s, %s) = %s", (a, b, out) => expect(overlapsPeriod(a, b, [p1])).toBe(out));
 });

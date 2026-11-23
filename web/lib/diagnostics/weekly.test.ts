@@ -216,6 +216,34 @@ describe("weekly diagnostics", () => {
     expect(rows.map((r) => r.metric)).toEqual(["cart_probe", "cart_probe", "cart_layout_alert"]);
   });
 
+  it("reports cart pauses and the EMA updates they froze", async () => {
+    const t = (i: number, metricType: string, payload: Record<string, unknown>) => ({
+      id: `01L${String(i).padStart(23, "0")}`,
+      source: "state_engine",
+      metricType,
+      payload,
+      createdAt: "2026-10-24T17:10:00.000Z",
+    });
+    await h.db.insert(systemTelemetry).values([
+      t(1, "cart_pause_changed", {
+        action: "created",
+        pauseId: "P1",
+        startsOn: "2026-10-24",
+        endsOn: "2027-03-01",
+      }),
+      t(2, "ema_paused", { itemId: "I1", observedDays: 9, emaDays: 2 }),
+      t(3, "ema_paused", { itemId: "I2", observedDays: 4, emaDays: 3 }),
+    ]);
+    const report = await renderWeekly(h.db, "2026-W43", {
+      now: "2026-10-26T20:00:00.000Z",
+      config: DEFAULT_CONFIG,
+    });
+    expect(report.markdown).toContain(
+      "Carts paused: 2 EMA update(s) frozen (created 2026-10-24–2027-03-01).",
+    );
+    expect(report.markdown).toContain("| ema_paused | 2 |");
+  });
+
   it("reports Subscribe & Save: items left out, syncs, and page reads not synced (§4.9)", async () => {
     const soap = await h.itemId("Eggs");
     const t = (i: number, source: string, metricType: string, payload: Record<string, unknown>) => ({

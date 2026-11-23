@@ -26,6 +26,8 @@ import * as jobsNotifications from "@/app/api/jobs/notifications/route";
 import * as jobsCreate from "@/app/api/jobs/route";
 import * as mediaUploadUrl from "@/app/api/media/upload-url/route";
 import * as predictions from "@/app/api/predictions/route";
+import * as pauseEnd from "@/app/api/pauses/[id]/end/route";
+import * as pauses from "@/app/api/pauses/route";
 import * as productReject from "@/app/api/products/[id]/reject/route";
 import * as receiptsCursor from "@/app/api/receipts/cursor/route";
 import * as receiptsIngest from "@/app/api/receipts/ingest/route";
@@ -34,6 +36,8 @@ import * as telemetry from "@/app/api/telemetry/route";
 
 export const HANDLERS: Record<RouteName, Record<string, unknown>> = {
   awayPeriods,
+  pauses,
+  pauseEnd,
   mergeSuggestionsRun,
   cronMaintenance,
   costcoTripCurrent: costcoTrip,

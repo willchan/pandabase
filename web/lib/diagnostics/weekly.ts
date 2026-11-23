@@ -156,6 +156,7 @@ export async function renderWeekly(
     "ema_outlier_rejected",
     "ema_outlier_accepted",
     "ema_skipped",
+    "ema_paused",
     "promoted_to_velocity",
     "overbuy",
     "estimate_vs_observed",
@@ -186,6 +187,20 @@ export async function renderWeekly(
     .sort((a, b) => b.mae - a.mae || a.name.localeCompare(b.name));
   const overbuys = metric("overbuy");
   const outliers = metric("ema_outlier_rejected", "ema_outlier_accepted");
+  // Cart pauses (§4.1): purchases that didn't teach the EMA, and pauses started / ended.
+  const pausedSteps = metric("ema_paused");
+  const pauseChanges = metric("cart_pause_changed");
+  if (pausedSteps.length || pauseChanges.length) {
+    findings.push({
+      score: 1,
+      text:
+        `Carts paused: ${pausedSteps.length} EMA update(s) frozen` +
+        (pauseChanges.length
+          ? ` (${pauseChanges.map((t) => `${String(t.p.action)} ${String(t.p.startsOn)}–${String(t.p.endsOn ?? t.p.plannedEndsOn)}`).join(", ")})`
+          : "") +
+        ".",
+    });
+  }
   if (overbuys.length) {
     findings.push({
       score: 2,

@@ -40,8 +40,15 @@
     {
       "idx": 5,
       "version": "6",
-      "when": 1795387484336,
-      "tag": "0005_subscriptions",
+      "when": 1795387438864,
+      "tag": "0005_cart_pauses",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1795389443739,
+      "tag": "0006_subscriptions",
       "breakpoints": true
     }
   ]

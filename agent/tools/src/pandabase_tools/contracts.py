@@ -24,6 +24,13 @@ class AwayPeriodResponse(BaseModel):
     away_period: AwayPeriod
 
 
+class CartPause(BaseModel):
+    ends_on: date_aliased
+    id: Annotated[str, Field(max_length=64, min_length=1)]
+    note: str | None
+    starts_on: date_aliased
+
+
 class CartResultLine(BaseModel):
     asin: str | None = None
     error: str | None = None
@@ -213,6 +220,25 @@ class PaperReceiptResult(BaseModel):
     tax_cents: Annotated[int | None, Field(ge=0, le=9007199254740991)]
     total_cents: Annotated[int | None, Field(ge=0, le=9007199254740991)]
     totals_check: Literal["pass", "fail", "n/a"]
+
+
+class PauseEndRequest(BaseModel):
+    actor_discord_id: Annotated[str, Field(max_length=32, min_length=1)]
+
+
+class PauseEndResponse(BaseModel):
+    pause: CartPause | None
+
+
+class PauseRequest(BaseModel):
+    actor_discord_id: Annotated[str, Field(max_length=32, min_length=1)]
+    ends_on: date_aliased
+    note: Annotated[str | None, Field(max_length=200)] = None
+    starts_on: date_aliased
+
+
+class PauseResponse(BaseModel):
+    pause: CartPause
 
 
 class PredictionsQuery(BaseModel):
@@ -501,6 +527,7 @@ class Cycle(BaseModel):
 
 class CycleCurrentResponse(BaseModel):
     cycle: Cycle | None
+    pause: CartPause | None = None
 
 
 class CycleOpenResponse(BaseModel):

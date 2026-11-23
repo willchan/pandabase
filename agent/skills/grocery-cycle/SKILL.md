@@ -56,6 +56,9 @@ pandabase-tools api get /api/grocery/cycle/current
 ```
 
 - `cycle` is non-null **and** has `discord_thread_id` → nothing to do.
+- `pause` is non-null (carts are paused) → still open the thread as below, but its first message
+  is only: `⏸️ **Groceries — week of Oct 26** · carts are paused until Mar 1 (<pause.ends_on>), so
+  no cart this week. Say "resume carts" here to start again.`
 - Otherwise create the thread with the message tool (`action: "thread-create"`,
   `target: "<cycle_channel id>"`, thread name `🛒 Groceries — week of <Mon date>`) and this first message:
 
@@ -90,6 +93,8 @@ Use `matches[0].item_id` when its `match` is `confident`; otherwise treat the wo
 | "skip this week" | `pandabase-tools api post /api/grocery/cycle/<C>/status --json '{"status": "skipped", "reason": "skip this week"}' --actor <sender id> --key discord:<message id>` → then §1 |
 | "shopping at Trader Joe's" | same route, `{"status": "other_store", "reason": "Trader Joe's"}` → reply "✅ Have fun at Trader Joe's — send the receipt photo here after." → then §1 — **not for Costco**: a Costco run is a trip (§5), and the weekly cart still happens |
 | "away until Nov 3" | `pandabase-tools api post /api/away-periods --json '{"starts_on": "<today>", "ends_on": "2026-11-03", "note": "away"}' --actor <sender id> --key discord:<message id>` (dates in household TZ) → "✅ Away until Nov 3 — no cart while you're gone." |
+| "pause carts until March 1", "no carts for a while" | `pandabase-tools api post /api/pauses --json '{"starts_on": "<today>", "ends_on": "2027-03-01", "note": "<their words, short>"}' --actor <sender id> --key discord:<message id>` (household TZ; no end date given → ask once, "until when? …or I'll pause 4 weeks") → "⏸️ Carts paused until Mar 1 — no weekly cart, and usage estimates won't learn from these weeks." **Not** "away": they're home and still eating |
+| "resume carts", "unpause" | `pause.id` from `pandabase-tools api get /api/grocery/cycle/current` → `pandabase-tools api post /api/pauses/<pause id>/end --json '{}' --actor <sender id> --key discord:<message id>` → "▶️ Carts are back on — I'll build one this Saturday." (no `pause` → "Carts aren't paused.") |
 | "done", "picked it up" | `{"status": "closed", "reason": "done"}` (only valid when the cycle is `ready`) → then §1 |
 | A count answering the nudge ("6 eggs") | `pandabase-tools api post /api/inventory/events --json '{"events": [{"item_id": "<id>", "kind": "observed", "quantity": 6, "source": "checkin"}]}' --actor <sender id> --key discord:<message id>` |
 
@@ -110,7 +115,7 @@ Photos and "bought/we're out/never buy" messages belong to the `discord-intake` 
 
 The `pandabase-friday-nudge` automation runs `pandabase-tools cycle nudge` with no model turn: it
 records the nudge and posts the check-in (likely needed, please check, freezer, review items) in
-`cycle_channel`, linking the cycle thread. **You never post the nudge.** Answers to it ("6 eggs",
+`cycle_channel`, linking the cycle thread (nothing while carts are paused). **You never post the nudge.** Answers to it ("6 eggs",
 photos) arrive in the thread: handle them with §2.
 
 ## 4. Saturday cart (10:00 build runs by itself; you do the 10:30 search)

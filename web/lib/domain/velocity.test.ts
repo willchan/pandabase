@@ -206,6 +206,84 @@ describe("updateVelocity — DESIGN §4.1", () => {
     expect(s.state.outlierDirection).toBe("low");
   });
 
+  describe("cart pauses (PRD §4.1 paused weeks): no learning from intervals that touch one", () => {
+    // Parental leave: home all day and shopping at an untracked store, so a gap between Amazon
+    // orders says nothing about steady-state use. Day 0 = Oct 1, day 10 = Oct 11, day 40 = Nov 10.
+    const paused = [{ startsOn: "2026-10-15", endsOn: "2026-11-05" }];
+    const state = st({ emaDays: 2, outlierStreak: 1, outlierDirection: "high" });
+    it.each([
+      ["spans the pause", day(10), day(40)],
+      ["starts inside it", day(20), day(40)],
+      ["ends inside it", day(10), day(20)],
+      ["lies within it", day(16), day(30)],
+      ["ends on its first day", day(10), day(14)],
+    ])("an interval that %s leaves EMA and streak untouched", (_, from, to) => {
+      const s = updateVelocity(
+        state,
+        { at: from, qty: 1 },
+        { at: to, qty: 1 },
+        {
+          away: [],
+          paused,
+          config,
+        },
+      );
+      expect(s.outcome).toBe("paused");
+      expect(s.state).toEqual(state);
+      expect(s.telemetry).toMatchObject({ metric: "ema_paused", emaDays: 2 });
+    });
+
+    it("does not subtract paused days (unlike away): the household is still eating", () => {
+      const s = updateVelocity(
+        st({ emaDays: 30 }),
+        { at: day(10), qty: 1 },
+        { at: day(40), qty: 1 },
+        { away: [], paused, config },
+      );
+      expect(s.elapsedDays).toBeCloseTo(30, 9);
+    });
+
+    it("learns again from the first interval wholly after the pause", () => {
+      const s = updateVelocity(
+        st({ emaDays: 2 }),
+        { at: day(36), qty: 1 },
+        { at: day(38), qty: 1 },
+        { away: [], paused, config },
+      );
+      expect(s.outcome).toBe("updated");
+    });
+
+    it("a first acquisition during a pause still seeds nothing new and records as usual", () => {
+      expect(
+        updateVelocity(
+          st({ defaultEmaDays: 3 }),
+          null,
+          { at: day(20), qty: 1 },
+          {
+            away: [],
+            paused,
+            config,
+          },
+        ).outcome,
+      ).toBe("first_acquisition");
+    });
+
+    it("replay (merge / rebuild) freezes the same intervals", () => {
+      const acq = [0, 2, 4, 20, 22, 38, 40].map((d) => ({ at: day(d), qty: 1 }));
+      const { steps, state: end } = replayVelocity(st(), acq, { away: [], paused, config });
+      expect(steps.map((x) => x.outcome)).toEqual([
+        "first_acquisition",
+        "initialized",
+        "updated",
+        "paused",
+        "paused",
+        "paused",
+        "updated",
+      ]);
+      expect(end.emaDays).toBeCloseTo(2, 9);
+    });
+  });
+
   it("skips same-day and out-of-order acquisitions", () => {
     const state = st({ emaDays: 2 });
     expect(
