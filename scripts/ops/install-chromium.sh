@@ -24,6 +24,19 @@ LAUNCHER="$ROOT/scripts/ops/chromium-launch.sh"
 MODE=headless
 [ "${HEADED:-0}" = 1 ] && MODE=headed
 
+# `launchctl bootout` returns before the service is gone; bootstrapping the new plist at once then
+# fails with "Bootstrap failed: 5: Input/output error" (live, 2026-11-23, both switching to
+# HEADED=1 and back). Wait until `print` no longer finds it: WAIT_STEPS × 0.5 s (tests set 0).
+WAIT_STEPS="${LAUNCHD_WAIT_STEPS:-20}"
+wait_unloaded() {
+  local i
+  for ((i = 0; i < WAIT_STEPS; i++)); do
+    launchctl print "$1" >/dev/null 2>&1 || return 0
+    sleep 0.5
+  done
+  return 0
+}
+
 run mkdir -p "$AGENTS_DIR" "$LOG_DIR"
 wanted=" "
 while IFS=$'\t' read -r profile cdp_url data_dir; do
@@ -55,8 +68,16 @@ while IFS=$'\t' read -r profile cdp_url data_dir; do
     printf '%s\n' "$rendered" >"$plist"
     if command -v plutil >/dev/null; then plutil -lint -s "$plist"; fi
   fi
-  if [ "$loaded" = 1 ]; then run launchctl bootout "$domain/$label" || true; fi
-  run launchctl bootstrap "$domain" "$plist"
+  if [ "$loaded" = 1 ]; then
+    run launchctl bootout "$domain/$label" || true
+    [ "$DRY_RUN" = 1 ] || wait_unloaded "$domain/$label"
+  fi
+  if ! run launchctl bootstrap "$domain" "$plist"; then
+    # Still tearing down after all: one more try once launchd has had a moment.
+    warn "bootstrap of $label failed; retrying once"
+    sleep "$((WAIT_STEPS > 0 ? 2 : 0))"
+    run launchctl bootstrap "$domain" "$plist"
+  fi
   info "loaded $label (port $port, $MODE, $data_dir)"
 done < <(jq -r '.profiles | to_entries[] | [.key, .value.cdp_url, (.value.user_data_dir // "")] | @tsv' "$PROFILES")
 

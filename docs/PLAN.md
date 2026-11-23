@@ -44,7 +44,7 @@ contracts.
 | M8 Ops, compose, README | done | #11 |
 | M9 Continuous deployment | done | #14 |
 | M10 Costco | in progress (M10.1–M10.3 done; M10.4 not started) | #66, #67, #68, #71 |
-| M11 Receipts as the source of truth | in review (M11.1 done; M11.2 in review; M11.3 not started) | #88 (M11.1), #89 (M11.2) |
+| M11 Receipts as the source of truth | done (M11.3 run on production 2026-11-23) | #88 (M11.1), #89 (M11.2), M11.3 notes PR |
 
 ---
 
@@ -1596,6 +1596,31 @@ reads receipts.
     deleted, 4 shared items kept and rebuilt (4 items changed, 0 products), and a full rebuild dry
     run afterwards shows 0 changes. Copies deleted. Nothing touched production; applying the
     rebuild, the Costco reset and the backfill are M11.3.
+- **M11.3 (2026-11-23, production, with the owner; counts only).** Bootstrap runs on `main` at
+  #89:
+  - `rebuild-learning` dry run, then applied: 494 items / 494 products checked, 1 item
+    (`current_ema_days`) and 1 product (`last_bought_at`) changed, causes `late_receipt` 1 and
+    `costco` 1, unexplained 0 — the late Costco delivery receipt M11.1 found.
+  - `reset-imports --vendor costco` applied (no separate dry run; 0 blockers, counts as on the prod
+    copy): 6 receipts, 26 lines, 15 items, 15 products, 19 reviews deleted; 4 shared items kept and
+    rebuilt (4 changed); 0 holds (the 2 held receipts are Whole Foods'), 0 trip links.
+  - On the Mac: the sweep's `receipts-costco.json` `done` set emptied (backed up first), so the
+    sweep re-opened the deleted receipts. The first sweep stopped `not_signed_in`: Costco had
+    signed the headless profile out since 2026-11-16; signed in again over Screen Sharing with
+    `HEADED=1 make install-chromium`. Then one sweep: 3 page loads, 9 clicks, 6 receipts (4
+    warehouse, 2 online), **all totals checks pass** (2 failed on 2026-11-16), 1 instant saving and
+    1 item fee folded into their lines, 0 unknown lines, 0 held, 15 new items, 0 trip links (no
+    trip on those dates).
+  - Backfill: all 9 periods on both tabs (17 clicks, 1 page load), 0 more receipts — correct: the
+    owner confirmed no Costco purchases on this account before September 2026.
+  - `rebuild-learning` again: 494 / 494 checked, **0 changed**: ingest now writes exactly what the
+    rebuild computes.
+  - Found on the way: `make install-chromium` failed with "Bootstrap failed: 5: Input/output
+    error" switching to and from `HEADED=1` — `launchctl bootout` returns before the service is
+    gone. Fixed here: wait until `launchctl print` no longer finds it, retry the bootstrap once
+    (regression test in `scripts/deploy/tests/chromium.bats`).
+  - Still to do: merge suggestions after the import (most Costco abbreviations match no existing
+    item), and the held-receipts retirement contract PR (§10 #90). M10.4 can start.
 
 ---
 

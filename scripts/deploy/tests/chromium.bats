@@ -94,3 +94,35 @@ program_args() {
   run /bin/bash "$ROOT_DIR/scripts/ops/chromium-launch.sh" invisible "$STUB/bin/chrome"
   [ "$status" -eq 2 ]
 }
+
+# Bug (live 2026-11-23): `launchctl bootout` returns before the service has stopped, so the
+# bootstrap right after it failed with "Bootstrap failed: 5: Input/output error", both switching
+# to HEADED=1 and back; a second run worked because nothing was loaded any more.
+@test "install-chromium waits for the old service to stop before bootstrapping" {
+  run /bin/bash "$ROOT_DIR/scripts/ops/install-chromium.sh"
+  [ "$status" -eq 0 ]
+  # launchd that tears down asynchronously: after bootout, `print` still finds the service for
+  # two more calls, and bootstrap fails (exit 5) while it is still there.
+  cat >"$STUB/bin/launchctl" <<'SH'
+#!/usr/bin/env bash
+echo "launchctl $*" >>"$STUB/calls"
+case "$1" in
+  print)
+    if [ -f "$STUB/stopping" ]; then
+      n=$(cat "$STUB/stopping"); [ "$n" -le 0 ] && { rm -f "$STUB/stopping" "$STUB/loaded"; exit 1; }
+      echo $((n - 1)) >"$STUB/stopping"; exit 0
+    fi
+    [ -f "$STUB/loaded" ] ;;
+  bootout) echo 2 >"$STUB/stopping" ;;
+  bootstrap)
+    if [ -f "$STUB/stopping" ]; then echo "Bootstrap failed: 5: Input/output error" >&2; exit 5; fi
+    touch "$STUB/loaded" ;;
+esac
+SH
+  chmod +x "$STUB/bin/launchctl"
+  : >"$STUB/calls"
+  LAUNCHD_WAIT_STEPS=5 HEADED=1 run /bin/bash "$ROOT_DIR/scripts/ops/install-chromium.sh"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"loaded com.pandabase.chromium.pandabase (port 9222, headed"* ]]
+  [ "$(grep -c 'launchctl bootstrap' "$STUB/calls")" -eq 1 ]
+}
