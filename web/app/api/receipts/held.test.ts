@@ -196,9 +196,9 @@ describe("held digital receipts", () => {
   });
 
   // Regression (prod copy, 2026-11-17): 33 of 35 checked Whole Foods orders and 11 of 163 Amazon
-  // ones fail the totals check — Whole Foods charges weight-priced produce by the weight packed, so
-  // its lines rarely add up — and #78 held them all, the weekly cart's order included.
-  it("a Whole Foods order whose weighed lines don't add up applies at once (not held)", async () => {
+  // ones fail the totals check (the parser misread Whole Foods' item grid: per-lb prices, bare
+  // quantities, unsupplied units), and #78 held them all, the weekly cart's order included.
+  it("a Whole Foods order whose lines don't add up applies at once (not held)", async () => {
     const res = await ingest({
       vendor: "wholefoods",
       external_order_id: "112-0000002-0000099",
