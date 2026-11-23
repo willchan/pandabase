@@ -588,6 +588,22 @@ describe("weekly diagnostics", () => {
     expect(dq).toContain('"check":"receipt_hold_released"');
   });
 
+  it("counts learning rebuilds (§4.9) only in weeks that had one", async () => {
+    await h.db.insert(systemTelemetry).values({
+      id: "01KREBUILD0000000000000000",
+      source: "state_engine",
+      metricType: "learning_rebuilt",
+      payload: { scope: "all", itemsChanged: 2, productsChanged: 3, eventItems: 1 },
+      createdAt: "2026-10-21T18:00:00.000Z",
+    });
+    const report = await renderWeekly(h.db, "2026-W43", ctx);
+    expect(report.markdown).toContain(
+      "Learning rebuilt from receipts (db:rebuild-learning): 1 run(s), 2 item(s) and 3 product(s) changed, 1 item(s) with regenerated preference events.",
+    );
+    const quiet = await renderWeekly(h.db, "2026-W42", ctx);
+    expect(quiet.markdown).not.toContain("Learning rebuilt");
+  });
+
   it("data quality: a week without receipts isn't flagged and says so", async () => {
     const report = await renderWeekly(h.db, "2025-W01", ctx);
     expect(report.markdown).toContain("| Store split (this week) | no lines |");

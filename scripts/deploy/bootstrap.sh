@@ -2,7 +2,7 @@
 # First-run database steps without a terminal (.github/workflows/bootstrap.yml, run from the
 # GitHub web UI or app; docs/SETUP-CLOUD.md). Every action is idempotent, so re-running is safe.
 #
-#   BOOTSTRAP_ACTION   migrate | add-member | reset-imports | rename-items
+#   BOOTSTRAP_ACTION   migrate | add-member | reset-imports | rename-items | rebuild-learning
 #   BOOTSTRAP_TARGET   production | preview (the GitHub environment whose TURSO_* it got)
 #   MEMBER_INDEX, MEMBER_NAME                           add-member: required; the member's email
 #                      is the MEMBER_INDEX-th (1-based) address in ALLOWED_EMAILS, a secret, so
@@ -10,9 +10,10 @@
 #   MEMBER_DISCORD, MEMBER_PROFILE                      optional (empty = leave as is)
 #   MEMBER_SWEEP       keep | daily | weekly | off      (keep = leave as is)
 #   MEMBER_CART        true | false                     (true = make this the cart account)
-#   RESET_APPLY        true | false                     reset-imports / rename-items: false (default)
-#                      only counts; true deletes the digital receipt import (refused if human data
-#                      is found) / renames brand-named auto-created items
+#   RESET_APPLY        true | false                     reset-imports / rename-items /
+#                      rebuild-learning: false (default) only counts; true deletes the digital
+#                      receipt import (refused if human data is found) / renames brand-named
+#                      auto-created items / writes the rebuilt learning (DESIGN §4.9)
 #   RESET_VENDOR       all | amazon | wholefoods | costco   reset-imports: one store's import only
 #                      (all = every store, the default)
 #   DRY_RUN=1          validate and print the command; touch nothing
@@ -40,8 +41,8 @@ errors=()
 err() { errors+=("$1"); }
 
 case "$action" in
-  migrate | add-member | reset-imports | rename-items) ;;
-  *) err "action must be migrate, add-member, reset-imports or rename-items (got '$action')" ;;
+  migrate | add-member | reset-imports | rename-items | rebuild-learning) ;;
+  *) err "action must be migrate, add-member, reset-imports, rename-items or rebuild-learning (got '$action')" ;;
 esac
 case "$target" in production | preview) ;; *) err "target must be production or preview (got '$target')" ;; esac
 
@@ -79,7 +80,7 @@ if [ "$action" = add-member ]; then
   case "$cart" in true | false) ;; *) err "cart must be true or false" ;; esac
 fi
 
-if [ "$action" = reset-imports ] || [ "$action" = rename-items ]; then
+if [ "$action" = reset-imports ] || [ "$action" = rename-items ] || [ "$action" = rebuild-learning ]; then
   case "$apply" in true | false) ;; *) err "apply must be true or false" ;; esac
 fi
 if [ "$action" = reset-imports ]; then
@@ -110,7 +111,7 @@ fi
 if [ "$action" = migrate ]; then
   cmd=(pnpm db:migrate:prod)
   shown="pnpm db:migrate:prod"
-elif [ "$action" = reset-imports ] || [ "$action" = rename-items ]; then
+elif [ "$action" = reset-imports ] || [ "$action" = rename-items ] || [ "$action" = rebuild-learning ]; then
   # Counts only unless apply; reset-imports refuses (exit 3) when it finds human data.
   cmd=(pnpm "db:$action")
   [ "$action" != reset-imports ] || [ "$vendor" = all ] || cmd+=(--vendor "$vendor")
