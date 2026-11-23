@@ -190,9 +190,26 @@ describe("held digital receipts", () => {
     expect(await telemetry("receipt_hold_released")).toEqual([
       expect.objectContaining({ holdId: hold!.id, outcome: "expired", attempts: 1 }),
     ]);
-    // Re-runs and later ingests change nothing.
+    // Re-runs change nothing; the same read again is a duplicate.
     expect((await cron()).body.applied_held_receipts).toBe(0);
-    expect((await ingest(FIXED)).body).toMatchObject({ duplicate: true, receipt_id: r!.id });
+    expect((await ingest(UNAPPLIED_SAVING)).body).toMatchObject({
+      duplicate: true,
+      receipt_id: r!.id,
+    });
+    // A fixed parser's read after the expiry replaces it (PLAN M11.2): only the almond line
+    // changes, the price is corrected, and a worse read can no longer replace it.
+    const fixed = await ingest(FIXED);
+    expect(fixed.body).toMatchObject({
+      duplicate: false,
+      replaced: true,
+      receipt_id: r!.id,
+      totals_check: "pass",
+    });
+    expect(await costcoProduct("9000103")).toMatchObject({ lastPriceCents: 549 });
+    expect(await telemetry("receipt_replaced")).toEqual([
+      expect.objectContaining({ outcome: "replaced", linesKept: 4, linesNew: 1, linesRemoved: 1 }),
+    ]);
+    expect((await ingest(UNAPPLIED_SAVING)).body).toMatchObject({ duplicate: true });
   });
 
   // Regression (prod copy, 2026-11-17): 33 of 35 checked Whole Foods orders and 11 of 163 Amazon

@@ -44,7 +44,7 @@ contracts.
 | M8 Ops, compose, README | done | #11 |
 | M9 Continuous deployment | done | #14 |
 | M10 Costco | in progress (M10.1–M10.3 done; M10.4 not started) | #66, #67, #68, #71 |
-| M11 Receipts as the source of truth | in review (M11.1 in review; M11.2–M11.3 not started) | #88 (M11.1) |
+| M11 Receipts as the source of truth | in review (M11.1 done; M11.2 in review; M11.3 not started) | #88 (M11.1), #89 (M11.2) |
 
 ---
 
@@ -1554,6 +1554,48 @@ reads receipts.
   rebuilding at ingest fixes; `web/lib/services/learning.test.ts` has the regression.
   `planLearningRebuild` reads every table whole (fine for a CLI). Ingest needs a per-item
   loader inside §8's round-trip rule.
+
+- **M11.2 (2026-11-23).** Ingest, re-read and reset rebuild instead of patch (DESIGN §4.5, §4.10,
+  §10 #89, #90):
+  - `persistReceiptEffects` no longer writes `applyReceipt`'s item / product / preference patches;
+    it rebuilds the touched items with `rebuildItemsIn` (`web/lib/services/learning.ts`) inside the
+    ingest transaction: `readLearningRows(db, items)` (new, scoped; one batch) → `planFromRows` →
+    `learningWrites` (one batch). A test pins the rebuild at 2 round trips for 1 or 8 items, and
+    another checks the scoped plan equals the whole-table plan per item. `applyReceipt` is
+    unchanged (its patches still feed the `learning_rebuilt {scope: ingest}` comparison, emitted
+    only when the rebuild differs). Preference events are now replaced as a multiset difference
+    (`diffEvents`), also in `db:rebuild-learning`, so its "removed / added" counts are the actual
+    differences rather than the whole stored set.
+  - The M11.1 late-receipt regression (`web/lib/services/learning.test.ts`) now asserts ingest
+    itself keeps `last_bought_at` at the later date and takes the EMA step; `--apply` got its own
+    test (a drifted stored value).
+  - Re-read orders: `replaceReceiptIn` in `services/receipts.ts`, digital only, keyed on content
+    (header + lines in order). Contract: `ReceiptIngestResponse.replaced` (optional; regenerated).
+    Agent: `ingest_key` always carries the body hash (was: held orders only), `receipts ingest`
+    too. A stored passing read isn't replaced by a failing one.
+  - `db:reset-imports` is delete-and-rebuild for both modes: `items_predating_import` and
+    `other_store_lines` are no longer blockers (those items are kept and rebuilt);
+    `info.itemsKept`, `rebuilt` and a `learning_rebuilt {scope: reset}` row are new.
+  - **Held receipts: not needed any more** (§10 #90) — retire them in a later contract PR (stop
+    holding, move the agent's re-read of a failing order from "held" to `totals_check: fail`,
+    then drop `receipt_hold`). They work unchanged here; an expired hold's order can now be
+    replaced by a fixed read (`held.test.ts`).
+  - Seeded databases: `db:seed` writes synthetic learned values, so the first ingest of a seeded
+    item recomputes it (two seeded tests adjusted: `pauses.test.ts`, `receipts/costco.test.ts`).
+    Making the seed fold its own history broke nine tests that rely on its synthetic prices; not
+    done.
+  - Not done: an item a misread created and the corrected read no longer names stays, with no
+    purchases and its `new_product` review (rare: the live misreads were prices and quantities).
+    Review answers (`answerReceiptReview`) still don't rebuild at once; the item's next ingest or
+    `db:rebuild-learning` picks them up.
+  - **Prod copy (2026-11-23, counts only):** re-ingesting all 240 already-seen digital receipts
+    gave 240 duplicates on `main` and on the branch, with the cart plan and the last 4 weekly
+    reports identical (hashes) between them and before/after. `--vendor costco` dry run: `main`
+    refuses (`other_store_lines` 14, `items_predating_import` 4); the branch has no blockers and
+    applies on a copy — 6 receipts, 26 lines, 15 items / 15 products, 26 events, 19 reviews
+    deleted, 4 shared items kept and rebuilt (4 items changed, 0 products), and a full rebuild dry
+    run afterwards shows 0 changes. Copies deleted. Nothing touched production; applying the
+    rebuild, the Costco reset and the backfill are M11.3.
 
 ---
 

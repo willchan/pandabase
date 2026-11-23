@@ -4,7 +4,6 @@ import {
   groceryCycle,
   inventoryEvent,
   item,
-  preferenceEvent,
   product,
   receipt,
   receiptHold,
@@ -12,23 +11,30 @@ import {
   reviewItem,
   type Db,
 } from "@pandabase/db";
-import { and, asc, eq, lte } from "drizzle-orm";
+import { and, asc, eq, inArray, lte, ne } from "drizzle-orm";
 import { monotonicFactory } from "ulid";
 import type { ReceiptIngestResponseT } from "../contracts/receipts";
+import { normalizeSku } from "../domain/matching";
 import {
   applyReceipt,
+  eventSource,
   heldReceiptExpiry,
   holdsReceipt,
+  lineBaseUnits,
   receiptDedupeKey,
+  reconcileReceiptEvents,
+  totalsCheck,
   type ReceiptEffects,
   type ReceiptInput,
 } from "../domain/receipts";
 import { badRequest } from "../http";
 import type { Q } from "../repo/db";
+import { toCandidate } from "../repo/catalog";
 import { refreshInventoryState } from "../repo/inventory";
 import { receiptRepository } from "../repo/receipts";
 import { emitTelemetry } from "../telemetry";
 import { linkCostcoReceiptIn } from "./costco";
+import { rebuildItemsIn } from "./learning";
 import { openNextCycleIn } from "./cycles";
 import type { ServiceCtx } from "./types";
 
@@ -70,7 +76,8 @@ const dedupeKey = (input: ReceiptInput, ctx: ServiceCtx): string => {
 /**
  * Ingest within the caller's transaction (composable with other writes). A digital receipt whose
  * totals check fails is held instead (§4.5 Held receipts); `asIs` applies a held one regardless
- * (its expiry).
+ * (its expiry). A digital order already ingested is replaced when its content changed
+ * (`replaceReceiptIn`), else answered as a duplicate.
  */
 export async function ingestReceiptIn(
   q: Q,
@@ -79,8 +86,14 @@ export async function ingestReceiptIn(
   opts: { asIs?: boolean } = {},
 ): Promise<ReceiptIngestResponseT> {
   const key = dedupeKey(input, ctx);
-  const existing = await existingReceipt(q, key);
-  if (existing) return existing;
+  const [stored] = await q.select().from(receipt).where(eq(receipt.dedupeKey, key));
+  if (stored) {
+    // §4.5 / PLAN M11.2: a digital order read again with different content replaces the stored
+    // one; anything else is a duplicate.
+    const replaced =
+      stored.source === "digital" ? await replaceReceiptIn(q, stored, input, ctx) : null;
+    return replaced ?? (await existingReceipt(q, key))!;
+  }
   const [hold] = await q.select().from(receiptHold).where(eq(receiptHold.dedupeKey, key));
   if (!opts.asIs && holdsReceipt(input, ctx.config)) return holdReceiptIn(q, key, input, hold, ctx);
   const fx = await applyReceipt(input, receiptRepository(q), {
@@ -216,6 +229,396 @@ export async function applyExpiredHolds(db: Db, ctx: ServiceCtx): Promise<number
   return due.length;
 }
 
+type ReceiptRow = typeof receipt.$inferSelect;
+type LineRow = typeof receiptLine.$inferSelect;
+type LineContent = Pick<
+  LineRow,
+  "rawText" | "asin" | "vendorSku" | "qty" | "unitPriceCents" | "lineTotalCents"
+>;
+
+/** What a re-read can change on a line: its text, ids, quantity and prices (not its answers). */
+const lineKey = (l: LineContent): string =>
+  JSON.stringify([
+    l.rawText,
+    l.asin ?? null,
+    l.vendorSku ?? null,
+    l.qty,
+    l.unitPriceCents ?? null,
+    l.lineTotalCents ?? null,
+  ]);
+
+/** An input line as ingest would store it (item numbers normalized on Costco lines, §4.8). */
+const inputLineContent = (l: IngestInput["lines"][number]): LineContent => ({
+  rawText: l.rawText,
+  asin: l.asin ?? null,
+  vendorSku: l.vendorSku && !l.asin ? normalizeSku(l.vendorSku) : (l.vendorSku ?? null),
+  qty: l.qty,
+  unitPriceCents: l.unitPriceCents ?? null,
+  lineTotalCents: l.lineTotalCents ?? null,
+});
+
+const headerKey = (r: {
+  fulfillment: string;
+  orderedAt: string | null;
+  acquiredAt: string;
+  subtotalCents: number | null;
+  totalCents: number | null;
+}): string =>
+  JSON.stringify([r.fulfillment, r.orderedAt, r.acquiredAt, r.subtotalCents, r.totalCents]);
+
+const isPending = (l: Pick<LineRow, "itemId" | "ignored">) => l.itemId === null && !l.ignored;
+const isProvisional = (l: Pick<LineRow, "itemId" | "ignored" | "trust" | "matchMethod">) =>
+  l.itemId !== null && !l.ignored && l.trust === "unverified" && l.matchMethod === "fuzzy";
+
+/**
+ * PLAN M11.2 / DESIGN §4.5 *Re-read orders*: a digital order ingested again whose content (header
+ * or lines) differs from the stored receipt replaces it in place — same receipt id and ingest
+ * time. A line whose content is unchanged keeps its row, so its match and any review answer stay;
+ * changed and new lines are resolved afresh (new items and products stamped with the receipt's
+ * `created_at`, the import-reset convention); lines no longer on the order are deleted. The
+ * receipt's `acquired` events are re-derived from its final lines (an unchanged event keeps its
+ * row, the rest are deleted and re-inserted), its open receipt review is re-pointed, and every
+ * item it touched, before or after, is rebuilt (§4.10). It doesn't close a cycle or link a Costco
+ * trip again: that happened when the order was first read. Returns null — answer as a duplicate —
+ * when nothing changed, or when the stored read added up and this one doesn't (a worse read).
+ */
+async function replaceReceiptIn(
+  q: Q,
+  r: ReceiptRow,
+  input: IngestInput,
+  ctx: ServiceCtx,
+): Promise<ReceiptIngestResponseT | null> {
+  const { now } = ctx;
+  const oldLines = await q
+    .select()
+    .from(receiptLine)
+    .where(eq(receiptLine.receiptId, r.id))
+    .orderBy(asc(receiptLine.id));
+  const newTotals = totalsCheck(input);
+  const same =
+    headerKey(r) ===
+      headerKey({
+        fulfillment: input.fulfillment,
+        orderedAt: input.orderedAt,
+        acquiredAt: input.acquiredAt,
+        subtotalCents: input.subtotalCents,
+        totalCents: input.totalCents ?? null,
+      }) &&
+    oldLines.length === input.lines.length &&
+    oldLines.every((l, i) => lineKey(l) === lineKey(inputLineContent(input.lines[i]!)));
+  if (same) return null;
+  if (r.totalsCheck === "pass" && newTotals === "fail") {
+    await emitTelemetry(
+      q,
+      "state_engine",
+      [{ metric: "receipt_replaced", outcome: "kept_passing", receiptId: r.id, vendor: r.vendor }],
+      now,
+    );
+    return null;
+  }
+
+  const fx = await applyReceipt(input, receiptRepository(q), {
+    config: ctx.config,
+    newId: () => newId(),
+    now,
+  });
+  // Unchanged lines keep their rows (first match by content, in order).
+  const pool = new Map<string, LineRow[]>();
+  for (const l of oldLines) {
+    const k = lineKey(l);
+    pool.set(k, [...(pool.get(k) ?? []), l]);
+  }
+  const finals: { kept: LineRow | null; fresh: (typeof fx.lines)[number] | null; id: string }[] =
+    fx.lines.map((l) => {
+      const kept = pool.get(lineKey(inputLineContent(l)))?.shift() ?? null;
+      return { kept, fresh: kept ? null : l, id: kept?.id ?? newId() };
+    });
+  const removed = [...pool.values()].flat();
+  const fresh = finals.filter((f) => f.fresh);
+
+  // Only the new items and products a fresh line uses (a kept line keeps what it had).
+  const usedItems = new Set(fresh.map((f) => f.fresh!.itemId));
+  const usedProducts = new Set(fresh.map((f) => f.fresh!.productId));
+  const newItems = fx.newItems.filter((i) => usedItems.has(i.id));
+  const newProducts = fx.newProducts.filter((p) => usedProducts.has(p.id));
+  const born = { createdAt: r.createdAt, updatedAt: now };
+  if (newItems.length > 0) {
+    await q.insert(item).values(
+      newItems.map((i): ItemInsert => ({
+        ...born,
+        id: i.id,
+        canonicalName: i.canonicalName,
+        category: i.category,
+        defaultLocation: i.defaultLocation as ItemInsert["defaultLocation"],
+        trackingType: i.trackingType,
+        baseUnit: i.baseUnit,
+        trust: i.trust,
+        switchThreshold: ctx.config.product.defaultSwitchThreshold,
+      })),
+    );
+  }
+  if (newProducts.length > 0) {
+    await q.insert(product).values(newProducts.map((p) => ({ ...born, ...p })));
+  }
+  if (removed.length > 0) {
+    await q.delete(receiptLine).where(
+      inArray(
+        receiptLine.id,
+        removed.map((l) => l.id),
+      ),
+    );
+  }
+  if (fresh.length > 0) {
+    await q.insert(receiptLine).values(
+      fresh.map(({ fresh: l, id }) => ({
+        createdAt: now,
+        updatedAt: now,
+        id,
+        receiptId: r.id,
+        rawText: l!.rawText,
+        asin: l!.asin,
+        vendorSku: l!.vendorSku ?? null,
+        productId: l!.productId,
+        itemId: l!.itemId,
+        qty: l!.qty,
+        unitPriceCents: l!.unitPriceCents,
+        lineTotalCents: l!.lineTotalCents,
+        matchMethod: l!.matchMethod,
+        matchScore: l!.matchScore,
+        trust: l!.trust,
+        ignored: l!.ignored,
+      })),
+    );
+  }
+  for (const rn of fx.renames) {
+    if (!usedItems.has(rn.itemId)) continue;
+    await q
+      .update(item)
+      .set({ canonicalName: rn.to, updatedAt: now })
+      .where(eq(item.id, rn.itemId));
+    await q
+      .update(product)
+      .set({ title: rn.title, updatedAt: now })
+      .where(eq(product.id, rn.productId));
+  }
+
+  // The final lines, as stored now.
+  const final = finals.map(({ kept, fresh: l, id }) =>
+    kept
+      ? kept
+      : ({
+          id,
+          rawText: l!.rawText,
+          itemId: l!.itemId,
+          productId: l!.productId,
+          qty: l!.qty,
+          trust: l!.trust,
+          ignored: l!.ignored,
+          matchMethod: l!.matchMethod,
+          matchScore: l!.matchScore,
+        } as Pick<
+          LineRow,
+          | "id"
+          | "rawText"
+          | "itemId"
+          | "productId"
+          | "qty"
+          | "trust"
+          | "ignored"
+          | "matchMethod"
+          | "matchScore"
+        >),
+  );
+  const applied = final.filter((l) => l.itemId !== null && !l.ignored);
+  const status: ReceiptRow["status"] = final.some(isPending)
+    ? applied.length > 0
+      ? "partial"
+      : "pending_review"
+    : "applied";
+  await q
+    .update(receipt)
+    .set({
+      fulfillment: input.fulfillment,
+      orderedAt: input.orderedAt,
+      acquiredAt: input.acquiredAt,
+      subtotalCents: input.subtotalCents,
+      totalCents: input.totalCents,
+      totalsCheck: newTotals,
+      status,
+      updatedAt: now,
+    })
+    .where(eq(receipt.id, r.id));
+
+  // `acquired` events from the final lines (base units as `applyReceipt` counts them).
+  const finalItems = [...new Set(applied.map((l) => l.itemId!))];
+  const [itemRows, productRows, events] = await Promise.all([
+    finalItems.length
+      ? q
+          .select({ id: item.id, defaultLocation: item.defaultLocation })
+          .from(item)
+          .where(inArray(item.id, finalItems))
+      : Promise.resolve([]),
+    finalItems.length
+      ? q.select().from(product).where(inArray(product.itemId, finalItems))
+      : Promise.resolve([]),
+    q
+      .select()
+      .from(inventoryEvent)
+      .where(
+        and(
+          eq(inventoryEvent.sourceRef, r.id),
+          eq(inventoryEvent.kind, "acquired"),
+          ne(inventoryEvent.trust, "expired"),
+        ),
+      ),
+  ]);
+  const location = new Map(itemRows.map((i) => [i.id, i.defaultLocation]));
+  const productsOf = (itemId: string) =>
+    productRows.filter((p) => p.itemId === itemId).map(toCandidate);
+  const moved = r.acquiredAt !== input.acquiredAt;
+  const plan = reconcileReceiptEvents(
+    final.map((l) => ({
+      itemId: l.itemId,
+      qty: l.qty,
+      trust: l.trust,
+      ignored: l.ignored,
+      baseQty: l.itemId ? lineBaseUnits(l, productsOf(l.itemId), r.vendor) : 0,
+    })),
+    moved
+      ? []
+      : events.map((e) => ({
+          id: e.id,
+          itemId: e.itemId,
+          quantity: e.quantity ?? 0,
+          trust: e.trust === "confirmed" ? "confirmed" : "provisional",
+        })),
+  );
+  const drop = moved ? events.map((e) => e.id) : plan.expire;
+  if (drop.length > 0) await q.delete(inventoryEvent).where(inArray(inventoryEvent.id, drop));
+  for (const t of plan.trust) {
+    await q
+      .update(inventoryEvent)
+      .set({ trust: t.trust, updatedAt: now })
+      .where(eq(inventoryEvent.id, t.eventId));
+  }
+  if (plan.insert.length > 0) {
+    await q.insert(inventoryEvent).values(
+      plan.insert.map((e): EventInsert => ({
+        createdAt: now,
+        updatedAt: now,
+        id: newId(),
+        itemId: e.itemId,
+        location: (location.get(e.itemId) ?? "pantry") as EventInsert["location"],
+        kind: "acquired",
+        quantity: e.quantity,
+        occurredAt: input.acquiredAt,
+        source: eventSource(input.source),
+        sourceRef: r.id,
+        actorMemberId: ctx.actor.memberId,
+        actorSystem: ctx.actor.system,
+        trust: e.trust,
+      })),
+    );
+  }
+
+  // Reviews: the open receipt review lists the final open lines; new items get theirs.
+  const open = await q
+    .select()
+    .from(reviewItem)
+    .where(and(eq(reviewItem.receiptId, r.id), eq(reviewItem.status, "pending")));
+  const payload = {
+    vendor: input.vendor,
+    pending_line_ids: final.filter(isPending).map((l) => l.id),
+    provisional_line_ids: final.filter(isProvisional).map((l) => l.id),
+  };
+  const hasOpenLines = payload.pending_line_ids.length + payload.provisional_line_ids.length > 0;
+  const openReceiptReview = open.find((x) => x.kind === "receipt");
+  const reviewIds: string[] = [];
+  if (openReceiptReview) {
+    if (hasOpenLines) {
+      reviewIds.push(openReceiptReview.id);
+      await q
+        .update(reviewItem)
+        .set({ payload, updatedAt: now })
+        .where(eq(reviewItem.id, openReceiptReview.id));
+    } else {
+      await q.delete(reviewItem).where(eq(reviewItem.id, openReceiptReview.id));
+    }
+  }
+  for (const rv of fx.reviews) {
+    const isReceiptReview = rv.kind === "receipt";
+    if (isReceiptReview ? openReceiptReview || !hasOpenLines : !usedItems.has(rv.itemId!)) continue;
+    const id = newId();
+    reviewIds.push(id);
+    await q.insert(reviewItem).values({
+      createdAt: now,
+      updatedAt: now,
+      id,
+      kind: rv.kind,
+      jobId: r.jobId,
+      receiptId: r.id,
+      itemId: rv.itemId,
+      payload: isReceiptReview ? payload : rv.payload,
+      urgency: rv.urgency,
+      impactScore: rv.impactScore,
+      status: rv.status,
+      defaultAction: rv.defaultAction,
+      expiresAt: rv.expiresAt,
+    });
+  }
+
+  // Every item the order touched, before or after, is rebuilt from its receipts (§4.10).
+  const touched = new Set<string>(finalItems);
+  for (const l of oldLines) if (l.itemId) touched.add(l.itemId);
+  for (const e of events) touched.add(e.itemId);
+  const rebuilt = await rebuildItemsIn(q, touched, ctx, { scope: "replace", receiptId: r.id });
+  await refreshInventoryState(q, [...touched], now, ctx.config);
+  await emitTelemetry(
+    q,
+    "state_engine",
+    [
+      {
+        metric: "receipt_replaced",
+        outcome: "replaced",
+        receiptId: r.id,
+        vendor: r.vendor,
+        linesKept: finals.length - fresh.length,
+        linesNew: fresh.length,
+        linesRemoved: removed.length,
+        newItems: newItems.length,
+        totalsBefore: r.totalsCheck,
+        totalsAfter: newTotals,
+        itemsRebuilt: touched.size,
+        itemsChanged: rebuilt.plan.changes.length,
+      },
+    ],
+    now,
+  );
+
+  return {
+    receipt_id: r.id,
+    duplicate: false,
+    replaced: true,
+    status,
+    totals_check: newTotals,
+    lines: final.map((l) => ({
+      id: l.id,
+      raw_text: l.rawText,
+      item_id: l.itemId,
+      product_id: l.productId,
+      match_method: l.matchMethod,
+      match_score: l.matchScore,
+      trust: l.trust,
+      pending: isPending(l),
+      ignored: l.ignored,
+    })),
+    new_item_ids: newItems.map((i) => i.id),
+    review_ids: reviewIds,
+    closed_cycle_id: null,
+    costco_trip_id: null,
+  };
+}
+
 async function existingReceipt(q: Q, key: string): Promise<ReceiptIngestResponseT | null> {
   const [r] = await q.select().from(receipt).where(eq(receipt.dedupeKey, key));
   if (!r) return null;
@@ -254,8 +657,9 @@ async function existingReceipt(q: Q, key: string): Promise<ReceiptIngestResponse
 
 /**
  * Commit `applyReceipt`'s effects (PLAN M3 "For M4"): new items/products, the receipt and its
- * lines, `acquired` events (`source_ref` = receipt id), item/product patches, preference events,
- * reviews, the cycle patch, the `inventory_state` projection, and the domain telemetry.
+ * lines, `acquired` events (`source_ref` = receipt id), reviews, the cycle patch, the touched
+ * items' learning — rebuilt from their receipts, not patched (§4.10) — the `inventory_state`
+ * projection, and the domain telemetry.
  */
 export async function persistReceiptEffects(
   q: Q,
@@ -346,19 +750,6 @@ export async function persistReceiptEffects(
     );
   }
 
-  for (const { id, patch } of fx.itemPatches) {
-    await q
-      .update(item)
-      .set({
-        updatedAt: now,
-        ...("emaDays" in patch ? { currentEmaDays: patch.emaDays } : {}),
-        ...("outlierStreak" in patch ? { emaOutlierStreak: patch.outlierStreak } : {}),
-        ...("outlierDirection" in patch ? { emaOutlierDirection: patch.outlierDirection } : {}),
-        ...(patch.trackingType ? { trackingType: patch.trackingType } : {}),
-        ...(patch.switchThreshold !== undefined ? { switchThreshold: patch.switchThreshold } : {}),
-      })
-      .where(eq(item.id, id));
-  }
   for (const r of fx.renames) {
     await q.update(item).set({ canonicalName: r.to, updatedAt: now }).where(eq(item.id, r.itemId));
     await q
@@ -366,17 +757,8 @@ export async function persistReceiptEffects(
       .set({ title: r.title, updatedAt: now })
       .where(eq(product.id, r.productId));
   }
-  for (const { id, ...patch } of fx.productPatches) {
-    await q
-      .update(product)
-      .set({ ...patch, updatedAt: now })
-      .where(eq(product.id, id));
-  }
-  if (fx.preferenceEvents.length > 0) {
-    await q
-      .insert(preferenceEvent)
-      .values(fx.preferenceEvents.map((e) => ({ ...stamp, id: newId(), ...e })));
-  }
+  // Product stats, stances, the EMA, tracking promotion and the switch threshold aren't patched
+  // from `fx`: the touched items are rebuilt from their receipts below (§4.10, PLAN M11.2).
 
   const reviewIds: string[] = [];
   for (const r of fx.reviews) {
@@ -432,12 +814,9 @@ export async function persistReceiptEffects(
         )
       : null;
 
-  await refreshInventoryState(
-    q,
-    fx.inventoryEvents.map((e) => e.itemId),
-    now,
-    ctx.config,
-  );
+  const touched = fx.inventoryEvents.map((e) => e.itemId);
+  await rebuildItemsIn(q, touched, ctx, { scope: "ingest", patched: fx, receiptId });
+  await refreshInventoryState(q, touched, now, ctx.config);
   await emitTelemetry(q, "state_engine", fx.telemetry, now, { receiptId, vendor: input.vendor });
 
   return {

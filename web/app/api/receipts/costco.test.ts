@@ -115,7 +115,9 @@ describe("Costco warehouse receipts", () => {
     });
     const [almondItem] = await h.db.select().from(item).where(eq(item.id, almond!.itemId));
     expect(almondItem).toMatchObject({ canonicalName: "Almond MLK", trust: "unverified" });
-    expect(await costcoProduct("9000101")).toMatchObject({ lastPriceCents: 949, timesBought: 2 });
+    // The seed's stats are synthetic (no receipt behind its `times_bought` 1): ingest rebuilds the
+    // product from its receipts (§4.10, PLAN M11.2), and this is the only one.
+    expect(await costcoProduct("9000101")).toMatchObject({ lastPriceCents: 949, timesBought: 1 });
     // The item number is kept on the line.
     const lines = await h.db.select().from(receiptLine).where(eq(receiptLine.vendorSku, "9000103"));
     expect(lines).toHaveLength(1);

@@ -431,3 +431,27 @@ export function eventsDiffer(
   const b = rebuilt.map(eventKey).sort();
   return a.some((k, i) => k !== b[i]);
 }
+
+/**
+ * The multiset difference between stored and rebuilt events: stored rows with no rebuilt match to
+ * delete, rebuilt events with no stored match to insert (matching ones keep their rows, ids and
+ * timestamps). Null when they match.
+ */
+export function diffEvents<
+  S extends Parameters<typeof eventKey>[0] & { id: string },
+  R extends Parameters<typeof eventKey>[0],
+>(stored: readonly S[], rebuilt: readonly R[]): { deleteIds: string[]; insert: R[] } | null {
+  const left = new Map<string, string[]>();
+  for (const e of stored) {
+    const k = eventKey(e);
+    left.set(k, [...(left.get(k) ?? []), e.id]);
+  }
+  const insert: R[] = [];
+  for (const e of rebuilt) {
+    const ids = left.get(eventKey(e));
+    if (ids?.length) ids.shift();
+    else insert.push(e);
+  }
+  const deleteIds = [...left.values()].flat();
+  return deleteIds.length === 0 && insert.length === 0 ? null : { deleteIds, insert };
+}

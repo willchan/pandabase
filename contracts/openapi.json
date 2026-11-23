@@ -2866,6 +2866,9 @@
             "minLength": 1,
             "type": "string"
           },
+          "replaced": {
+            "type": "boolean"
+          },
           "review_ids": {
             "items": {
               "type": "string"

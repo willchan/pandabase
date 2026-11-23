@@ -424,13 +424,12 @@ def ingest_request(order: ParsedOrder, member: Member, tz: str) -> c.ReceiptInge
     return c.ReceiptIngestRequest(**body)
 
 
-def ingest_key(discord_id: str, order_id: str, body: c.ReceiptIngestRequest, *, held: bool) -> str:
-    """The ingest `Idempotency-Key`: `receipt:{discord id}:{order id}`. Re-reading a held receipt
-    (DESIGN §4.5) puts the request's hash before the order id, so a corrected read isn't answered
-    with the stored reply of the held one for 24 h. `db:reset-imports` reads the order id after
-    the last colon either way."""
-    if not held:
-        return f"receipt:{discord_id}:{order_id}"
+def ingest_key(discord_id: str, order_id: str, body: c.ReceiptIngestRequest) -> str:
+    """The ingest `Idempotency-Key`: `receipt:{discord id}:{body hash}:{order id}`. The request's
+    hash is in it so a read that changed (a fixed parser, a held receipt re-read) is never answered
+    with the stored reply of an earlier read for 24 h: the State Engine replaces the order with it
+    (DESIGN §4.5 *Re-read orders*), and the same read again stays idempotent. `db:reset-imports`
+    reads the order id after the last colon."""
     digest = hashlib.sha256(body.model_dump_json(exclude_none=True).encode()).hexdigest()[:12]
     return f"receipt:{discord_id}:{digest}:{order_id}"
 
@@ -694,7 +693,7 @@ class Sweeper:
             try:
                 res = self.api.ingest_receipt(
                     body,
-                    key=ingest_key(self.member.discord_id, oid, body, held=oid in self.state.held),
+                    key=ingest_key(self.member.discord_id, oid, body),
                 )
             except (ApiError, ValueError) as err:
                 result.errors.append({"order_id": oid, "error": str(err)[:300]})

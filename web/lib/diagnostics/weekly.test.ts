@@ -246,7 +246,12 @@ describe("weekly diagnostics", () => {
 
   it("reports Subscribe & Save: items left out, syncs, and page reads not synced (§4.9)", async () => {
     const soap = await h.itemId("Eggs");
-    const t = (i: number, source: string, metricType: string, payload: Record<string, unknown>) => ({
+    const t = (
+      i: number,
+      source: string,
+      metricType: string,
+      payload: Record<string, unknown>,
+    ) => ({
       id: `01S${String(i).padStart(23, "0")}`,
       source,
       metricType,
@@ -254,9 +259,19 @@ describe("weekly diagnostics", () => {
       createdAt: "2026-10-24T17:10:00.000Z",
     });
     await h.db.insert(systemTelemetry).values([
-      t(1, "agent", "subscription_page", { member: "alex", outcome: "synced", tiles: 3, expected: 3 }),
+      t(1, "agent", "subscription_page", {
+        member: "alex",
+        outcome: "synced",
+        tiles: 3,
+        expected: 3,
+      }),
       t(2, "state_engine", "subscription_sync", { memberId: "m", active: 3, added: 3, ended: 0 }),
-      t(3, "agent", "subscription_page", { member: "sam", outcome: "incomplete", tiles: 2, expected: 5 }),
+      t(3, "agent", "subscription_page", {
+        member: "sam",
+        outcome: "incomplete",
+        tiles: 2,
+        expected: 5,
+      }),
       t(4, "state_engine", "subscription_left_out", {
         cycleId: "C1",
         itemId: soap,
@@ -265,14 +280,19 @@ describe("weekly diagnostics", () => {
       }),
     ]);
     const md = (
-      await renderWeekly(h.db, "2026-W43", { now: "2026-10-26T20:00:00.000Z", config: DEFAULT_CONFIG })
+      await renderWeekly(h.db, "2026-W43", {
+        now: "2026-10-26T20:00:00.000Z",
+        config: DEFAULT_CONFIG,
+      })
     ).markdown;
     expect(md).toContain(
       "Subscribe & Save: 1 item(s) left out of builds; 1 sync(s) (3 active after the last), 1 page read(s) not synced (incomplete 1).",
     );
     expect(md).toContain("The Subscribe & Save list wasn't refreshed 1 time(s) (incomplete)");
     expect(md).toContain("Left out (Subscribe & Save): Eggs — next delivery 2026-10-29");
-    expect(md).toContain("Subscribe & Save page not synced (sam): incomplete — 2 tiles, 5 expected");
+    expect(md).toContain(
+      "Subscribe & Save page not synced (sam): incomplete — 2 tiles, 5 expected",
+    );
     expect(md).toContain("The Subscribe & Save page may have changed");
   });
 
@@ -634,6 +654,46 @@ describe("weekly diagnostics", () => {
     );
     const quiet = await renderWeekly(h.db, "2026-W42", ctx);
     expect(quiet.markdown).not.toContain("Learning rebuilt");
+    expect(quiet.markdown).not.toContain("Rebuilt at ingest");
+  });
+
+  it("counts ingest corrections, replaced orders and reset rebuilds (PLAN M11.2)", async () => {
+    const at = "2026-10-21T18:00:00.000Z";
+    const row = (id: string, metricType: string, payload: Record<string, unknown>) => ({
+      id,
+      source: "state_engine",
+      metricType,
+      payload,
+      createdAt: at,
+    });
+    await h.db.insert(systemTelemetry).values([
+      row("01KREBUILD0000000000000001", "learning_rebuilt", {
+        scope: "ingest",
+        itemsChanged: 1,
+        causes: { late_receipt: 1, unexplained: 0 },
+      }),
+      row("01KREBUILD0000000000000002", "learning_rebuilt", {
+        scope: "reset",
+        items: 4,
+        itemsChanged: 2,
+        productsChanged: 3,
+      }),
+      row("01KREBUILD0000000000000003", "receipt_replaced", {
+        outcome: "replaced",
+        linesNew: 2,
+        linesRemoved: 1,
+        newItems: 1,
+      }),
+      row("01KREBUILD0000000000000004", "receipt_replaced", { outcome: "kept_passing" }),
+    ]);
+    const report = await renderWeekly(h.db, "2026-W43", ctx);
+    expect(report.markdown).toContain(
+      "Import resets (db:reset-imports): 1, 4 kept item(s) rebuilt (2 item(s), 3 product(s) changed).",
+    );
+    expect(report.markdown).toContain(
+      "Rebuilt at ingest (§4.10): 1 receipt(s) corrected what in-place learning would have written (late 1, edited 0, merged 0, other 0 item(s)). Re-read orders replaced: 1 (2 line(s) re-read, 1 dropped, 1 new item(s)); 1 worse re-read(s) ignored.",
+    );
+    expect(report.markdown).not.toContain("Learning rebuilt from receipts");
   });
 
   it("data quality: a week without receipts isn't flagged and says so", async () => {

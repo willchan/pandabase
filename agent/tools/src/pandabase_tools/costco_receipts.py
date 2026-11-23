@@ -847,7 +847,7 @@ class CostcoSweeper:
         try:
             res = self.api.ingest_receipt(
                 body,
-                key=ingest_key(self.member.discord_id, order_id, body, held=key in self.state.held),
+                key=ingest_key(self.member.discord_id, order_id, body),
             )
         except (ApiError, ValueError) as err:
             result.errors.append({"error": "ingest_failed", "detail": str(err)[:300]})

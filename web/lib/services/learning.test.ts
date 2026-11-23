@@ -178,35 +178,65 @@ describe("db:rebuild-learning over ingested receipts (PLAN M11.1)", () => {
 
   // The bug M11 exists for (prod copy 2026-11-23: a Costco delivery receipt acquired before two
   // warehouse receipts but read after them): ingest skipped its EMA step and moved
-  // `last_bought_at` back to the older date.
-  it("puts a late receipt in its place: EMA step taken, last_bought_at not moved back", async () => {
+  // `last_bought_at` back to the older date. Since M11.2 ingest rebuilds the item instead.
+  it("ingest puts a late receipt in its place: EMA step taken, last_bought_at not moved back", async () => {
     await buy(day(0), [COFFEE]);
     const r = await buy(day(10), [COFFEE]);
     await buy(day(30), [COFFEE]);
+    const itemId = r.lines[0]!.item_id!;
+    const [onTime] = await h.db.select().from(item).where(eq(item.id, itemId));
     // Late: acquired before the day-30 one, ingested after it.
     await buy(day(20), [COFFEE], { now: hourAfter(day(30)) });
     const productId = r.lines[0]!.product_id!;
     const [stored] = await h.db.select().from(product).where(eq(product.id, productId));
-    expect(stored!.lastBoughtAt).toBe(day(20)); // ingest: moved back
+    expect(stored!.lastBoughtAt).toBe(day(30)); // was day(20): moved back
+    const [late] = await h.db.select().from(item).where(eq(item.id, itemId));
+    expect(late!.currentEmaDays).not.toBe(onTime!.currentEmaDays); // the step was taken
+    nothingChanges(await plan());
+    // Ingest says what the in-place patches would have got wrong (counts only).
+    const [t] = await h.db
+      .select()
+      .from(systemTelemetry)
+      .where(eq(systemTelemetry.metricType, "learning_rebuilt"));
+    expect(t!.payload).toMatchObject({
+      scope: "ingest",
+      itemsChanged: 1,
+      productsChanged: 1,
+      causes: { late_receipt: 1, unexplained: 0 },
+    });
+  });
 
+  it("ingest in order emits no learning_rebuilt row", async () => {
+    await buy(day(0), [COFFEE, RICE]);
+    await buy(day(10), [COFFEE]);
+    await buy(day(20), [COFFEE]);
+    const rows = await h.db
+      .select()
+      .from(systemTelemetry)
+      .where(eq(systemTelemetry.metricType, "learning_rebuilt"));
+    expect(rows).toEqual([]);
+  });
+
+  it("--apply writes the rebuilt values (a stored value that drifted)", async () => {
+    await buy(day(0), [COFFEE]);
+    const r = await buy(day(10), [COFFEE]);
+    const productId = r.lines[0]!.product_id!;
+    await h.db
+      .update(product)
+      .set({ lastBoughtAt: day(1), timesBought: 9 })
+      .where(eq(product.id, productId));
     const p = await plan();
-    expect(p.changes).toHaveLength(1);
-    expect(p.causes).toMatchObject({ late_receipt: 1, unexplained: 0 });
-    expect(p.itemColumns.currentEmaDays).toBe(1);
-    expect(p.productColumns.lastBoughtAt).toBe(1);
-    expect(p.changes[0]!.products[0]!.patch).toMatchObject({ lastBoughtAt: day(30) });
+    expect(p.productColumns).toMatchObject({ lastBoughtAt: 1, timesBought: 1 });
     expect(formatLearningPlan(p, false)).toContain("dry run");
-
-    const now = day(31);
-    await applyLearningRebuild(h.db, { config: DEFAULT_CONFIG, now });
+    await applyLearningRebuild(h.db, { config: DEFAULT_CONFIG, now: day(31) });
     const [after] = await h.db.select().from(product).where(eq(product.id, productId));
-    expect(after!.lastBoughtAt).toBe(day(30));
+    expect(after).toMatchObject({ lastBoughtAt: day(10), timesBought: 2 });
     nothingChanges(await plan()); // idempotent
     const [t] = await h.db
       .select()
       .from(systemTelemetry)
       .where(eq(systemTelemetry.metricType, "learning_rebuilt"));
-    expect(t!.payload).toMatchObject({ scope: "all", itemsChanged: 1, productsChanged: 1 });
+    expect(t!.payload).toMatchObject({ scope: "all", productsChanged: 1 });
   });
 
   it("--items limits the rebuild to those items", async () => {
