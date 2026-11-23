@@ -70,6 +70,7 @@ def test_cron_example_schedule() -> None:
         "pandabase-job-replies": "*/5 * * * *",
         "pandabase-cart-probe": "0 15 * * 5",  # Friday afternoon, before Saturday's build
         "pandabase-data-check": "20 8 * * 1",  # Monday morning, after Sunday's diagnostics
+        "pandabase-signin-check": "7 * * * *",  # hourly: cookie names only, no page load
         "pandabase-costco-receipts": "10 9 * * *",  # only runs when "back from Costco" scheduled
         "pandabase-costco-receipts-weekly": "40 19 * * 0",  # before the 21:00 Amazon sweep
     }

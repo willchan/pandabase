@@ -38,6 +38,7 @@ from . import (
     layout_watch,
     photos,
     receipt_parser,
+    signin_check,
     subscriptions,
 )
 from . import config as config_mod
@@ -72,6 +73,7 @@ class Env:
         self.driver_factory: Callable[[str], AbstractContextManager[Driver]] = lambda cdp_url: (
             CdpDriver(cdp_url)
         )
+        self.jar_source: signin_check.JarSource = signin_check.read_jar
         self.today: Callable[[], date] | None = None
         self.now: Callable[[], datetime] = lambda: datetime.now(UTC)
 
@@ -733,6 +735,33 @@ def cmd_cdp_check(env: Env) -> Any:
     }
 
 
+def cmd_cdp_signin(env: Env) -> Any:
+    """Hourly: is each PandaBase browser profile still signed in? Reads cookie names over CDP
+    without opening a tab or a page, so it takes no profile lock (`signin_check.py`)."""
+    cfg = env.cfg
+    costco_profile = cfg.cart_member().profile if cfg.receipts.costco.orders_url else None
+    results = []
+    for profile_name in sorted({m.profile for m in cfg.members if m.profile}):
+        profile = env.loaded.profiles[profile_name]
+        results.append(
+            signin_check.check(
+                profile=profile_name,
+                cdp_url=profile.cdp_url,
+                sites=signin_check.sites_for(cfg.signin, costco=profile_name == costco_profile),
+                cfg=cfg.signin,
+                state_path=env.loaded.state_dir() / f"signin-{profile_name}.json",
+                tel=env.tel,
+                now=env.now(),
+                tz=cfg.household_tz,
+                read=env.jar_source,
+            )
+        )
+    if env.args.reply:
+        lines = [r.reply() for r in results if r.lines]
+        return "\n".join(lines) if lines else "NO_REPLY"
+    return {"profiles": [r.as_json() for r in results]}
+
+
 def cmd_config_show(env: Env) -> Any:
     cfg = env.cfg
     return {
@@ -886,6 +915,11 @@ def build_parser() -> argparse.ArgumentParser:
     cc = cdp.add_parser("check", help="attach to a member's Chromium (smoke)")
     cc.add_argument("--member", required=True)
     cc.set_defaults(fn=cmd_cdp_check)
+    cs = cdp.add_parser(
+        "signin", help="is each browser profile signed in? (cookie names only, loads no page)"
+    )
+    cs.add_argument("--reply", action="store_true", help="the ops-channel message, or NO_REPLY")
+    cs.set_defaults(fn=cmd_cdp_signin)
 
     cfg = sub.add_parser("config").add_subparsers(dest="cmd", required=True)
     cfg.add_parser("show").set_defaults(fn=cmd_config_show)

@@ -1320,6 +1320,22 @@ payload's destination is fixed at install time. Model jobs (`--session isolated`
 names their skill file (`Read the skill file <repo>/agent/skills/<skill>/SKILL.md first and follow
 it. …`); the Saturday 10:30 search job reads what the build left with `cart pending` (build state
 only, no browser) and never re-runs the build (§10 #60).
+The hourly sign-in check (`pandabase-signin-check`, `cdp signin --reply`, `signin_check.py`, §10
+#92) reads each PandaBase profile's cookie *names* over CDP (`/json/version`, then the default
+context's cookies: no tab, no page load, no profile lock) and compares them with `signin` in the
+tools config: Amazon on every profile (`at-main` / `sess-at-main`), Costco on the cart member's
+once `receipts.costco.orders_url` is set (the `x-ms-cpim-sso:*` single-sign-on cookie its silent
+refresh needs). A signed-out store is posted to the ops channel at once, again every
+`signin.repeat_hours` (24) while it lasts, and ✅ when it's back; Chrome not answering on its port
+likewise. A Chrome launch (the DevTools browser id changes) whose jar kept at most
+`1 - signin.wipe_share` of at least `signin.wipe_min_cookies` cookies is posted once as a wiped jar.
+The state file (`signin-<profile>.json`) holds launch id, version, cookie count and since/alerted
+times, never names or values; `signin_check` telemetry goes out only when something changed. The
+receipt sweep skill no longer posts `not_signed_in` itself (it posts only `amazon_challenge`, at
+most daily). `chromium-launch.sh` logs one line before every Chrome start — Chrome version, the
+jar's cookie count (read `immutable=1`), whether `security show-keychain-info` answers for the
+login keychain (Chrome's cookie key lives there), boot time — so a wiped jar shows whether it was
+empty before Chrome started.
 OpenClaw keeps automations in its own state DB, so M8 registers them with the CLI. Skills are
 installed by pointing OpenClaw's `skills.load.extraDirs` at the repo's `agent/skills` (`make
 install-agent-skills`): OpenClaw rejects workspace-skill symlinks that resolve outside the
@@ -1790,3 +1806,4 @@ docker-compose.yml (+ docker-compose.build.yml), Makefile, CLAUDE.md, README.md,
 | 89 | Ingest, a re-read order and the import reset rebuild the touched items' learning from their receipts instead of patching it; a digital order read again with different content replaces the stored receipt (unchanged lines and their answers kept), and `db:reset-imports` keeps shared items and rebuilds them instead of refusing | A parser fix can now correct a receipt already written and one store's import can be removed alone; a late receipt learns as if it had arrived in order. Rebuilding in the ingest transaction costs one read and one write batch whatever the receipt's size (§8) |
 | 90 | Held receipts (#83) are retired: a failing digital receipt is applied as read, the sweeps re-read a `totals_check: fail` order for 14 days, and a differing read replaces it; holds left on production are released (applied as read) by the next daily cron, then `receipt_hold` is dropped in a contract PR (§4.5 *Failing totals*, *Held receipts*) | They existed because an applied misread couldn't be corrected (§10 #83); since M11.2 a re-read replaces it. Holding costs a lost purchase for up to 14 days (the cart re-buys the item, no cycle closure). Expand → contract: stop holding and move the agent's re-read from `held` to `totals_check: fail` first, keep reading the table, then drop it. Releasing the last holds at once rather than waiting for their expiry: applying as read is what this decision does for every new failing receipt, and it records the purchases ~10 days sooner. The re-read is bounded (14 days, then `done`) because a re-read costs a page load per sweep, and only a deployed parser fix changes the read |
 | 91 | Daily maintenance runs from a Vercel Schedule (`schedules` in `web/vercel.json`, a `GET` path target, same time and `CRON_SECRET` bearer check), not a legacy Cron Job; production only; run on demand by the *Run maintenance* workflow (§8 *Daily maintenance*) | Vercel marks Cron Jobs legacy (Schedules public beta, 2026-11-05; no removal date yet). Schedules ship with the `vercel deploy --prod` that `deploy.yml` already runs, so they stay in code. Same path and auth means no route change and no new secret. The schedule and the cron are swapped in one deploy, because keeping both runs the job twice. Preview schedules start inactive, which keeps the shared preview DB to tier A′'s own calls. UTC rather than `America/Los_Angeles`, to keep today's time exactly (03:17 PST / 04:17 PDT) |
+| 92 | An hourly command job checks the browser's sign-ins from cookie names over CDP (no page load) and posts a sign-out at once, then daily, and ✅ on recovery; a Chrome restart that wipes the jar is posted once; the sweep skill no longer posts sign-outs | After the 2026-11-21 reboot (also Chrome's first launch on 158) the profile came back with no cookies at all; the daily Amazon sweep failed `not_signed_in` for days with one post (the skill's weekly limit) and two held Whole Foods orders went unread. A sweep only learns of a sign-out when it runs, and loading a page to check costs bot-check risk; cookie names cost nothing |

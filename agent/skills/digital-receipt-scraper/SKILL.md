@@ -70,14 +70,14 @@ nothing about it.
    "✅ Order picked up and in the pantry (N items). This week's list is closed."
    PandaBase usually opens the next cycle itself; still run `grocery-cycle` §1 so it gets its
    thread. `receipts ingest` prints the same two fields.
-3. **`errors`** containing `not_signed_in` → post once to `channels.ops_channel` (its id):
-   "⚠️ Amazon is signed out in <member>'s browser on the Mac Mini — please sign in there. I'll
-   pick up the receipts on the next run." Before posting, read the channel's recent messages
-   (message tool `action: "read"`); if the same warning was posted in the last 7 days, stay
-   silent. `amazon_challenge` → the same, with "⚠️ Amazon showed a bot check in <member>'s
-   browser on the Mac Mini — please open it there and clear it." Don't run another sweep until
-   the next scheduled one. Other errors: stay silent (they're in telemetry and the weekly
-   diagnostics).
+3. **`errors`** containing `not_signed_in` → stay silent: the hourly sign-in check
+   (`pandabase-signin-check`) already posts "⚠️ Amazon is signed out in the pandabase browser on
+   the Mac Mini …" to `channels.ops_channel`, again each day while it lasts. `amazon_challenge`
+   → post to `channels.ops_channel` (its id): "⚠️ Amazon showed a bot check in <member>'s
+   browser on the Mac Mini — please open it there and clear it." Before posting, read the
+   channel's recent messages (message tool `action: "read"`); if the same warning was posted in
+   the last 24 hours, stay silent. Don't run another sweep until the next scheduled one. Other
+   errors: stay silent (they're in telemetry and the weekly diagnostics).
 4. Exit code 3 (`profile_locked`): the browser is busy (e.g. the cart build); run once more in
    15 minutes, then give up silently until the next scheduled sweep.
 
@@ -128,6 +128,7 @@ pandabase-tools receipts sweep --vendor costco --backfill
 It walks the period picker (about two years) on both tabs and ingests what's new; a run that is
 interrupted picks up where it stopped when run again (ingested receipts are remembered). Finish
 with one message: "✅ Imported N Costco receipts." (N = `ingested` length; add "⚠️ M lines I
-couldn't read" when `unknown_lines` isn't empty). `errors` with `not_signed_in` or
-`costco_challenge` → post the matching warning from the Amazon section above, with "Costco"
-instead of "Amazon", and stop. Then ask for merge suggestions once, as after an Amazon backfill.
+couldn't read" when `unknown_lines` isn't empty). `errors` with `not_signed_in` → reply "⚠️ Costco is
+signed out in the pandabase browser on the Mac Mini — please sign in there, then ask me again.";
+`costco_challenge` → the bot-check warning from the Amazon section above, with "Costco" instead
+of "Amazon". Then stop. Then ask for merge suggestions once, as after an Amazon backfill.

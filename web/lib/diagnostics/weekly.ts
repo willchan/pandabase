@@ -1327,6 +1327,31 @@ export async function renderWeekly(
     });
   else if (badDeploys.length)
     findings.push({ score: 2, text: `${badDeploys.length} deploy step(s) failed or rolled back.` });
+  // The hourly browser sign-in check (§6, §10 #92): `signin_check {profile, restarted, wiped,
+  // chrome_version, cookies, cookies_before, changed, signed_out, error, alerted}`, sent only
+  // when something changed.
+  const signin = metric("signin_check");
+  const wipes = signin.filter((t) => t.p.wiped === true);
+  const restarts = signin.filter((t) => t.p.restarted === true);
+  const changes = (suffix: string) =>
+    signin.flatMap((t) =>
+      (Array.isArray(t.p.changed) ? t.p.changed : [])
+        .map(String)
+        .filter((c) => c.endsWith(suffix))
+        .map((c) => c.slice(0, -suffix.length)),
+    );
+  const signOuts = changes("_out");
+  const signIns = changes("_back");
+  if (wipes.length)
+    findings.push({
+      score: 3,
+      text: `Chrome restarted and lost its cookie jar ${wipes.length} time(s): every store sign-in had to be redone.`,
+    });
+  else if (signOuts.length)
+    findings.push({
+      score: 3,
+      text: `The PandaBase browser was signed out of ${[...new Set(signOuts)].sort().join(", ")} this week (receipts wait until it's signed in).`,
+    });
   const deploysSection = section(
     "9. Deploys",
     [
@@ -1344,6 +1369,12 @@ export async function renderWeekly(
       ),
       "",
       `Mac Mini rollbacks: ${rollbacks.length}.`,
+      "",
+      `Browser sign-in check: ${restarts.length} Chrome restart(s), ${wipes.length} wiped cookie jar(s); signed out: ${signOuts.length ? countBy(signOuts, (x) => x).map(([k, c]) => `${k} ${c}`).join(", ") : "none"}; signed in again: ${signIns.length ? countBy(signIns, (x) => x).map(([k, c]) => `${k} ${c}`).join(", ") : "none"}.`,
+      ...wipes.map(
+        (t) =>
+          `- ${t.at}: Chrome ${s(t.p.chrome_version) ?? "?"} kept ${n(t.p.cookies)} of ${n(t.p.cookies_before)} cookies.`,
+      ),
       "",
       table(
         ["At", "Component", "Sha", "Outcome", "Detail"],
@@ -1373,6 +1404,11 @@ export async function renderWeekly(
       ...(stuck.length
         ? [
             "A rollback failed: run `make update-status`, then roll back by hand (README *Manual rollback*).",
+          ]
+        : []),
+      ...(wipes.length
+        ? [
+            "A wiped cookie jar: read the `chromium-launch:` lines in the Chrome log (cookie count and keychain state before that start) to see whether the jar was empty before Chrome started or Chrome dropped it.",
           ]
         : []),
       ...(badDeploys.some((t) => s(t.p.component) === "web-smoke")

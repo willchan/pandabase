@@ -78,6 +78,9 @@ A Discord **thread per cycle** in `#pandabase`, acting as a running grocery list
 - **Friday afternoon add-button check:** before the build, one Amazon and one Whole Foods product
   page are opened (nothing clicked) to confirm the add button is still found; a ⚠️ goes to the ops
   channel only when it isn't, or when the cart browser is signed out.
+- **Signed-out browser:** an hourly check (no page loaded) posts to the ops channel as soon as
+  Amazon or Costco is signed out in the PandaBase browser, once a day while it stays that way, and
+  once when it's back; also when a Chrome restart lost its saved sign-ins.
 - **Away weeks:** "away until Nov 3" or "skip this week" → cycle skipped; away days don't distort
   consumption estimates.
 - **Paused weeks:** for stretches that aren't normal but we're still home (a new baby, guests,
