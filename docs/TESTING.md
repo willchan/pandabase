@@ -171,8 +171,9 @@ same functions as tier A; remote mode only swaps the fixture (`BridgeDb` reads t
 **Covers beyond tier A:** the Vercel build and runtime (env vars, Node version, bundling of `/db`,
 `proxy.ts`, `__Secure-` cookies over https), Turso over the network (latency, libSQL remote
 semantics, migrations on the real engine), R2's real SigV4 and bucket permissions, Deployment
-Protection. **Doesn't cover:** steps 4, 9, 10, 14, 17–19 (no new seam), Vercel Cron's own
-scheduling (cron is called by hand), Google sign-in, the Mac Mini, real models, production data
+Protection. **Doesn't cover:** steps 4, 9, 10, 14, 17–19 (no new seam), Vercel's own
+scheduling (the endpoint is called by hand; the preview's `maintenance` schedule stays inactive,
+Vercel's default for Preview branches, so it never runs against the shared preview DB), Google sign-in, the Mac Mini, real models, production data
 or config.
 
 **Skips cleanly** (a notice, and a green "Skipped" status) until the `preview` environment has every secret it needs:

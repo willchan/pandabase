@@ -11,7 +11,7 @@
   Will / wife ──Google──▶│  /web  Next.js (App Router) — UI + API routes           │
    (phone)               │        Auth.js v5 (Google, allowlist)                   │
                          │        Drizzle ORM ──────────────▶ Turso (libSQL)       │
-                         │        Vercel Cron: /api/cron/maintenance (daily)       │
+                         │        Vercel Schedule: /api/cron/maintenance (daily)   │
                          └───────▲───────────────────▲────────────────────────────┘
                                  │ HTTPS (bearer)    │ HTTPS (bearer)
                                  │ AGENT token       │ WORKER token
@@ -298,8 +298,8 @@ All routes under `/web/app/api`. Payloads defined once as **Zod schemas** in `we
   name, else the email's local part; no Discord id, sweep `off`, not the cart account — all
   edited in Settings; concurrent first requests insert once via the unique email). Rejected Google
   accounts land on `/sign-in?error=AccessDenied`.
-- **Cron:** `/api/cron/maintenance` requires `Authorization: Bearer ${CRON_SECRET}` (Vercel Cron,
-  `web/vercel.json`, daily 11:17 UTC).
+- **Cron:** `/api/cron/maintenance` requires `Authorization: Bearer ${CRON_SECRET}` (the Vercel
+  Schedule `maintenance` in `web/vercel.json`, daily 11:17 UTC; §8 *Daily maintenance*).
 - **Latency middleware:** every request logs `api_request {route, method, status, latencyMs,
   scope}` (source `api`); a telemetry failure never fails the request.
 
@@ -1517,6 +1517,22 @@ over 200k `<option>`s and took ~35s under `next dev` (2s after both changes).
   which matters because every kept deployment counts toward the team's 10 GB of Function Storage
   (shared with Bamboo; §10 #84). The globs are relative to `web/` (pnpm's store is in the root
   `node_modules/.pnpm`) and include the symlinks to sharp, which would otherwise dangle.
+- **Daily maintenance:** the Vercel Schedule `maintenance` (`web/vercel.json` `schedules`, since
+  2026-11-23; it replaced the legacy Cron Job, §10 #91) calls `GET /api/cron/maintenance` at
+  `17 11 * * *` UTC (03:17 PST, 04:17 PDT), within Hobby's fixed 15-minute jitter window, with
+  `Authorization: Bearer $CRON_SECRET` (user-agent `vercel-cron/1.0`). `requestMethod: "GET"` is
+  required: a path schedule defaults to POST. A static schedule is created, changed or deleted
+  when the deployment that declares it becomes production, so `deploy.yml`'s `vercel deploy
+  --prod` ships it, and the `CRON_SECRET` it sends is the one that deployment saw (changing the
+  env var needs a redeploy). Rolling back to a deployment without it deletes it. No retries: a run
+  that fails waits for the next day, which is fine because every step is idempotent and catches
+  up. On previews the schedule exists per branch but starts **inactive** (Vercel's default for
+  Preview), so nothing fires against the shared preview DB; tier A′ calls the endpoint itself.
+  **Run now:** Actions → *Run maintenance* (`.github/workflows/maintenance.yml`, production
+  only: `vercel schedules invoke maintenance` with the `production` environment's `VERCEL_*`
+  secrets), the dashboard's *Run Schedule*, or the CLI from a linked `web/`. Execution history:
+  Vercel → the project's Schedules → `maintenance`, or `vercel schedules executions list
+  maintenance`; each run also writes a `maintenance_run` telemetry row (source `cron`).
 - **Preview E2E (tier A′):** `.github/workflows/preview-e2e.yml` on Vercel's
   `repository_dispatch` `vercel.deployment.success` (environment `preview`; GitHub runs `main`'s
   copy of the workflow, which checks out `client_payload.git.sha` and reports a `Preview E2E`
@@ -1705,7 +1721,7 @@ docker-compose.yml (+ docker-compose.build.yml), Makefile, CLAUDE.md, README.md,
 | 20 | Latest stable Next.js, Auth.js v5, Drizzle + libSQL | Next 14 is past support; Drizzle has first-class Turso support |
 | 21 | Zod → OpenAPI → Pydantic codegen, drift checked in CI | One contract source across TS and Python |
 | 22 | Chores, video audits deferred | Groceries first as MVP |
-| 23 | Daily Vercel Cron for maintenance | App stays healthy even if the Mac Mini is off |
+| 23 | Daily Vercel Cron for maintenance (a Vercel Schedule since #91) | App stays healthy even if the Mac Mini is off |
 | 24 | Invariants as DB constraints (enum/bool/JSON CHECKs, partial uniques); drizzle-kit migrations, schema drift checked in CI | A backstop under domain code; one active cycle / one cart account can't be violated by a buggy caller |
 | 25 | Domain functions return effects; repositories only read | Business rules testable without a DB; M4 commits each operation in one transaction |
 | 26 | EMA learns from provisional acquisitions; product preference only from confirmed lines | Paper receipts are mostly provisional and EMA has an outlier guard; a wrong product match would teach the wrong brand |
@@ -1773,3 +1789,4 @@ docker-compose.yml (+ docker-compose.build.yml), Makefile, CLAUDE.md, README.md,
 | 88 | The learning rebuild folds merged items as one item, replays a human override in its recorded direction, compares an implicit swap with the cart built before the receipt was ingested, treats every receipt-created item as born `static`, and keeps `switch` events (§4.10) | Each choice reproduces what ingest did for a history that arrived in order — on the production copy (2026-11-23) 493 of 494 items rebuilt to exactly their stored values, the one difference a late receipt — while letting a late or corrected receipt take its place. A merge's stance reset was a side effect of moving products, not a preference; replaying "the item as it is now" is what a rebuild after any merge needs anyway. The override kind is the human's choice; recomputing "toward preferred" from rebuilt stances could flip its sign. No input records an item's original tracking type, and ingest only ever creates `static` items. `switch` events change no derived value and need the build's quotes to regenerate |
 | 89 | Ingest, a re-read order and the import reset rebuild the touched items' learning from their receipts instead of patching it; a digital order read again with different content replaces the stored receipt (unchanged lines and their answers kept), and `db:reset-imports` keeps shared items and rebuilds them instead of refusing | A parser fix can now correct a receipt already written and one store's import can be removed alone; a late receipt learns as if it had arrived in order. Rebuilding in the ingest transaction costs one read and one write batch whatever the receipt's size (§8) |
 | 90 | Held receipts (#83) are retired: a failing digital receipt is applied as read, the sweeps re-read a `totals_check: fail` order for 14 days, and a differing read replaces it; holds left on production are released (applied as read) by the next daily cron, then `receipt_hold` is dropped in a contract PR (§4.5 *Failing totals*, *Held receipts*) | They existed because an applied misread couldn't be corrected (§10 #83); since M11.2 a re-read replaces it. Holding costs a lost purchase for up to 14 days (the cart re-buys the item, no cycle closure). Expand → contract: stop holding and move the agent's re-read from `held` to `totals_check: fail` first, keep reading the table, then drop it. Releasing the last holds at once rather than waiting for their expiry: applying as read is what this decision does for every new failing receipt, and it records the purchases ~10 days sooner. The re-read is bounded (14 days, then `done`) because a re-read costs a page load per sweep, and only a deployed parser fix changes the read |
+| 91 | Daily maintenance runs from a Vercel Schedule (`schedules` in `web/vercel.json`, a `GET` path target, same time and `CRON_SECRET` bearer check), not a legacy Cron Job; production only; run on demand by the *Run maintenance* workflow (§8 *Daily maintenance*) | Vercel marks Cron Jobs legacy (Schedules public beta, 2026-11-05; no removal date yet). Schedules ship with the `vercel deploy --prod` that `deploy.yml` already runs, so they stay in code. Same path and auth means no route change and no new secret. The schedule and the cron are swapped in one deploy, because keeping both runs the job twice. Preview schedules start inactive, which keeps the shared preview DB to tier A′'s own calls. UTC rather than `America/Los_Angeles`, to keep today's time exactly (03:17 PST / 04:17 PDT) |

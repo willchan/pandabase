@@ -1686,3 +1686,26 @@ Not a milestone: one PR (branch `claude/serene-brahmagupta-dug10o`, DESIGN §4.9
   sweep output gains `subscriptions`; the build message a 🔁 line. Touched M2 (schema), M3
   (`predictions.ts`, `subscriptions.ts`), M4 (route, contracts), M7 (tools, the receipt skill).
 
+---
+
+## After M11 — Vercel Schedules
+
+Not a milestone: one PR (branch `claude/vercel-schedules`, DESIGN §8 *Daily maintenance*,
+§10 #91).
+
+**Notes:**
+
+- Vercel's dashboard marked Cron Jobs deprecated. The docs say Cron Jobs "will be migrated to
+  Schedules in the future" but give no date, and existing crons keep working. The move is one
+  `vercel.json` change: `crons` → `schedules.maintenance` with the same path and time, plus
+  `requestMethod: "GET"` (a path schedule otherwise POSTs, and the route is GET only). Auth is
+  unchanged (`Bearer $CRON_SECRET`), so there are no route, contract or secret changes.
+- Differs from what we assumed: Hobby schedules fire within a fixed 15-minute jitter window
+  (Cron Jobs on Hobby fired anywhere in the hour), runs are not retried, and a changed
+  `CRON_SECRET` reaches the schedule only with the next production deploy. Preview schedules start
+  inactive per branch, so tier A′ is unchanged. The pinned CLI (65.0.0) has `vercel schedules`
+  but no `--git-branch` on `invoke`, so *Run maintenance* is production only.
+- New: `.github/workflows/maintenance.yml` (Actions → *Run maintenance*), which runs
+  `vercel schedules invoke maintenance` in the `production` environment with the existing
+  `VERCEL_*` secrets.
+

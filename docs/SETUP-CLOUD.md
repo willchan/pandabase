@@ -47,7 +47,7 @@ them up.
 - `AGENT_API_TOKEN`: the OpenClaw agent's API key
 - `WORKER_API_TOKEN`: the worker's API key
 - `AUTH_SECRET`: signs sign-in sessions
-- `CRON_SECRET`: lets Vercel Cron call the nightly job
+- `CRON_SECRET`: lets the Vercel Schedule call the daily maintenance job
 
 Make **each one twice**: a *prod* value and a *preview* value (eight in
 all). Preview deployments run the code of an unreviewed PR, so anything
@@ -369,7 +369,7 @@ Open
    - `AGENT_API_TOKEN`, `WORKER_API_TOKEN`, `CRON_SECRET`,
      `AUTH_SECRET`: the preview end-to-end tests (tier A′,
      [TESTING.md](TESTING.md)) call the preview deployment as the
-     agent, the worker and Vercel Cron, and sign in to its web UI with
+     agent, the worker and the daily Vercel Schedule, and sign in to its web UI with
      a session signed by `AUTH_SECRET`
    - `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`,
      `R2_BUCKET`: the same tests delete the photos they uploaded to
@@ -498,8 +498,10 @@ being public means the Mac Mini pulls it without a GitHub token. Nothing
 to change.
 
 **Check:** the Deploy run is green. Vercel → **Deployments** shows a new
-**Production** deployment of the same commit. Vercel → **Settings** →
-**Cron Jobs** lists `/api/cron/maintenance`.
+**Production** deployment of the same commit. Vercel → **Schedules**
+lists `maintenance` (`17 11 * * *`, `/api/cron/maintenance`, Production,
+active). To run it now: GitHub → **Actions** → **Run maintenance** →
+**Run workflow** (or *Run Schedule* on the schedule's page in Vercel).
 
 ---
 
@@ -727,7 +729,7 @@ it has, so nothing on production changes or goes down.
    secret**, once each, all *preview* values:
    - `AGENT_API_TOKEN`, `WORKER_API_TOKEN`, `CRON_SECRET`,
      `AUTH_SECRET`: the preview end-to-end tests use these four (as
-     the agent, the worker, Vercel Cron, and to sign a web session);
+     the agent, the worker, the daily Vercel Schedule, and to sign a web session);
    - `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`,
      `R2_BUCKET`: the same tests delete the photos they upload.
 

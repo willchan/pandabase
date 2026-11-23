@@ -1,0 +1,52 @@
+name: Run maintenance
+
+# Run production's daily maintenance now (DESIGN §8 *Daily maintenance*): invokes the Vercel
+# Schedule `maintenance` (web/vercel.json), which calls GET /api/cron/maintenance with the
+# deployment's CRON_SECRET, exactly like the 11:17 UTC run. The job is idempotent, so an extra run
+# is safe. Run it from GitHub (web or app): Actions → Run maintenance → Run workflow. The run then
+# shows in Vercel's execution history as a manual run.
+#
+# Production only: a preview's schedule is inactive (Vercel's default for Preview branches) and
+# tier A′ calls the preview's endpoint itself (docs/TESTING.md).
+
+on:
+  workflow_dispatch:
+
+# Not deploy.yml's group: a manual run must never replace a pending deploy.
+concurrency:
+  group: maintenance-production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  invoke:
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 5
+    steps:
+      - name: Environment is configured
+        run: |
+          missing=()
+          for name in VERCEL_TOKEN VERCEL_ORG_ID VERCEL_PROJECT_ID; do
+            [ -n "${!name}" ] || missing+=("$name")
+          done
+          if [ "${#missing[@]}" -gt 0 ]; then
+            echo "::error title=run maintenance::the 'production' environment needs secrets ${missing[*]}"
+            exit 2
+          fi
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      # Same CLI version as deploy.yml. The token is only ever passed to the CLI, never printed.
+      - name: vercel schedules invoke maintenance
+        run: npx --yes vercel@65.0.0 schedules invoke maintenance --token="$VERCEL_TOKEN"
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
