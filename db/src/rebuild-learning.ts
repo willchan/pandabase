@@ -13,13 +13,13 @@
 import { appendFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
-import { and, eq, inArray, isNotNull } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, or } from "drizzle-orm";
 import { ulid } from "ulid";
 import { DEFAULT_CONFIG, type Config } from "../../web/lib/config";
 import { CartResult } from "../../web/lib/contracts/cycle";
 import {
   changedColumns,
-  eventsDiffer,
+  diffEvents,
   ITEM_COLUMNS,
   PRODUCT_COLUMNS,
   REBUILT_EVENT_KINDS,
@@ -69,7 +69,8 @@ export interface ItemChange {
   itemId: string;
   item: Partial<LearnedItem> | null;
   products: { id: string; patch: Partial<LearnedProduct> }[];
-  /** Stored events of the rebuilt kinds to replace, or null when they already match. */
+  /** Stored events of the rebuilt kinds to delete and rebuilt ones to add (a multiset difference:
+   * matching events keep their rows), or null when they already match. */
   events: { deleteIds: string[]; insert: LearnedPreferenceEvent[] } | null;
   causes: Cause[];
 }
@@ -118,25 +119,131 @@ export function configFromEnv(tz?: string): Config {
   };
 }
 
-/** Plan the rebuild: read every input, fold each item, compare with what is stored. */
+type Selectable = Pick<Db, "select">;
+/** A handle that may send several statements in one round trip (a `Db`, `batchTransaction`'s). */
+type Reader = Selectable & { batch?: unknown };
+
+/** Every input row the fold reads (whole tables, or scoped to some items by `readLearningRows`). */
+export interface LearningRows {
+  items: (typeof item.$inferSelect)[];
+  products: (typeof product.$inferSelect)[];
+  receipts: (typeof receipt.$inferSelect)[];
+  /** Lines with an item (ignored ones included; the plan drops them). */
+  lines: (typeof receiptLine.$inferSelect)[];
+  acquired: (typeof inventoryEvent.$inferSelect)[];
+  prefs: (typeof preferenceEvent.$inferSelect)[];
+  cycles: (typeof groceryCycle.$inferSelect)[];
+  away: { startsOn: string; endsOn: string }[];
+  paused: { startsOn: string; endsOn: string }[];
+}
+
+/**
+ * Read the fold's inputs. Without `items`, whole tables (the CLI). With `items`, only what those
+ * items' rebuild reads — the items and every merged item (merges are few), their products, the
+ * lines and acquired events of them or of a merged item, those lines' receipts, preference events
+ * about them or their products, and every built cycle, away and pause period — as one batch of
+ * statements when the handle can batch (one round trip whatever the number of items or lines,
+ * DESIGN §8 *Database round trips*), else as concurrent statements.
+ */
+export async function readLearningRows(
+  db: Reader,
+  items?: readonly string[],
+): Promise<LearningRows> {
+  const scoped = items !== undefined;
+  const ids = [...new Set(items ?? [])];
+  const merged = db.select({ id: item.id }).from(item).where(isNotNull(item.mergedIntoItemId));
+  const theirProducts = db
+    .select({ id: product.id })
+    .from(product)
+    .where(inArray(product.itemId, ids));
+  const lineItem = or(inArray(receiptLine.itemId, ids), inArray(receiptLine.itemId, merged));
+  const queries = [
+    scoped
+      ? db
+          .select()
+          .from(item)
+          .where(or(inArray(item.id, ids), isNotNull(item.mergedIntoItemId)))
+      : db.select().from(item),
+    scoped
+      ? db.select().from(product).where(inArray(product.itemId, ids))
+      : db.select().from(product),
+    scoped
+      ? db
+          .select()
+          .from(receipt)
+          .where(
+            inArray(
+              receipt.id,
+              db.select({ id: receiptLine.receiptId }).from(receiptLine).where(lineItem),
+            ),
+          )
+      : db.select().from(receipt),
+    db
+      .select()
+      .from(receiptLine)
+      .where(scoped ? lineItem : isNotNull(receiptLine.itemId)),
+    db
+      .select()
+      .from(inventoryEvent)
+      .where(
+        scoped
+          ? and(
+              eq(inventoryEvent.kind, "acquired"),
+              or(inArray(inventoryEvent.itemId, ids), inArray(inventoryEvent.itemId, merged)),
+            )
+          : eq(inventoryEvent.kind, "acquired"),
+      ),
+    scoped
+      ? db
+          .select()
+          .from(preferenceEvent)
+          .where(
+            or(
+              inArray(preferenceEvent.itemId, ids),
+              inArray(preferenceEvent.itemId, merged),
+              inArray(preferenceEvent.fromProductId, theirProducts),
+              inArray(preferenceEvent.toProductId, theirProducts),
+            ),
+          )
+      : db.select().from(preferenceEvent),
+    db.select().from(groceryCycle).where(isNotNull(groceryCycle.builtAt)),
+    db.select({ startsOn: awayPeriod.startsOn, endsOn: awayPeriod.endsOn }).from(awayPeriod),
+    db.select({ startsOn: pausePeriod.startsOn, endsOn: pausePeriod.endsOn }).from(pausePeriod),
+  ] as const;
+  const res = (typeof db.batch === "function"
+    ? await (db as unknown as Db).batch(queries as unknown as Parameters<Db["batch"]>[0])
+    : await Promise.all(queries)) as unknown as [
+    LearningRows["items"],
+    LearningRows["products"],
+    LearningRows["receipts"],
+    LearningRows["lines"],
+    LearningRows["acquired"],
+    LearningRows["prefs"],
+    LearningRows["cycles"],
+    LearningRows["away"],
+    LearningRows["paused"],
+  ];
+  const [itemRows, products, receipts, lines, acquired, prefs, cycles, away, paused] = res;
+  return { items: itemRows, products, receipts, lines, acquired, prefs, cycles, away, paused };
+}
+
+/** Plan the rebuild: read the inputs, fold each item, compare with what is stored. */
 export async function planLearningRebuild(
-  db: Pick<Db, "select">,
+  db: Reader,
   opts: { items?: readonly string[]; config?: Config } = {},
 ): Promise<LearningRebuildPlan> {
+  return planFromRows(await readLearningRows(db, opts.items), opts);
+}
+
+/** `planLearningRebuild` over rows already read (`rows` may cover more items than `opts.items`). */
+export function planFromRows(
+  rows: LearningRows,
+  opts: { items?: readonly string[]; config?: Config } = {},
+): LearningRebuildPlan {
   const config = opts.config ?? configFromEnv();
   const tz = config.householdTz;
-  const [items, products, receipts, lines, acquired, prefs, cycles, away, paused] =
-    await Promise.all([
-      db.select().from(item),
-      db.select().from(product),
-      db.select().from(receipt),
-      db.select().from(receiptLine).where(isNotNull(receiptLine.itemId)),
-      db.select().from(inventoryEvent).where(eq(inventoryEvent.kind, "acquired")),
-      db.select().from(preferenceEvent),
-      db.select().from(groceryCycle).where(isNotNull(groceryCycle.builtAt)),
-      db.select({ startsOn: awayPeriod.startsOn, endsOn: awayPeriod.endsOn }).from(awayPeriod),
-      db.select({ startsOn: pausePeriod.startsOn, endsOn: pausePeriod.endsOn }).from(pausePeriod),
-    ]);
+  const { items, products, receipts, acquired, prefs, cycles, away, paused } = rows;
+  const lines = rows.lines.filter((l) => l.itemId !== null);
 
   // Merges: an item's history is its own plus that of every item merged into it.
   const mergedInto = new Map(items.map((i) => [i.id, i.mergedIntoItemId]));
@@ -298,9 +405,7 @@ export async function planLearningRebuild(
       });
     }
     const stored = storedByItem.get(it.id) ?? [];
-    const eventChange = eventsDiffer(stored, res.events)
-      ? { deleteIds: stored.map((e) => e.id), insert: res.events }
-      : null;
+    const eventChange = diffEvents(stored, res.events);
     if (itemCols.length === 0 && productChanges.length === 0 && !eventChange) continue;
 
     for (const c of itemCols) plan.itemColumns[c]++;
@@ -308,8 +413,9 @@ export async function planLearningRebuild(
     plan.productsChanged += productChanges.length;
     if (eventChange) {
       plan.events.items++;
-      for (const e of stored) plan.events.deleted[e.kind as RebuiltKind]++;
-      for (const e of res.events) plan.events.inserted[e.kind]++;
+      const gone = new Set(eventChange.deleteIds);
+      for (const e of stored) if (gone.has(e.id)) plan.events.deleted[e.kind as RebuiltKind]++;
+      for (const e of eventChange.insert) plan.events.inserted[e.kind]++;
     }
 
     // Which known causes this item's history shows.
@@ -349,13 +455,18 @@ export async function planLearningRebuild(
   return plan;
 }
 
-/** Plan, then write every change in one batch (atomic) and emit `learning_rebuilt`. */
-export async function applyLearningRebuild(
-  db: Db,
-  opts: { items?: readonly string[]; config?: Config; now?: string } = {},
-): Promise<LearningRebuildPlan> {
-  const now = opts.now ?? nowIso();
-  const plan = await planLearningRebuild(db, opts);
+type Writer = Pick<Db, "update" | "delete" | "insert">;
+
+/**
+ * The statements that write a plan's changes: item and product patches, then the rebuilt kinds'
+ * preference events (deletes before inserts). Shared by `--apply`, ingest and the import reset.
+ */
+export function learningWrites(
+  db: Writer,
+  plan: Pick<LearningRebuildPlan, "changes">,
+  now: string,
+  newId: (at: string) => string = (at) => ulid(Date.parse(at)),
+) {
   const writes = [];
   for (const c of plan.changes) {
     if (c.item) {
@@ -391,7 +502,7 @@ export async function applyLearningRebuild(
         writes.push(
           db.insert(preferenceEvent).values(
             c.events.insert.map(({ at, ...e }) => ({
-              id: ulid(Date.parse(at)),
+              id: newId(at),
               createdAt: at,
               updatedAt: now,
               itemId: c.itemId,
@@ -402,6 +513,17 @@ export async function applyLearningRebuild(
       }
     }
   }
+  return writes;
+}
+
+/** Plan, then write every change in one batch (atomic) and emit `learning_rebuilt`. */
+export async function applyLearningRebuild(
+  db: Db,
+  opts: { items?: readonly string[]; config?: Config; now?: string } = {},
+): Promise<LearningRebuildPlan> {
+  const now = opts.now ?? nowIso();
+  const plan = await planLearningRebuild(db, opts);
+  const writes: unknown[] = learningWrites(db, plan, now);
   writes.push(
     db.insert(systemTelemetry).values({
       id: ulid(Date.parse(now)),
@@ -411,13 +533,15 @@ export async function applyLearningRebuild(
       createdAt: now,
     }),
   );
-  const [first, ...rest] = writes;
-  await db.batch([first!, ...rest]);
+  await db.batch(writes as unknown as Parameters<Db["batch"]>[0]);
   return plan;
 }
 
 /** The `learning_rebuilt` telemetry payload: counts only. */
-export function summaryPayload(plan: LearningRebuildPlan, scope: "all" | "items") {
+export function summaryPayload(
+  plan: LearningRebuildPlan,
+  scope: "all" | "items" | "ingest" | "replace" | "reset",
+) {
   return {
     scope,
     items: plan.items,

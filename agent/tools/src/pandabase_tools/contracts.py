@@ -707,6 +707,7 @@ class ReceiptIngestResponse(BaseModel):
     lines: list[ReceiptLineOut]
     new_item_ids: list[str]
     receipt_id: Annotated[str, Field(max_length=64, min_length=1)]
+    replaced: bool | None = None
     review_ids: list[str]
     status: Literal["applied", "pending_review", "partial", "held"]
     totals_check: Literal["pass", "fail", "n/a"]

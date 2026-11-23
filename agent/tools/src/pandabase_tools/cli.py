@@ -502,7 +502,7 @@ def cmd_receipts_ingest(env: Env) -> Any:
     body["actor_discord_id"] = member.discord_id
     req = contracts.ReceiptIngestRequest.model_validate(body)
     oid = req.external_order_id
-    key = f"receipt:{member.discord_id}:{oid}" if oid else None
+    key = receipt_parser.ingest_key(member.discord_id, oid, req) if oid else None
     try:  # read first: once the ingest closes the cycle, `cycle/current` no longer returns it
         cycle = env.api.current_cycle()
     except api_mod.ApiError:

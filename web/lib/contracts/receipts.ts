@@ -77,6 +77,11 @@ export const ReceiptIngestResponse = named(
     /** The receipt was already ingested (same dedupe key); nothing changed. */
     duplicate: z.boolean(),
     /**
+     * A digital order read again with different content replaced the stored receipt (same
+     * `receipt_id`; unchanged lines and their answers kept, items rebuilt; DESIGN §4.5).
+     */
+    replaced: z.boolean().optional(),
+    /**
      * `held`: a digital receipt whose totals check failed was stored but not applied (no lines,
      * items, events or trip link). Ingest the order again once it reads right; at `held_until` it
      * is applied as read.

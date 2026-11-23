@@ -2,31 +2,46 @@
 // be re-run with a fixed parser (DESIGN §4.5 "Resetting the digital import"). Ingest dedupes on the
 // order id, so re-importing alone can't correct rows a buggy parser wrote.
 //
-// Deletes what the import created: digital receipts and their lines, held receipts (§4.5), the items and products they
-// created, those items' inventory events / state / preference events / price quotes / vendor
-// aliases, the reviews about them (Cleanup's receipt, new-product, unverified-item and merge
-// reviews), the merge_suggest jobs, and the stored replies to `receipt:` ingest keys (else a
-// re-import within the 24 h idempotency window would replay the old responses). Keeps members,
-// settings, away periods, grocery cycles and telemetry.
+// Deletes what the import created: digital receipts and their lines, held receipts (§4.5), the
+// items and products they created that no other import uses, those items' inventory events / state
+// / preference events / price quotes / vendor aliases, the reviews about them (Cleanup's receipt,
+// new-product, unverified-item and merge reviews), the merge_suggest jobs, and the stored replies to
+// `receipt:` ingest keys (else a re-import within the 24 h idempotency window would replay the old
+// responses). Keeps members, settings, away periods, grocery cycles and telemetry.
 //
-// Refuses — deleting nothing — if any of that is tied to human-entered or human-confirmed data
-// (answered reviews, labeled observations, inventory events from people, cycle overrides, product
-// rejections, paper/manual receipt lines, merges, item settings, items that predate the import).
-// Without --apply it only counts. Output is counts only: the repo and its Actions logs are public.
+// Delete-and-rebuild (PLAN M11.2, DESIGN §4.10): an item the import touched but didn't create, or
+// one another store's import also names, stays — it loses only the deleted receipts' lines and
+// acquisitions (and products the import created on it that nothing else names), and its learning
+// (product stats, stances, EMA, promotion, switch threshold) is rebuilt from the receipts left, in
+// the same transaction. So the shared-item refusals that came from learning side effects are gone.
+//
+// Refuses — deleting nothing — if what it would delete is tied to human-entered or human-confirmed
+// data (answered reviews, labeled observations, inventory events from people, cycle overrides,
+// product overrides or rejections, paper/manual receipt lines, merges, item settings). Without
+// --apply it only counts. Output is counts only: the repo and its Actions logs are public.
 //
 // `--vendor V` limits it to one store's import (e.g. re-reading Costco receipts after a parser fix
-// without touching Amazon's). It then also refuses if another store's imported lines name an item
-// it would delete, keeps the merge_suggest jobs (deleting only the merge reviews about its items),
-// and clears only the ingest replies for its own orders. Either way, a Costco trip a deleted
-// receipt closed keeps its status and loses only the link, so the re-imported receipt re-links it.
+// without touching Amazon's). It keeps the merge_suggest jobs (deleting only the merge reviews
+// about its items) and clears only the ingest replies for its own orders. Either way, a Costco trip
+// a deleted receipt closed keeps its status and loses only the link, so the re-imported receipt
+// re-links it.
 import { appendFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
-import { and, eq, inArray, like, ne, notInArray, or, sql, type SQL } from "drizzle-orm";
+import { and, eq, inArray, like, notInArray, or, sql, type SQL } from "drizzle-orm";
 import type { SQLiteColumn } from "drizzle-orm/sqlite-core";
 import { createDb, type Db } from "./client";
 import { databaseUrlFromEnv } from "./env";
+import { ulid } from "ulid";
+import type { Config } from "../../web/lib/config";
+import {
+  configFromEnv,
+  learningWrites,
+  planLearningRebuild,
+  summaryPayload,
+} from "./rebuild-learning";
 import { rebuildInventoryState } from "./rebuild-state";
+import { nowIso } from "./schema/common";
 import {
   auditJob,
   costcoTrip,
@@ -44,6 +59,7 @@ import {
   receiptHold,
   receiptLine,
   reviewItem,
+  systemTelemetry,
   vendorAlias,
 } from "./schema/index";
 
@@ -67,7 +83,11 @@ export const RESET_TABLES = [
 ] as const;
 export type ResetTable = (typeof RESET_TABLES)[number];
 
-/** What makes the reset refuse: human data, or another store's import (`--vendor`). */
+/**
+ * What makes the reset refuse: human data about something it would delete. (Items a digital
+ * receipt matched but didn't create, and items another store's import also names, used to block;
+ * since PLAN M11.2 they are kept and their learning rebuilt.)
+ */
 export const BLOCKERS = {
   answered_reviews: "reviews someone confirmed, corrected or dismissed",
   labeled_observations: "labeled observations about imported receipts, items or merge jobs",
@@ -75,10 +95,8 @@ export const BLOCKERS = {
   cycle_overrides: "grocery-cycle overrides naming an imported item or product",
   human_preference_events: "product overrides or rejections on imported items",
   other_receipt_lines: "paper or manual receipt lines naming an imported item or product",
-  other_store_lines: "another store's imported lines naming an item or product in scope (--vendor)",
   merges: "item merges between an imported item and another item",
   item_settings: "imported items with an audit hint, shelf life or reorder threshold set",
-  items_predating_import: "items a digital receipt matched but did not create",
 } as const;
 export type Blocker = keyof typeof BLOCKERS;
 
@@ -93,6 +111,9 @@ const INGEST_SCOPE_SUFFIX = ":POST /api/receipts/ingest";
 export interface ResetOptions {
   /** Only this store's digital import (`receipt.vendor`); all stores when absent. */
   vendor?: string;
+  /** For the kept items' learning rebuild (defaults: the clock, `HOUSEHOLD_TZ`). */
+  now?: string;
+  config?: Config;
 }
 
 /** Store names `--vendor` accepts (`receipt.vendor` values are lower-case words). */
@@ -110,7 +131,14 @@ export interface ImportResetPlan {
     cyclesClosedByImport: number;
     /** Costco trips whose closing receipt is deleted: kept, with `receipt_id` cleared. */
     tripsUnlinked: number;
+    /**
+     * Items the import touched that stay (made before it, or another store's import names them):
+     * their learning is rebuilt from the receipts left (DESIGN §4.10).
+     */
+    itemsKept: number;
   };
+  /** After `--apply`: what the rebuild of the kept items changed. */
+  rebuilt?: { itemsChanged: number; productsChanged: number; eventItems: number };
 }
 
 interface Scope {
@@ -127,6 +155,8 @@ interface Scope {
   priceQuotes: string[];
   idempotencyKeys: { key: string; scope: string }[];
   trips: string[];
+  /** Touched items that stay: their learning is rebuilt once the import is gone. */
+  keptItems: string[];
 }
 
 const CHUNK = 400;
@@ -183,33 +213,89 @@ async function scope(q: Q, opts: ResetOptions): Promise<{ s: Scope; plan: Import
     .from(receiptLine)
     .where(inIds(receiptLine.receiptId, receiptIds));
 
-  // Items the import touched, with the creation stamps of the receipts that touched them: ingest
-  // stamps a new item with its receipt's `created_at`, so a matching stamp means "created by it".
+  // Items and products the import touched, with the creation stamps of the receipts that touched
+  // them: ingest stamps a new item / product with its receipt's `created_at`, so a matching stamp
+  // means "created by it".
   const lineProductIds = [...new Set(lines.flatMap((l) => (l.productId ? [l.productId] : [])))];
   const lineProducts = await q
     .select({ id: product.id, itemId: product.itemId })
     .from(product)
     .where(inIds(product.id, lineProductIds));
   const productItem = new Map(lineProducts.map((p) => [p.id, p.itemId]));
+  const addStamp = (m: Map<string, Set<string>>, id: string, stamp: string) => {
+    let set = m.get(id);
+    if (!set) m.set(id, (set = new Set()));
+    set.add(stamp);
+  };
   const stampsByItem = new Map<string, Set<string>>();
+  const stampsByProduct = new Map<string, Set<string>>();
   for (const l of lines) {
     const stamp = receiptById.get(l.receiptId)!.createdAt;
     for (const itemId of [l.itemId, l.productId ? productItem.get(l.productId) : undefined]) {
-      if (!itemId) continue;
-      let set = stampsByItem.get(itemId);
-      if (!set) stampsByItem.set(itemId, (set = new Set()));
-      set.add(stamp);
+      if (itemId) addStamp(stampsByItem, itemId, stamp);
     }
+    if (l.productId) addStamp(stampsByProduct, l.productId, stamp);
   }
-  const itemIds = [...stampsByItem.keys()].sort();
-  const items = await q.select().from(item).where(inIds(item.id, itemIds));
-  const itemSet = new Set(itemIds);
-
-  const products = await q
-    .select({ id: product.id })
+  const touchedIds = [...stampsByItem.keys()].sort();
+  const touchedItems = await q.select().from(item).where(inIds(item.id, touchedIds));
+  const touchedProducts = await q
+    .select({
+      id: product.id,
+      itemId: product.itemId,
+      vendor: product.vendor,
+      createdAt: product.createdAt,
+    })
     .from(product)
-    .where(inIds(product.itemId, itemIds));
-  const productIds = products.map((p) => p.id);
+    .where(inIds(product.itemId, touchedIds));
+
+  // Lines that stay (other receipts) naming a touched item or product. Another store's import
+  // keeps what it names: the item stays and its learning is rebuilt without this import (PLAN
+  // M11.2). A paper / manual line is a person's record: naming an item to delete, it blocks.
+  const lineCols = {
+    id: receiptLine.id,
+    itemId: receiptLine.itemId,
+    productId: receiptLine.productId,
+    source: receipt.source,
+  };
+  const scopedReceipts = new Set(receiptIds);
+  const staying = (
+    await q
+      .select({ ...lineCols, receiptId: receiptLine.receiptId })
+      .from(receiptLine)
+      .innerJoin(receipt, eq(receipt.id, receiptLine.receiptId))
+      .where(
+        or(
+          inIds(receiptLine.itemId, touchedIds),
+          inIds(
+            receiptLine.productId,
+            touchedProducts.map((p) => p.id),
+          ),
+        ),
+      )
+  ).filter((l) => !scopedReceipts.has(l.receiptId));
+  const keptByImport = new Set<string>();
+  for (const l of staying) {
+    if (l.source !== "digital") continue;
+    if (l.itemId) keptByImport.add(l.itemId);
+    if (l.productId) keptByImport.add(l.productId);
+  }
+
+  // Delete what the import created and no other import uses; keep (and rebuild) the rest.
+  const items = touchedItems.filter(
+    (i) => stampsByItem.get(i.id)!.has(i.createdAt) && !keptByImport.has(i.id),
+  );
+  const itemIds = items.map((i) => i.id).sort();
+  const itemSet = new Set(itemIds);
+  const keptItems = touchedIds.filter((id) => !itemSet.has(id));
+  const products = touchedProducts.filter(
+    (p) =>
+      itemSet.has(p.itemId) ||
+      (stampsByProduct.get(p.id)?.has(p.createdAt) === true &&
+        (vendor === null || p.vendor === vendor) &&
+        !keptByImport.has(p.id)),
+  );
+  const productIds = products.map((p) => p.id).sort();
+  const productSet = new Set(productIds);
 
   // Merge jobs span every store: a full reset deletes them (re-run after the import); a one-store
   // reset keeps them and deletes only the merge reviews naming its items (either side).
@@ -248,11 +334,26 @@ async function scope(q: Q, opts: ResetOptions): Promise<{ s: Scope; plan: Import
   });
   const reviews = [...direct, ...intoScoped];
 
-  const events = await q
-    .select({ id: inventoryEvent.id, source: inventoryEvent.source })
-    .from(inventoryEvent)
-    .where(inIds(inventoryEvent.itemId, itemIds));
+  // Events: every event of a deleted item; on a kept item, only the acquisitions of the receipts
+  // deleted here.
+  const events = (
+    await q
+      .select({
+        id: inventoryEvent.id,
+        itemId: inventoryEvent.itemId,
+        source: inventoryEvent.source,
+        sourceRef: inventoryEvent.sourceRef,
+      })
+      .from(inventoryEvent)
+      .where(inIds(inventoryEvent.itemId, touchedIds))
+  ).filter(
+    (e) =>
+      itemSet.has(e.itemId) ||
+      (e.source === "digital_receipt" && e.sourceRef !== null && scopedReceipts.has(e.sourceRef)),
+  );
 
+  // Preference events of deleted items or naming a deleted product. A kept item's `auto_promote`
+  // / `implicit_swap` events are regenerated by its rebuild; its human ones stay.
   const prefs = await q
     .select({ id: preferenceEvent.id, kind: preferenceEvent.kind })
     .from(preferenceEvent)
@@ -288,7 +389,7 @@ async function scope(q: Q, opts: ResetOptions): Promise<{ s: Scope; plan: Import
         like(idempotencyKey.scope, `%${INGEST_SCOPE_SUFFIX}`),
       ),
     );
-  // `receipt:{discord id}:{order id}`: one store's reset clears only its own orders' replies.
+  // `receipt:{discord id}:…:{order id}`: one store's reset clears only its own orders' replies.
   const orderIds = new Set(
     [...receipts, ...holds].flatMap((r) => (r.externalOrderId ? [r.externalOrderId] : [])),
   );
@@ -302,7 +403,7 @@ async function scope(q: Q, opts: ResetOptions): Promise<{ s: Scope; plan: Import
     .from(costcoTrip)
     .where(inIds(costcoTrip.receiptId, receiptIds));
 
-  // --- Human data (blockers) ---
+  // --- Human data about what would be deleted (blockers) ---
   const overrides = await q
     .select({ id: groceryCycleOverride.id })
     .from(groceryCycleOverride)
@@ -312,31 +413,12 @@ async function scope(q: Q, opts: ResetOptions): Promise<{ s: Scope; plan: Import
         inIds(groceryCycleOverride.productId, productIds),
       ),
     );
-  const otherLines = await q
-    .select({ id: receiptLine.id })
-    .from(receiptLine)
-    .innerJoin(receipt, eq(receipt.id, receiptLine.receiptId))
-    .where(
-      and(
-        ne(receipt.source, "digital"),
-        or(inIds(receiptLine.itemId, itemIds), inIds(receiptLine.productId, productIds)),
-      ),
-    );
-  // Another store's import naming an item in scope: deleting the item would orphan its lines.
-  const otherStoreLines =
-    vendor === null
-      ? []
-      : await q
-          .select({ id: receiptLine.id })
-          .from(receiptLine)
-          .innerJoin(receipt, eq(receipt.id, receiptLine.receiptId))
-          .where(
-            and(
-              eq(receipt.source, "digital"),
-              ne(receipt.vendor, vendor),
-              or(inIds(receiptLine.itemId, itemIds), inIds(receiptLine.productId, productIds)),
-            ),
-          );
+  const otherLines = staying.filter(
+    (l) =>
+      l.source !== "digital" &&
+      ((l.itemId !== null && itemSet.has(l.itemId)) ||
+        (l.productId !== null && productSet.has(l.productId))),
+  );
   const mergedIntoImported = await q
     .select({ id: item.id })
     .from(item)
@@ -372,14 +454,12 @@ async function scope(q: Q, opts: ResetOptions): Promise<{ s: Scope; plan: Import
       (HUMAN_PREFERENCE_KINDS as readonly string[]).includes(p.kind),
     ).length,
     other_receipt_lines: otherLines.length,
-    other_store_lines: otherStoreLines.length,
     merges:
       mergedIntoImported.length +
       items.filter((i) => i.mergedIntoItemId && !itemSet.has(i.mergedIntoItemId)).length,
     item_settings: items.filter(
       (i) => i.auditHint !== null || i.shelfLifeDays !== null || i.reorderThreshold !== null,
     ).length,
-    items_predating_import: items.filter((i) => !stampsByItem.get(i.id)!.has(i.createdAt)).length,
   };
 
   const [closed] = await q
@@ -401,6 +481,7 @@ async function scope(q: Q, opts: ResetOptions): Promise<{ s: Scope; plan: Import
     priceQuotes: quotes.map((p) => p.id),
     idempotencyKeys: keys,
     trips: trips.map((t) => t.id),
+    keptItems,
   };
   const plan: ImportResetPlan = {
     vendor,
@@ -425,6 +506,7 @@ async function scope(q: Q, opts: ResetOptions): Promise<{ s: Scope; plan: Import
       reviewsByKind: tally(reviews.map((r) => r.kind)),
       cyclesClosedByImport: Number(closed?.n ?? 0),
       tripsUnlinked: s.trips.length,
+      itemsKept: keptItems.length,
     },
   };
   return { s, plan };
@@ -484,6 +566,25 @@ export async function applyImportReset(db: Db, opts: ResetOptions = {}): Promise
         .delete(idempotencyKey)
         .where(and(eq(idempotencyKey.key, k.key), eq(idempotencyKey.scope, k.scope)));
     }
+    // The items that stay lose this import's purchases: rebuild their learning (§4.10).
+    if (s.keptItems.length > 0) {
+      const now = opts.now ?? nowIso();
+      const config = opts.config ?? configFromEnv();
+      const rebuild = await planLearningRebuild(tx, { items: s.keptItems, config });
+      for (const w of learningWrites(tx, rebuild, now)) await w;
+      await tx.insert(systemTelemetry).values({
+        id: ulid(Date.parse(now)),
+        source: "state_engine",
+        metricType: "learning_rebuilt",
+        payload: { ...summaryPayload(rebuild, "reset"), vendor: plan.vendor },
+        createdAt: now,
+      });
+      plan.rebuilt = {
+        itemsChanged: rebuild.itemsChanged,
+        productsChanged: rebuild.productsChanged,
+        eventItems: rebuild.events.items,
+      };
+    }
     return plan;
   });
   await rebuildInventoryState(db);
@@ -509,8 +610,14 @@ export function formatPlan(plan: ImportResetPlan, applied: boolean): string {
     "",
     `Kept: grocery cycles closed by an imported order: ${plan.info.cyclesClosedByImport}`,
     `Kept, link cleared: Costco trips closed by a deleted receipt: ${plan.info.tripsUnlinked}`,
+    `Kept, learning rebuilt: items the import touched but didn't create alone: ${plan.info.itemsKept}`,
+    ...(plan.rebuilt
+      ? [
+          `  rebuilt: items changed ${plan.rebuilt.itemsChanged}, products changed ${plan.rebuilt.productsChanged}, items with regenerated preference events ${plan.rebuilt.eventItems}`,
+        ]
+      : []),
     "",
-    "Blockers: human data, or (--vendor) data shared with another store; any non-zero refuses:",
+    "Blockers: human data about what would be deleted; any non-zero refuses:",
   );
   for (const [k, label] of Object.entries(BLOCKERS)) {
     out.push(`  ${k.padEnd(24)} ${plan.blockers[k as Blocker]}  ${label}`);
@@ -520,7 +627,7 @@ export function formatPlan(plan: ImportResetPlan, applied: boolean): string {
     isBlocked(plan)
       ? "BLOCKED: nothing deleted; resolve the blockers above before resetting."
       : applied
-        ? "Done. inventory_state rebuilt."
+        ? "Done. Kept items' learning and inventory_state rebuilt."
         : "OK to apply: no blockers found.",
   );
   return out.join("\n");

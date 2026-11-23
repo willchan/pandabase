@@ -303,8 +303,7 @@ def test_a_held_order_is_re_read_on_later_sweeps_until_it_applies(tmp_path: Path
         for r in server.api.requests
         if r.method == "POST" and held in r.headers["Idempotency-Key"]
     ]
-    assert keys[0] == f"receipt:1001:{held}"
-    assert re.fullmatch(rf"receipt:1001:[0-9a-f]{{12}}:{held}", keys[1])
+    assert all(re.fullmatch(rf"receipt:1001:[0-9a-f]{{12}}:{held}", k) for k in keys)
 
 
 def test_no_cursor_uses_initial_window(tmp_path: Path) -> None:

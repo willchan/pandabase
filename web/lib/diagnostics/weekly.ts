@@ -344,8 +344,23 @@ export async function renderWeekly(
       .orderBy(asc(receiptHold.expiresAt), asc(receiptHold.id))
   ).filter((h) => h.status === "held" || (h.resolvedAt !== null && h.resolvedAt >= end));
   const releasedBy = (o: string) => released.filter((t) => t.p.outcome === o).length;
-  // §4.10: `db:rebuild-learning --apply` runs (one summary row each).
-  const rebuilds = metric("learning_rebuilt");
+  // §4.10: `db:rebuild-learning --apply` runs and import resets (one summary row each), and
+  // ingests whose rebuild corrected what in-place patching would have written (PLAN M11.2).
+  const rebuiltRows = metric("learning_rebuilt");
+  const byScope = (...scopes: string[]) =>
+    rebuiltRows.filter((t) => scopes.includes(s(t.p.scope) ?? "all"));
+  const rebuilds = byScope("all", "items");
+  const resets = byScope("reset");
+  const corrected = byScope("ingest");
+  // §4.5 Re-read orders: digital orders read again with different content.
+  const replacedRows = metric("receipt_replaced");
+  const replaced = replacedRows.filter((t) => t.p.outcome === "replaced");
+  const keptPassing = replacedRows.filter((t) => t.p.outcome === "kept_passing");
+  const cause = (rows: Telemetry[], key: string) =>
+    rows.reduce((a, t) => {
+      const v = n((t.p.causes as Record<string, unknown> | undefined)?.[key]);
+      return a + (Number.isFinite(v) ? v : 0);
+    }, 0);
   if (stillHeld.length) {
     findings.push({
       score: 3,
@@ -517,6 +532,22 @@ export async function renderWeekly(
             `Learning rebuilt from receipts (db:rebuild-learning): ${rebuilds.length} run(s), ` +
               `${sum(rebuilds, "itemsChanged")} item(s) and ${sum(rebuilds, "productsChanged")} product(s) changed, ` +
               `${sum(rebuilds, "eventItems")} item(s) with regenerated preference events.`,
+          ]
+        : []),
+      ...(resets.length
+        ? [
+            "",
+            `Import resets (db:reset-imports): ${resets.length}, ${sum(resets, "items")} kept item(s) rebuilt ` +
+              `(${sum(resets, "itemsChanged")} item(s), ${sum(resets, "productsChanged")} product(s) changed).`,
+          ]
+        : []),
+      ...(corrected.length || replacedRows.length
+        ? [
+            "",
+            `Rebuilt at ingest (§4.10): ${corrected.length} receipt(s) corrected what in-place learning would have written ` +
+              `(late ${cause(corrected, "late_receipt")}, edited ${cause(corrected, "edited_after_ingest")}, merged ${cause(corrected, "merged")}, other ${cause(corrected, "unexplained")} item(s)). ` +
+              `Re-read orders replaced: ${replaced.length} (${sum(replaced, "linesNew")} line(s) re-read, ${sum(replaced, "linesRemoved")} dropped, ${sum(replaced, "newItems")} new item(s))` +
+              `${keptPassing.length ? `; ${keptPassing.length} worse re-read(s) ignored` : ""}.`,
           ]
         : []),
       "",

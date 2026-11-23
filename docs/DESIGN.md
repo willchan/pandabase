@@ -530,11 +530,45 @@ text before the first comma/dash, sizes removed, at most 6 words. `pnpm db:renam
 as the old rule named them from one of their product titles; names a person gave or confirmed are
 never touched.
 
-**Planned (M11, §10 #86):** learning from receipts becomes a rebuildable projection like
-`inventory_state`: re-reading an order replaces it, and resetting one store's import deletes its
-receipts and recomputes the items they touched (PLAN M11).
+**Learning is rebuilt, not patched (M11.2, §10 #86, #89):** `applyReceipt` still resolves lines,
+creates items and products, derives `acquired` events, reviews, cycle closure and telemetry, but
+its item / product / preference-event patches aren't written: after the receipt, lines and events
+are, `persistReceiptEffects` rebuilds the items the receipt touched (`rebuildItemsIn`,
+`web/lib/services/learning.ts`, §4.10) in the same transaction — one read batch
+(`readLearningRows` scoped to the items), the fold in memory, one write batch (§8 *Database round
+trips*; a Drizzle transaction sends the same few statements one by one). For a receipt that
+arrives in order the result is what the patches would have written; when it isn't (a late
+receipt, lines answered since, a merge), ingest emits one `learning_rebuilt {scope: "ingest",
+…counts, causes}` comparing the rebuild with the patches (report §3). A seeded database's learned
+values are synthetic, so the first ingest of a seeded item recomputes it from its seeded history.
 
-**Held receipts** (`holdsReceipt` in `web/lib/domain/receipts.ts`; `ingestReceiptIn` in
+**Re-read orders** (`replaceReceiptIn`, M11.2): a **digital** order ingested again (same dedupe
+key) whose content differs — header (`fulfillment`, `ordered_at`, `acquired_at`, subtotal, total)
+or any line (`raw_text`, ASIN, item number, `qty`, unit price, line total, in order) — **replaces**
+the stored receipt in place (same id and `created_at`); the same content again is a duplicate, as
+are paper and manual receipts always.
+- A line whose content is unchanged keeps its row: its match and any review answer stay. Changed
+  and new lines are resolved afresh by `applyReceipt` (new items / products stamped with the
+  receipt's `created_at`, as the import reset expects); lines no longer on the order are deleted.
+- The receipt's `acquired` events are re-derived from its final lines (`reconcileReceiptEvents`; an
+  event with the right item and quantity keeps its row, the rest are deleted and re-inserted; a
+  changed `acquired_at` replaces them all). Its open receipt review is re-pointed at the final
+  open lines (deleted if none); a new item gets its `new_product` review.
+- Every item the order touched before or after is rebuilt (§4.10) and re-projected. No cycle is
+  closed and no Costco trip linked again (that happened on the first read). An item a misread
+  created and the corrected read no longer names stays, with no purchases (PLAN M11 Notes).
+- *Not a worse read:* a stored receipt whose totals check passed isn't replaced by one that fails
+  (answered as a duplicate; `receipt_replaced {outcome: kept_passing}`).
+- The response has `replaced: true` (`duplicate: false`), the same `receipt_id`, the final lines.
+  Telemetry `receipt_replaced {outcome: replaced, receiptId, vendor, linesKept, linesNew,
+  linesRemoved, newItems, totalsBefore, totalsAfter, itemsRebuilt, itemsChanged}` → report §3.
+- *Idempotency:* the agent sends every ingest under `receipt:{discord id}:{body hash}:{order id}`
+  (`ingest_key`), so a changed read is never answered from the 24 h reply store while the same
+  read stays idempotent.
+
+**Held receipts** (to be retired, §10 #90: since M11.2 a re-read replaces an applied misread, so
+holding it is no longer needed; it still works as below until a contract PR removes it)
+(`holdsReceipt` in `web/lib/domain/receipts.ts`; `ingestReceiptIn` in
 `web/lib/services/receipts.ts`): a **digital** receipt from a `receipts.holdVendors` store (`costco`)
 whose totals check fails is stored as a `receipt_hold` and **not applied** — no receipt row, lines, items, products, inventory events,
 item/product/preference changes, reviews, cycle closure or Costco trip link. Its lines are what a
@@ -554,8 +588,9 @@ store's import (§10 #83). The response is `status: "held"`, `totals_check: "fai
   one wrong line — both live failures had their items right and a price or quantity off.
 - *Agent:* a held response isn't "done" in the sweep's state file (`held` instead), so every
   later sweep re-reads the order — Amazon's even once its order list has moved past it — and
-  re-ingests it under `receipt:{discord id}:{body hash}:{order id}` so a corrected read isn't
-  answered with the held reply stored for the idempotency window (24 h). Entries older than 60
+  re-ingests it under `receipt:{discord id}:{body hash}:{order id}` (every ingest's key since
+  M11.2) so a corrected read isn't answered with the held reply stored for the idempotency window
+  (24 h). Entries older than 60
   days are forgotten (long since applied as read).
 - Paper receipts keep their own review flow, and manual (typed) receipts apply as before.
 - *Only `holdVendors` stores (`costco`):* on the prod copy (2026-11-17) 33 of 35 checked Whole
@@ -676,8 +711,18 @@ Implementation notes (`web/lib/domain/receipts.ts`):
   the merge_suggest jobs, deleting only the merge reviews naming one of its items on either side
   (`item_id` or `merge_into_item_id`), clears only its own (and its held) orders' `receipt:…:{order id}` replies,
   and also refuses if another store's imported lines name an item or product it would delete.
-  Its shared-item blockers that come from learning side effects go once the reset rebuilds
-  learning instead (§4.10, PLAN M11.2).
+  **Delete-and-rebuild (M11.2, §10 #89):** only items and products the scoped receipts
+  *created* (stamp match) and no remaining digital line names are deleted. An item the import
+  touched but didn't create, or one another store's import also names, is **kept**: it loses only
+  the deleted receipts' lines and their `digital_receipt` acquisitions (plus products the import
+  created on it that nothing else names, with their aliases, quotes and preference events), and
+  its learning is rebuilt from the receipts left (§4.10) in the reset's transaction, with one
+  `learning_rebuilt {scope: "reset", vendor, …counts}` row; `info.itemsKept` counts them. So the
+  shared-item refusals (`items_predating_import`, `other_store_lines`), which came from learning
+  side effects, are gone; the blockers left are human data about what would be deleted (answered
+  reviews, labels, human inventory / preference events, cycle overrides, paper or manual lines,
+  merges, item settings). Prod copy 2026-11-23: `--vendor costco` went from refused (14 + 4) to
+  6 receipts, 26 lines and 15 items deleted, 4 shared items kept and rebuilt.
 
 ### 4.6 Review expiry & trust
 
@@ -956,8 +1001,13 @@ recomputed: `rebuildItemLearning` (`web/lib/domain/learning.ts`, pure) folds one
 time order and returns its derived values; `pnpm db:rebuild-learning [--items ID,…] [--apply]`
 (`db/src/rebuild-learning.ts`; Bootstrap action `rebuild-learning`, input `apply`) runs it over
 every unmerged item and compares with what is stored. The derived columns stay where they are, as
-a cache the rebuild owns: nothing that reads them changes. From M11.2 ingest rebuilds the items a
-receipt touched instead of patching them (PLAN M11).
+a cache the rebuild owns: nothing that reads them changes. Since M11.2 ingest, a re-read order's
+replacement and the import reset rebuild the items they touched instead of patching them
+(`rebuildItemsIn`; §4.5). `readLearningRows(db, items)` reads only those items' inputs (the items
+and every merged item, their products, lines, receipts, acquisitions and preference events, all
+built cycles, away and pause periods) in one batch; `planFromRows` folds them and
+`learningWrites` writes the differences — preference events as a multiset difference, so an
+unchanged event keeps its row.
 
 | Inputs (kept) | Derived (rebuilt) |
 |---|---|
@@ -1310,7 +1360,9 @@ impactScore, ageHours, …line counts}`, `item_merged {itemId, intoItemId, revie
 `maintenance_run`, `settings_rejected {keys}`, `receipt_held` / `receipt_hold_released` (§4.5
 *Held receipts*; report §3), `learning_rebuilt {scope, items, itemsChanged, itemColumns,
 productsChanged, productColumns, eventItems, eventsDeleted, eventsInserted, causes}` (§4.10,
-one per `db:rebuild-learning --apply`; report §3), `merge_suggest_requested {trigger: backfill|cron,
+one per `db:rebuild-learning --apply` (`scope` all / items), per import reset (`reset`) and per
+ingest whose rebuild differs from in-place patching (`ingest`); report §3), `receipt_replaced
+{outcome, linesKept, linesNew, linesRemoved, newItems, …}` (§4.5 *Re-read orders*; report §3), `merge_suggest_requested {trigger: backfill|cron,
 jobIds, candidates, items}`, `merge_suggestions_created {jobId, items, suggestions, created,
 duplicate, low_confidence, merged, self, unknown, both_confirmed}` (accepted / dismissed / expired
 suggestions are the `review_resolved` / `review_expired` rows of kind `merge_suggestion`); source `session`: `ui_action {action, ok, latencyMs,
@@ -1714,3 +1766,5 @@ docker-compose.yml (+ docker-compose.build.yml), Makefile, CLAUDE.md, README.md,
 | 86 | Learning from receipts is derived, not accumulated: product stats, auto-promoted stances, usage rates, tracking promotion and switch thresholds are recomputed from receipts and recorded human decisions (`db:rebuild-learning`, §4.10), with the columns kept as a cache (PLAN M11: the rebuild in M11.1, ingest and reset use it from M11.2) | Receipts are applied once as in-place edits and ingest dedupes on the order id, so a misread receipt can't be corrected and one store's import can't be removed once it touched a shared item: Amazon needed a full reset (#62), and Costco's reset refuses on production because two misread receipts moved Amazon products' buy streaks and stances (2026-11-16). Every new store's parser is wrong at first on live pages, so this recurs per store. Inventory already works this way (`db:rebuild-state`); the learning functions are pure, so replaying them is mostly bookkeeping. Kept the columns (expand-only) so nothing that reads them changes |
 | 87 | Subscribe & Save items are read from the member's `/auto-deliveries` page each sweep and left out of the cart; only a list whose tiles match the page's category counts is synced, and a subscription not confirmed for 21 days stops counting (§4.9) | The household's carts filled with one-time buys of items already delivered by subscription (2026-11). Flagging S&S lines on order pages would miss subscriptions until they deliver and never notice a cancellation; a manual per-item switch would need the household to keep it in step with Amazon. The page is the source of truth and costs one read-only load per sweep. Replacing the list makes cancellations visible, so a short read would wrongly end live subscriptions: hence the count check. The stale window bounds the opposite failure (a broken sync hiding items for good) |
 | 88 | The learning rebuild folds merged items as one item, replays a human override in its recorded direction, compares an implicit swap with the cart built before the receipt was ingested, treats every receipt-created item as born `static`, and keeps `switch` events (§4.10) | Each choice reproduces what ingest did for a history that arrived in order — on the production copy (2026-11-23) 493 of 494 items rebuilt to exactly their stored values, the one difference a late receipt — while letting a late or corrected receipt take its place. A merge's stance reset was a side effect of moving products, not a preference; replaying "the item as it is now" is what a rebuild after any merge needs anyway. The override kind is the human's choice; recomputing "toward preferred" from rebuilt stances could flip its sign. No input records an item's original tracking type, and ingest only ever creates `static` items. `switch` events change no derived value and need the build's quotes to regenerate |
+| 89 | Ingest, a re-read order and the import reset rebuild the touched items' learning from their receipts instead of patching it; a digital order read again with different content replaces the stored receipt (unchanged lines and their answers kept), and `db:reset-imports` keeps shared items and rebuilds them instead of refusing | A parser fix can now correct a receipt already written and one store's import can be removed alone; a late receipt learns as if it had arrived in order. Rebuilding in the ingest transaction costs one read and one write batch whatever the receipt's size (§8) |
+| 90 | Held receipts (#83) are no longer needed and are to be retired in a later contract PR: apply a failing receipt as read and let the next read of the order replace it | They existed because an applied misread couldn't be corrected (§10 #83); since M11.2 a re-read replaces it. Holding costs a lost purchase for up to 14 days (the cart re-buys the item, no cycle closure). The agent's re-read of a failing order (held orders stay out of `done`) must move to `totals_check: fail` before the hold table goes (expand → contract: stop holding, keep reading the table, then drop it) |

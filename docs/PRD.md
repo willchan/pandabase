@@ -95,7 +95,11 @@ A Discord **thread per cycle** in `#pandabase`, acting as a running grocery list
   profile). His wife's orders aren't swept: PandaBase has no browser profile for her account.
   Delivery, pickup and phone-linked in-store purchases. An order is ingested once
   delivered/picked up (or, for an old order whose page no longer says, a week after it was
-  placed); orders returned in full are skipped. Re-ingesting is harmless. If Amazon shows a bot
+  placed); orders returned in full are skipped. Re-ingesting is harmless, and an order read
+  again with different content (a fixed reader) **replaces** what was read before: its lines,
+  stock and what PandaBase learned from it are corrected, and answers already given on unchanged
+  lines are kept. One store's whole import can also be reset and read again without touching the
+  others (items other stores bought stay, relearned without it). If Amazon shows a bot
   check, the import stops and asks in the ops channel for someone to clear it. Each sweep also
   reads the Subscribe & Save page (no clicks) to learn what Amazon already delivers on a schedule,
   and stays silent about it. It only updates the list when it read all of it; if it can't for three

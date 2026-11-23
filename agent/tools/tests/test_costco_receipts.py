@@ -548,8 +548,7 @@ def test_a_held_receipt_is_re_read_on_later_sweeps_until_it_applies(tmp_path: Pa
         for r in server.api.requests
         if r.url.path == "/api/receipts/ingest" and FIRST in r.headers["idempotency-key"]
     ]
-    assert keys[0] == f"receipt:1001:{FIRST}"
-    assert all(re.fullmatch(rf"receipt:1001:[0-9a-f]{{12}}:{FIRST}", k) for k in keys[1:])
+    assert all(re.fullmatch(rf"receipt:1001:[0-9a-f]{{12}}:{FIRST}", k) for k in keys)
     assert len(keys) == 3
 
 

@@ -11,6 +11,7 @@ import { createTestDb, type Db } from "./client";
 import {
   applyImportReset,
   formatPlan,
+  isBlocked,
   ImportResetBlocked,
   planImportReset,
   type Blocker,
@@ -348,11 +349,24 @@ describe("reset-imports", () => {
       "item_settings",
       (db) => db.update(t.item).set({ shelfLifeDays: 7 }).where(eqId(t.item, bananas)),
     ],
-    [
-      "items_predating_import", // a digital line matched an item made before the import
-      (db) => db.insert(t.receiptLine).values({ receiptId: wf, rawText: "rice", itemId: kept }),
-    ],
   ];
+
+  // PLAN M11.2: an item the import touched but didn't create no longer blocks (it used to, as
+  // `items_predating_import`): it stays, loses the import's lines and events, and is rebuilt.
+  it("keeps an item a digital line matched but didn't create, and rebuilds it", async () => {
+    await db.insert(t.receiptLine).values({ receiptId: wf, rawText: "rice", itemId: kept });
+    const plan = await planImportReset(db);
+    expect(isBlocked(plan)).toBe(false);
+    expect(plan.info.itemsKept).toBe(1);
+    const applied = await applyImportReset(db);
+    expect(applied.rebuilt).toBeDefined();
+    expect((await db.select({ id: t.item.id }).from(t.item)).map((i) => i.id)).toContain(kept);
+    const rebuilt = await db
+      .select()
+      .from(t.systemTelemetry)
+      .where(eq(t.systemTelemetry.metricType, "learning_rebuilt"));
+    expect(rebuilt.map((r) => (r.payload as { scope: string }).scope)).toEqual(["reset"]);
+  });
 
   it.each(blockerCases)("refuses on %s and deletes nothing", async (blocker, addHumanData) => {
     await addHumanData(db);
@@ -534,14 +548,24 @@ describe("reset-imports --vendor", () => {
     );
   });
 
-  it("refuses when another store's import names an item it would delete", async () => {
+  // PLAN M10.3 / M11.2: this used to refuse (`other_store_lines`), which kept production's
+  // Costco reset blocked. Another store's line keeps the item; Costco's own product and history go.
+  it("keeps an item another store's import names, drops Costco's product, rebuilds the item", async () => {
     await db.insert(t.receiptLine).values({ receiptId: wf, rawText: "towels", itemId: towels });
+    await db.update(t.product).set({ timesBought: 5 }).where(eqId(t.product, pTowels));
     const plan = await planImportReset(db, { vendor: "costco" });
-    expect(plan.blockers.other_store_lines).toBe(1);
-    await expect(applyImportReset(db, { vendor: "costco" })).rejects.toBeInstanceOf(
-      ImportResetBlocked,
-    );
-    expect(await count(db, t.receipt)).toBe(4);
+    expect(isBlocked(plan)).toBe(false);
+    expect(plan.counts).toMatchObject({ item: 0, product: 1, receipt: 1, receipt_line: 1 });
+    expect(plan.info.itemsKept).toBe(1);
+    await applyImportReset(db, { vendor: "costco" });
+    expect(await ids(t.item)).toContain(towels);
+    expect(await ids(t.product)).not.toContain(pTowels);
+    expect(await count(db, t.receipt)).toBe(3);
+    const events = await db
+      .select()
+      .from(t.inventoryEvent)
+      .where(eq(t.inventoryEvent.itemId, towels));
+    expect(events).toEqual([]);
   });
 
   it("finds nothing for a store with no import", async () => {

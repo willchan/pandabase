@@ -1,7 +1,9 @@
 // Cart pauses (PRD §4.1 paused weeks, DESIGN §4.1/§4.7): the build is skipped, the agent sees the
 // pause on cycle/current, purchases still count but don't teach the EMA, and "resume" ends it.
+import { planLearningRebuild } from "@pandabase/db/rebuild-learning";
 import { item, pausePeriod, systemTelemetry } from "@pandabase/db";
 import { eq } from "drizzle-orm";
+import { DEFAULT_CONFIG } from "@/lib/config";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { CycleT } from "@/lib/contracts";
 import { ALEX, setup, type Harness } from "@/test/harness";
@@ -81,6 +83,10 @@ describe("cart pauses", () => {
     const ridgeline = await h.productId("Ridgeline Roasters House Blend 12oz");
     const [before] = await h.db.select().from(item).where(eq(item.id, coffee));
     await pause("2026-10-01", "2027-03-01");
+    // The seed's EMA is synthetic; ingest rebuilds the item from its acquisitions (§4.10), so the
+    // value to keep is what its history up to now folds to (the pause included).
+    const rebuilt = (await planLearningRebuild(h.db, { items: [coffee], config: DEFAULT_CONFIG }))
+      .changes[0]?.item?.currentEmaDays;
     h.advance(3 * 86_400_000); // the seed already bought coffee today
     const res = await h.call(HANDLERS.receiptsIngest.POST, "/api/receipts/ingest", {
       body: {
@@ -97,7 +103,7 @@ describe("cart pauses", () => {
     expect(res.status).toBe(200);
     const [after] = await h.db.select().from(item).where(eq(item.id, coffee));
     expect(before!.currentEmaDays).toBe(0.91);
-    expect(after!.currentEmaDays).toBe(before!.currentEmaDays);
+    expect(after!.currentEmaDays).toBeCloseTo(rebuilt ?? before!.currentEmaDays!, 9);
     const tel = await h.db
       .select()
       .from(systemTelemetry)
