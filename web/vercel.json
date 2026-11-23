@@ -1,11 +1,12 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "crons": [
-    {
+  "schedules": {
+    "maintenance": {
+      "schedule": "17 11 * * *",
       "path": "/api/cron/maintenance",
-      "schedule": "17 11 * * *"
+      "requestMethod": "GET"
     }
-  ],
+  },
   "git": {
     "deploymentEnabled": {
       "main": false

@@ -122,7 +122,7 @@ it on a laptop, copy both files to the Mac Mini's checkout over a secure channel
 `scp`) — the tokens must match on both sides. Then edit `.env`: set `PANDABASE_API_URL` to
 your production URL (step 6).
 
-### 6. Vercel (web app, API, cron)
+### 6. Vercel (web app, API, daily schedule)
 
 *Phase 1 done? Skip, except item 4 (the URL in `agent/pandabase.config.json` comes with step 9).*
 
@@ -138,7 +138,7 @@ your production URL (step 6).
    | `AUTH_GOOGLE_ID`, `AUTH_GOOGLE_SECRET` | step 4 |
    | `ALLOWED_EMAILS` | both members' Google emails, comma-separated |
    | `AGENT_API_TOKEN`, `WORKER_API_TOKEN` | from `.env` (same values as the Mac Mini) |
-   | `CRON_SECRET` | from `.env.vercel` (Vercel Cron sends it as the bearer token) |
+   | `CRON_SECRET` | from `.env.vercel` (the `maintenance` schedule sends it as the bearer token) |
    | `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET` | step 3 |
    | `HOUSEHOLD_TZ` | `America/Los_Angeles` |
 
@@ -155,7 +155,9 @@ your production URL (step 6).
    vercel link)`, then `make vercel-env`. It skips variables that already exist and prints names
    only. It refuses `preview`: the Mac's values are production's.
 3. Deploy once by hand (*Deployments → Redeploy*, or `vercel deploy --prod` from the repo root).
-   The daily maintenance cron (`web/vercel.json`, 11:17 UTC) registers itself. After that,
+   The daily maintenance schedule (`web/vercel.json` `schedules.maintenance`, 11:17 UTC) registers
+   itself and shows under the project's **Schedules** (DESIGN §8 *Daily maintenance*). To run it
+   now: Actions → **Run maintenance**, or *Run Schedule* in the dashboard. After that,
    production deploys come only from GitHub Actions (step 15): `web/vercel.json` sets
    `git.deploymentEnabled.main: false`, so a push to `main` no longer deploys on its own (it would
    ship code before its migration). PR previews still build through Vercel's Git integration.
@@ -603,7 +605,7 @@ Mini's worker rolls back on its own (step 15).
 | `AGENT_API_TOKEN` | `make secrets` | `.env`, Vercel Production; `~/.config/pandabase/agent.env` as `PANDABASE_AGENT_API_TOKEN` | agent tools → API (scope `agent`) |
 | `WORKER_API_TOKEN` | `make secrets` | `.env`, Vercel Production | worker → API (scope `worker`) |
 | `AUTH_SECRET` | `make secrets` | `.env.vercel`, Vercel Production | Auth.js session JWTs |
-| `CRON_SECRET` | `make secrets` | `.env.vercel`, Vercel Production | Vercel Cron → `/api/cron/maintenance` |
+| `CRON_SECRET` | `make secrets` | `.env.vercel`, Vercel Production | the Vercel Schedule `maintenance` → `/api/cron/maintenance` (redeploy after changing it: a schedule sends the value its production deployment saw) |
 | preview `AGENT_API_TOKEN`, `WORKER_API_TOKEN`, `AUTH_SECRET`, `CRON_SECRET` | password manager (never `make secrets`) | Vercel Preview, GitHub environment `preview` | preview deployments and their end-to-end tests; useless on production |
 | `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN` | `turso` (step 2) | Vercel, one per environment (+ your shell for migrations) | web app only |
 | `AUTH_GOOGLE_ID`, `AUTH_GOOGLE_SECRET` | Google console (step 4) | Vercel (shared by Production and Preview) | sign-in |
