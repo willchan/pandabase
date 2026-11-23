@@ -545,12 +545,12 @@ store's import (§10 #83). The response is `status: "held"`, `totals_check: "fai
   answered with the held reply stored for the idempotency window (24 h). Entries older than 60
   days are forgotten (long since applied as read).
 - Paper receipts keep their own review flow, and manual (typed) receipts apply as before.
-- *Only exact stores:* Whole Foods charges weighed produce by the weight packed, so its lines
-  rarely add up to the subtotal (prod copy, 2026-11-17: 33 of 35 checked orders failed, by ~6% on
-  average, either way; Amazon 11 of 163). Holding them would hold nearly every Whole Foods order,
-  the weekly cart's included (no cycle closure for two weeks), so Amazon and Whole Foods orders
-  apply at once as before. A store joins `holdVendors` once its totals check is exact when read
-  right.
+- *Only `holdVendors` stores (`costco`):* on the prod copy (2026-11-17) 33 of 35 checked Whole
+  Foods orders and 11 of 163 Amazon ones failed the check. The cause was the parser, not the
+  store — it read a weighed item's per-lb price, a bare quantity "2" as 1, and out-of-stock and
+  refunded units as bought (§6 *Whole Foods item grid*, fixed since) — but holding every one of
+  them would have held the weekly cart's order too (no cycle closure for two weeks). A store joins
+  `holdVendors` once its parser's totals check passes on real orders.
 - *Telemetry:* `receipt_held {holdId, vendor, fulfillment, attempt, lines, replaced, heldUntil}`
   and `receipt_hold_released {holdId, receiptId, vendor, outcome: totals_pass|unchecked|expired,
   attempts, heldDays}` → weekly report §3 (held at the end of the week, newly held, applied after a
@@ -1098,6 +1098,20 @@ JSON on stdout; exit 0 ok, 1 error, 2 usage, 3 profile locked, 4 refused URL):
   cancellation), and so are orders refunded in full ("Refund Total" ≥ the grand total; reason
   `returned`). Zero ASINs on a final order → `needs_agent_extraction` with page text, and
   `selector_error`; the skill ingests its own extraction with `receipts ingest`.
+  **Whole Foods item grid** (live pages, 2026-11; `extract_grid_lines`): one `{ASIN}-item-grid-row`
+  per item with Quantity | Weight | Total cells. Read by those ids and the gridcell order (not
+  class names): the line total is `{ASIN}-item-total-price` (what was charged: a weighed item's
+  total, not its per-lb price); the quantity is the cell before the one holding
+  `{ASIN}-item-priced-by-quantity` — a count, or the weight in lb when the item was ordered by
+  weight (an estimated 1.00 lb counted as 1 before, so the scale holds); the unit price is total ÷
+  quantity. A status box "Out of stock (n) -$x" takes n units and $x off the line (the subtotal
+  leaves them out; a line with nothing left is dropped). "Refunded (n) -$x" does the same — those
+  units count as not received — and, since "Item(s) Subtotal" still includes them, $x comes off
+  the subtotal sent too. Checked on two saved live orders (one weighed by count, one by weight,
+  a refund, an out-of-stock item): the lines add up to the subtotal to the cent. The older
+  first-`$`-price × `Qty` rule stays for pages without the grid: it read a weighed item's per-lb
+  price as its price, a bare quantity "2" as 1, and unsupplied units as bought, which is why 33
+  of 35 checked Whole Foods orders failed the totals check (prod copy, 2026-11-17).
 - `costco_receipts.py` (`receipts sweep --vendor costco [--backfill | --due] [--reply]`, M10.3) —
   Costco's Orders & Purchases on the cart member's (`pandabase`) profile: Online tab cards (read
   once a card has rendered, or after a bounded wait: the SPA draws each tab's frame first), then a
@@ -1588,7 +1602,7 @@ docker-compose.yml (+ docker-compose.build.yml), Makefile, CLAUDE.md, README.md,
 | 80 | The Costco sweep never reads `data-private` content except receipt rows, and an unreadable receipt line is reported (sweep reply, telemetry, failed totals check), never mapped to an item | Member and card numbers, address and contact details are on the same pages; the State Engine needs none of them. No discount line has been seen yet: guessing its format could subtract a saving from the wrong item or drop a purchase silently |
 | 81 | PandaBase's Chrome runs headless (`--headless`, headed Chrome's user agent for the installed major version, a 1920×1080 screen); `HEADED=1 make install-chromium` gives a window for signing in by hand | A headed window in the agent account's background login session stops painting once the display sleeps, so Playwright clicks wait forever for a "stable" element (first Costco sweep, 2026-11-16); pandaden's OpenClaw profile hit the same thing. Chrome 157 headless still says `HeadlessChrome` in its user agent and reports an 800×600 screen, both easy bot-check tells, while its client hints are the normal brands; the launcher reads the version at each start so the user agent keeps matching them after Chrome updates. Anti-backgrounding flags alone were the alternative, but a sleeping display stops frames regardless |
 | 82 | A Costco instant saving comes off the line of the item it names (line total and unit price); an online item's fee is added to its item's line total; an online "Discount on Order" isn't spread over the lines | The coupon row names its item number, so the paid price is known exactly: store choice then compares what the household paid, and the lines add up to SUBTOTAL. A receipt-level `discount_cents` (Amazon's way) would leave every Costco price high. A fee belongs to buying that item, but isn't its price per unit. An order discount names no item; with several items any split would be a guess, so it only switches off the subtotal + tax = total check |
-| 83 | A Costco (`receipts.holdVendors`) digital receipt whose totals check fails is held — stored, not applied — until a re-read of the order adds up, or for 14 days, then applied as read (§4.5 *Held receipts*) | In the first Costco sweep (2026-11-16) the two receipts with wrong lines were exactly the two whose totals failed, and applying them changed shared items (buy streaks, stances, usage rates) that an order-id-deduped re-ingest can't correct; `db:reset-imports --vendor` then refused because those items were shared with Amazon's import. Holding costs nothing when the parser is fixed in time. Never applying would lose the purchase for good (the item looks unbought and is ordered again), and both live failures had their items right, so the default after two weeks is to apply as read. Costco only: Whole Foods' weighed lines fail the check on nearly every correct order (33 of 35 on the prod copy). A separate `receipt_hold` table, not a `held` receipt status: widening `receipt.status`'s CHECK would rebuild `receipt` |
+| 83 | A Costco (`receipts.holdVendors`) digital receipt whose totals check fails is held — stored, not applied — until a re-read of the order adds up, or for 14 days, then applied as read (§4.5 *Held receipts*) | In the first Costco sweep (2026-11-16) the two receipts with wrong lines were exactly the two whose totals failed, and applying them changed shared items (buy streaks, stances, usage rates) that an order-id-deduped re-ingest can't correct; `db:reset-imports --vendor` then refused because those items were shared with Amazon's import. Holding costs nothing when the parser is fixed in time. Never applying would lose the purchase for good (the item looks unbought and is ordered again), and both live failures had their items right, so the default after two weeks is to apply as read. Costco only for now: 33 of 35 checked Whole Foods orders failed the check because the parser misread the item grid (§6), so holding them would have held nearly every order, the weekly cart's included. A separate `receipt_hold` table, not a `held` receipt status: widening `receipt.status`'s CHECK would rebuild `receipt` |
 | 84 | Server functions leave out sharp (§8 *Function size*) | Function Storage on the free Vercel team (shared with Bamboo) reached 75% of 10 GB in 2026-11; every kept deployment holds its functions, and sharp was over half of each one while nothing here uses it. Previews stay on (tier A′ needs them); the team's retention policy deletes old deployments |
 | 85 | A cart pause is its own period, not an away period: no cart, no Friday check-in, no EMA learning across it, days still count as eating | Parental leave (2026-11): home all day and shopping at 99 Ranch without receipts. An away period would subtract those days and make rates look faster afterwards; letting the EMA run would accept three "slow" gaps in a row as a habit change. Freezing keeps the pre-leave rates, which are the best guess for when life is back to normal |
 | 86 | Learning from receipts is derived, not accumulated: product stats, auto-promoted stances, usage rates, tracking promotion and switch thresholds are recomputed from receipts and recorded human decisions (`db:rebuild-learning`), with the columns kept as a cache (PLAN M11, planned) | Receipts are applied once as in-place edits and ingest dedupes on the order id, so a misread receipt can't be corrected and one store's import can't be removed once it touched a shared item: Amazon needed a full reset (#62), and Costco's reset refuses on production because two misread receipts moved Amazon products' buy streaks and stances (2026-11-16). Every new store's parser is wrong at first on live pages, so this recurs per store. Inventory already works this way (`db:rebuild-state`); the learning functions are pure, so replaying them is mostly bookkeeping. Kept the columns (expand-only) so nothing that reads them changes |

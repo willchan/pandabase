@@ -18,6 +18,7 @@ cursor on purpose; the state file's `done` set just avoids reopening pages.
 from __future__ import annotations
 
 import hashlib
+import itertools
 import json
 import re
 import time
@@ -243,6 +244,81 @@ def _in_recommendations(node: dom.Node) -> bool:
     return False
 
 
+# The live Whole Foods item grid (2026-11): one `{ASIN}-item-grid-row` per item with Quantity |
+# Weight | Total cells, the charged total in `{ASIN}-item-total-price`, and a status box
+# ("Weight adjusted from est. 1.00 lb", "Out of stock (1) -$5.99", "Refunded (1) -$8.49").
+GRID_QTY = re.compile(r"^\s*(\d+(?:\.\d+)?)\s*(lb|lbs|oz)?\s*$", re.I)
+GRID_UNSUPPLIED = re.compile(
+    r"\b(out of stock|refunded)\s*\((\d+)\)\s*-\s*\$\s?([\d,]+)\.(\d{2})", re.I
+)
+
+
+@dataclass
+class GridLines:
+    lines: list[c.ReceiptLineIn]
+    refunded_cents: int  # in the page's Item(s) Subtotal, but not received
+
+
+def _by_id(root: dom.Node, node_id: str) -> dom.Node | None:
+    return next((n for n in root.iter() if n.attrs.get("id") == node_id), None)
+
+
+def _grid_qty(row: dom.Node, weight_cell: dom.Node) -> float | None:
+    """The Quantity cell: the gridcell just before the one holding the weight."""
+    cells = [n for n in row.iter() if n.attrs.get("role") == "gridcell"]
+    for prev, cell in itertools.pairwise(cells):
+        if cell is weight_cell or weight_cell in cell.iter():
+            m = GRID_QTY.match(prev.text())
+            return float(m.group(1)) if m else None
+    return None
+
+
+def extract_grid_lines(scope: dom.Node) -> GridLines | None:
+    """Lines from the item grid, or None when the page has none (older layouts). Each line is
+    what was charged: a weighed item's total (not its per-lb price), a quantity that is the weight
+    when the item was ordered by weight, out-of-stock units left out (the subtotal leaves them
+    out too) and refunded units left out (the subtotal counts them: `refunded_cents`)."""
+    rows = [n for n in scope.iter() if n.attrs.get("id", "").endswith("-item-grid-row")]
+    out: list[c.ReceiptLineIn] = []
+    refunded = 0
+    found = False
+    for row in rows:
+        asin = row.attrs["id"].removesuffix("-item-grid-row")
+        total_el = _by_id(row, f"{asin}-item-total-price")
+        weight_el = _by_id(row, f"{asin}-item-priced-by-quantity")
+        if total_el is None or weight_el is None:
+            continue
+        found = True
+        weight_cell = next(
+            (a for a in weight_el.ancestors() if a.attrs.get("role") == "gridcell"), weight_el
+        )
+        qty = _grid_qty(row, weight_cell)
+        total = _cents(PRICE.search(total_el.text()))
+        titles = [t for x, a in dom.asin_links(row) if x == asin and (t := a.text().strip())]
+        if qty is None or total is None or not titles:
+            continue
+        title = max(titles, key=len)
+        for m in GRID_UNSUPPLIED.finditer(row.text()):
+            units = float(m.group(2))
+            amount = int(m.group(3).replace(",", "")) * 100 + int(m.group(4))
+            if m.group(1).lower() == "refunded":
+                refunded += min(amount, total)
+            qty, total = qty - units, max(0, total - amount)
+        if qty <= 0 or total <= 0:
+            continue
+        out.append(
+            c.ReceiptLineIn(
+                asin=asin,
+                raw_text=title[:300],
+                title=title[:300],
+                qty=qty,
+                unit_price_cents=round(total / qty),
+                line_total_cents=total,
+            )
+        )
+    return GridLines(out, refunded) if found else None
+
+
 def extract_lines(root: dom.Node) -> list[c.ReceiptLineIn]:
     scope = _item_scope(root)
     seen: dict[str, c.ReceiptLineIn] = {}
@@ -284,6 +360,10 @@ def parse_order_details(
         acquired = acquired.replace(year=acquired.year + 1)
     total = _cents(GRAND_TOTAL.search(text))
     refund = _cents(REFUND_TOTAL.search(text))
+    grid = extract_grid_lines(_item_scope(root))
+    subtotal = _cents(SUBTOTAL.search(text))
+    if grid is not None and subtotal is not None:
+        subtotal -= grid.refunded_cents
     status = order_status(text)
     if status != "cancelled" and refund is not None and total and refund >= total:
         status = "returned"  # refunded in full: nothing to stock
@@ -310,8 +390,8 @@ def parse_order_details(
         vendor="wholefoods" if re.search(r"whole\s*foods", text, re.I) else "amazon",
         ordered_on=ordered,
         acquired_on=acquired or (ordered if IN_STORE.search(text) else None),
-        lines=extract_lines(root),
-        subtotal_cents=_cents(SUBTOTAL.search(text)),
+        lines=grid.lines if grid is not None else extract_lines(root),
+        subtotal_cents=subtotal,
         total_cents=total,
         text=text,
     )
