@@ -189,7 +189,7 @@ migrations-check:
 	scripts/deploy/check-migrations.sh --base $(MIGRATIONS_BASE)
 
 # Ops scripts lint clean, compose files and plists valid, workflows lint clean, deploy tests pass,
-# smoke helpers pass the projects' ruff/mypy (CI: ops).
+# smoke helpers pass the projects' ruff/mypy, finished milestones have left docs/PLAN.md (CI: ops).
 ops-check: deploy-test migrations-check
 	shellcheck -x scripts/ops/*.sh scripts/smoke/*.sh scripts/deploy/*.sh
 	actionlint .github/workflows/*.yml
@@ -208,3 +208,8 @@ ops-check: deploy-test migrations-check
 	  uv run ruff format --check --config pyproject.toml ../scripts/deploy && \
 	  uv run mypy ../scripts/deploy/web_smoke.py ../scripts/deploy/tests/test_web_smoke.py && \
 	  uv run pytest -q -p no:cacheprovider ../scripts/deploy/tests/test_web_smoke.py
+	cd worker && uv run ruff check --config pyproject.toml ../scripts/docs && \
+	  uv run ruff format --check --config pyproject.toml ../scripts/docs && \
+	  uv run mypy ../scripts/docs/check_plan_done.py ../scripts/docs/tests/test_check_plan_done.py && \
+	  uv run pytest -q -p no:cacheprovider ../scripts/docs/tests
+	python3 scripts/docs/check_plan_done.py

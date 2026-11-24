@@ -18,6 +18,10 @@
    call it out in the PR.
 7. Drive the PR to green **and mergeable** following `.claude/skills/steward/SKILL.md`: check
    mergeability before CI on every wake and after each push; a conflicted PR gets no CI.
+8. The PR that finishes a milestone also marks its status row `done` and moves the milestone's
+   whole section, **Notes** included, from this file to the end of [PLAN-done.md](PLAN-done.md).
+   For a milestone split into parts (M10.1–M10.4), the PR that lands the last part does the move.
+   `make ops-check` (CI `ops`) fails while a `done`/`merged` milestone still has a section here.
 
 ## Dependency graph
 
@@ -49,7 +53,7 @@ contracts.
 Finished milestones (M1–M9, *After M9*, M11) and their **Notes** are in
 [PLAN-done.md](PLAN-done.md); a code comment's "PLAN M<N>" points there when M<N> is finished.
 Read one there only when your task depends on it; never read that file in full. Milestones move
-there once done.
+there once done (*Session protocol* step 8).
 
 ---
 
