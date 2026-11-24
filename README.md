@@ -6,7 +6,7 @@ predict what we need, and fill the weekly Whole Foods/Amazon cart (cart only, ne
 
 - [Product requirements](docs/PRD.md): what it does and why
 - [Design](docs/DESIGN.md): architecture, schema, API, algorithms, agent
-- [Build plan](docs/PLAN.md) · [Roadmap](docs/ROADMAP.md) · [CLAUDE.md](CLAUDE.md) (dev commands)
+- [Build plan](docs/PLAN.md) · [Roadmap](docs/ROADMAP.md) · [CLAUDE.md](CLAUDE.md) · [Commands](docs/COMMANDS.md)
 
 ```
  phones ──Google──▶ Vercel: web UI + API + daily cron ──▶ Turso (libSQL)
@@ -647,13 +647,13 @@ Mini's worker rolls back on its own (step 15).
 - **Re-check everything:** `make smoke`.
 - **Diagnostics:** every Sunday the agent writes `diagnostics/YYYY-Www.md` plus JSONL extracts
   (gitignored) and posts a 3-line summary. To review them with Claude Code on the Mac Mini, ask it
-  to "review diagnostics" (playbook in [CLAUDE.md](CLAUDE.md); report sections in
+  to "review diagnostics" (playbook in [.claude/skills/review-diagnostics](.claude/skills/review-diagnostics/SKILL.md); report sections in
   [DESIGN §7](docs/DESIGN.md#7-diagnostics)). Insights in the web UI shows the same report.
 - **Pause a member's sweeps:** set `receipt_sweep: "off"` in the config and run
   `make install-agent-cron` (it tells you which automation to remove).
 
 ## Development
 
-See [CLAUDE.md](CLAUDE.md) for every command. Quick start: `pnpm install`,
+See [docs/COMMANDS.md](docs/COMMANDS.md) for every command. Quick start: `pnpm install`,
 `pnpm db:reset && pnpm db:seed`, `pnpm dev` (local DB, `DEV_AUTH_BYPASS=1` in `web/.env.local`),
 `make check` before pushing. Test tiers (system test, agent eval, live): [docs/TESTING.md](docs/TESTING.md).

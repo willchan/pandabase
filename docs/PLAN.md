@@ -23,6 +23,35 @@
    For a milestone split into parts (M10.1–M10.4), the PR that lands the last part does the move.
    `make ops-check` (CI `ops`) fails while a `done`/`merged` milestone still has a section here.
 
+## Orchestrator protocol
+
+Work split across several milestones or PRs (for example M10.1–M10.4, M11.1–M11.3) runs through a
+short-lived **orchestrator** session that dispatches a fresh **milestone session** per PR. The
+orchestrator never implements a milestone itself and never keeps one long chat going: in Nov 2026
+an 8-day parent session reached ~700k tokens, and each short question there cost as much as a
+whole small session.
+
+1. **Plan the next step.** Read `CLAUDE.md` and this file (status table and the ready milestone's
+   section; open [PLAN-done.md](PLAN-done.md) only for a dependency's Notes). Tell Will what you
+   intend to dispatch and why, and collect any inputs the milestone needs first: milestone
+   sessions can't ask him.
+2. **Dispatch** with `create_session` (cloud) or a subagent in its own worktree (Mac), passing
+   **`model: "sonnet"`** and **`effort: "medium"`** (this is the standing instruction those
+   parameters require). Use `model: "opus"` instead, still at medium effort, only for a milestone
+   whose core is new design: a schema or API contract, a matching/learning algorithm, or a
+   migration plan with production data at stake. Say which you chose and why. The prompt:
+   *"You are the milestone session for M<N> of PandaBase. Follow docs/PLAN.md › Session protocol
+   for M<N> exactly. Inputs from Will: <…>. When done, report: the PR URL, the acceptance results,
+   the deviations you recorded in Notes, and every manual step Will must take."*
+3. **Review** the result: the PR diff and Notes against the milestone's acceptance and CLAUDE.md
+   rules. Send fixes back to the milestone session rather than making them yourself.
+4. **Hand over to Will** anything outside the repo or touching production (M11.3-style runs).
+   Merging follows CLAUDE.md › *Merge when green*.
+5. **Restart after each merge.** Once a milestone's PR merges, end with a one-paragraph status and
+   the exact prompt to start the next orchestrator: everything it needs is in this file and the
+   PRs. Don't answer follow-up questions in an orchestrator that has grown past ~200k tokens;
+   start a fresh one.
+
 ## Dependency graph
 
 ```

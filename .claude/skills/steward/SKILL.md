@@ -25,6 +25,22 @@ commit), but those runs don't tell you whether the PR merges cleanly. Only check
 3. **Green → merge.** Mergeable, all required checks passed on the head commit, no unresolved
    review threads: squash-merge it yourself without asking (CLAUDE.md *Merge when green*).
 
+## Merging without extra wakes
+
+Each wake resends the session's whole context, so a wake that only reports your own steps is
+pure cost. When the PR is green and mergeable, in the same turn:
+
+1. Cancel any backup check-in you scheduled for this PR (`delete_trigger`), and unsubscribe from
+   its activity (`unsubscribe_pr_activity`). Do both **before** marking it ready or merging, so
+   the "ready for review" and "merged" events don't wake you.
+2. Mark it ready if it's a draft, squash-merge it, then check `main`'s CI on the merge commit in
+   this same turn and report. If it's still running, schedule one check-in for it (it isn't a PR
+   event, so nothing else wakes you), and end that check-in with the final report.
+
+While Auto-fix and the PR subscription are on, don't also schedule backup check-ins: CI and
+review events already wake you. Schedule one only if a subscription was refused or isn't
+delivering.
+
 ## Resolving conflicts
 
 - `git fetch origin main && git merge origin/main` into your branch. **No rebase, no force-push.**
@@ -38,7 +54,7 @@ commit), but those runs don't tell you whether the PR merges cleanly. Only check
     to change.
   - `docs/DESIGN.md` §10 *Key decisions*: `main`'s numbers win; renumber yours after them and fix any
     references (`§10 #N`) in your own text.
-  - `CLAUDE.md` Commands: keep both sides' lines.
+  - `docs/COMMANDS.md` and `CLAUDE.md` Commands: keep both sides' lines.
 - Validate before pushing: `make check` (or at least everything your change touches), then push.
 - If both sides changed the same *logic* and either choice loses behavior, stop and ask.
 
