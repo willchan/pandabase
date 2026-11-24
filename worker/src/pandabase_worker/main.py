@@ -61,17 +61,19 @@ class Worker:
         self._clock = clock
         self._last_heartbeat: float | None = None
         self._ollama_checked = False
+        self._idle_wait = settings.poll_interval_seconds
 
     # -- loop ---------------------------------------------------------------------------------
 
     def run(self) -> None:
         log.info(
-            "worker %s (%s): vlm=%s text=%s poll=%ss",
+            "worker %s (%s): vlm=%s text=%s poll=%ss (idle backoff to %ss)",
             __version__,
             self.settings.build_sha or "local build",
             self.settings.vlm_model,
             self.settings.text_model,
             self.settings.poll_interval_seconds,
+            self.settings.poll_max_interval_seconds,
         )
         while not self.stop.is_set():
             try:
@@ -80,9 +82,22 @@ class Worker:
             except Exception:
                 log.exception("poll failed")
                 worked = False
-            if not worked:
-                self.stop.wait(self.settings.poll_interval_seconds)
+            wait = self.next_wait(worked)
+            if wait:
+                self.stop.wait(wait)
         log.info("worker stopped")
+
+    def next_wait(self, worked: bool) -> float:
+        """Seconds to sleep after a poll. A job (or startup) resets to the base interval and
+        sleeps none; each empty poll, Ollama outage or API error doubles it up to
+        `poll_max_interval_seconds`, so an idle worker costs the State Engine few calls."""
+        base = self.settings.poll_interval_seconds
+        if worked:
+            self._idle_wait = base
+            return 0.0
+        wait = max(self._idle_wait, base)
+        self._idle_wait = min(wait * 2, max(self.settings.poll_max_interval_seconds, base))
+        return wait
 
     def heartbeat(self) -> None:
         """`worker_heartbeat` at startup and every `HEARTBEAT_SECONDS` (liveness for deploys)."""

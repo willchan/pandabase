@@ -45,6 +45,9 @@ class Settings:
     vlm_model: str = DEFAULT_VLM_MODEL
     text_model: str = DEFAULT_TEXT_MODEL
     poll_interval_seconds: float = 10.0
+    # Idle backoff ceiling: after each empty poll the wait doubles from `poll_interval_seconds`
+    # up to this, and resets on a job (DESIGN §5, §10 #93: Vercel free-tier CPU).
+    poll_max_interval_seconds: float = 120.0
     household_tz: str = "America/Los_Angeles"
     prompts_dir: Path = PROMPTS_DIR
     # Git sha the image was built from (Dockerfile `GIT_SHA`); the deploy health check matches it.
@@ -63,6 +66,7 @@ class Settings:
             vlm_model=e.get("OLLAMA_VLM_MODEL") or DEFAULT_VLM_MODEL,
             text_model=e.get("OLLAMA_TEXT_MODEL") or DEFAULT_TEXT_MODEL,
             poll_interval_seconds=float(e.get("POLL_INTERVAL_SECONDS") or 10),
+            poll_max_interval_seconds=float(e.get("POLL_MAX_INTERVAL_SECONDS") or 120),
             household_tz=e.get("HOUSEHOLD_TZ") or cls.household_tz,
             prompts_dir=Path(e["PROMPTS_DIR"]) if e.get("PROMPTS_DIR") else PROMPTS_DIR,
             build_sha=e.get("PANDABASE_BUILD_SHA") or None,

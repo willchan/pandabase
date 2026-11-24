@@ -1,7 +1,7 @@
 // Media jobs (DESIGN §5): create, lease (claim), complete/fail with retries, apply results,
 // Discord notifications.
 import { auditJob, inventoryEvent, receipt, reviewItem, type Db } from "@pandabase/db";
-import { and, asc, eq, inArray, isNotNull, isNull, lte } from "drizzle-orm";
+import { and, asc, eq, inArray, isNotNull, isNull, lte, ne, or, sql } from "drizzle-orm";
 import type { z } from "zod";
 import {
   MergeSuggestInput,
@@ -180,13 +180,45 @@ export async function releaseExpiredLeases(
   return { released, failed };
 }
 
-/** Lease the oldest queued job (5 min, `attempts += 1`) with presigned URLs; null if none. */
+/**
+ * Is there anything for a claim to do: a queued job of a requested type, or a lease to release?
+ * One indexed read (`audit_job_status_idx`, `LIMIT 1`) so an idle poll opens no transaction.
+ * Expired leases count: they must be swept (and re-queued) even when nothing is `queued`.
+ */
+async function claimWorkExists(
+  db: Db,
+  jobTypes: readonly string[] | undefined,
+  now: string,
+): Promise<boolean> {
+  const queued = and(
+    eq(auditJob.status, "queued"),
+    ne(auditJob.jobType, "storage_audit"),
+    // `inArray` with no values is invalid SQL; an empty list matches no type.
+    jobTypes && jobTypes.length === 0 ? sql`0` : undefined,
+    jobTypes && jobTypes.length > 0
+      ? inArray(auditJob.jobType, jobTypes as (typeof auditJob.jobType.enumValues)[number][])
+      : undefined,
+  );
+  const expired = and(eq(auditJob.status, "claimed"), lte(auditJob.leaseExpiresAt, now));
+  const [row] = await db
+    .select({ id: auditJob.id })
+    .from(auditJob)
+    .where(or(queued, expired))
+    .limit(1);
+  return row !== undefined;
+}
+
+/**
+ * Lease the oldest queued job (5 min, `attempts += 1`) with presigned URLs; null if none.
+ * Idle polls (the worker polls 24/7) stop at `claimWorkExists`: no transaction, no writes.
+ */
 export async function claimJob(
   db: Db,
   r2: Presigner,
   jobTypes: readonly string[] | undefined,
   ctx: Pick<ServiceCtx, "now" | "config">,
 ): Promise<z.input<typeof ClaimedJob> | null> {
+  if (!(await claimWorkExists(db, jobTypes, ctx.now))) return null;
   const claimed = await db.transaction(async (tx) => {
     await releaseExpiredLeases(tx, ctx);
     const queued = await tx

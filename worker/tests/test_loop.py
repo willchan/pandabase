@@ -331,3 +331,37 @@ def test_heartbeat_reports_the_image_build_sha() -> None:
     env = {"PANDABASE_API_URL": API, "WORKER_API_TOKEN": TOKEN, "PANDABASE_BUILD_SHA": "abc123"}
     assert Settings.from_env(env).build_sha == "abc123"
     assert Settings.from_env({**env, "PANDABASE_BUILD_SHA": ""}).build_sha is None
+
+
+def test_idle_polls_back_off_and_reset_on_a_job(rig: Rig) -> None:
+    """Regression: the worker polled `/api/jobs/claim` every 10 s forever (~8.6k empty calls a
+    day, burning Vercel free-tier CPU). Empty polls now double the wait up to the cap."""
+    rig.worker.settings = replace(
+        rig.settings, poll_interval_seconds=10, poll_max_interval_seconds=60
+    )
+    rig.worker._idle_wait = 10
+    waits = [rig.worker.next_wait(False) for _ in range(5)]
+    assert waits == [10, 20, 40, 60, 60]
+    assert rig.worker.next_wait(True) == 0  # a job: no wait, and the next idle poll starts over
+    assert [rig.worker.next_wait(False) for _ in range(2)] == [10, 20]
+
+
+def test_run_loop_backs_off_while_ollama_is_down(rig: Rig) -> None:
+    """A down Ollama returns early (no claim); that path backs off too, not a 10 s hot loop."""
+    rig.worker.settings = replace(
+        rig.settings, poll_interval_seconds=1, poll_max_interval_seconds=4
+    )
+    rig.worker._idle_wait = 1
+    rig.ollama.tags = None
+    waits: list[float] = []
+
+    def fake_wait(seconds: float | None = None) -> bool:
+        waits.append(seconds or 0)
+        if len(waits) == 5:
+            rig.worker.stop.set()
+        return rig.worker.stop.is_set()
+
+    rig.worker.stop.wait = fake_wait  # type: ignore[assignment]
+    rig.worker.run()
+    assert waits == [1, 2, 4, 4, 4]
+    assert rig.engine.calls == []
