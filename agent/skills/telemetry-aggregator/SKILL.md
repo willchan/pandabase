@@ -35,4 +35,4 @@ If the post fails, say so when you end the turn; don't report it as posted.
 
 With an empty `summary`: "📊 Diagnostics 2026-W42 written — nothing notable." On an error
 exit: "⚠️ Couldn't write diagnostics for <week>: <error>." Don't interpret or act on the
-findings — the review happens with Claude using the CLAUDE.md "review diagnostics" playbook.
+findings — the review happens with Claude using the "review diagnostics" playbook (`.claude/skills/review-diagnostics/SKILL.md`).

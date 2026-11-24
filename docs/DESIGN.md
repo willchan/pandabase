@@ -1446,7 +1446,7 @@ Nobody reads the report by default, so `pandabase-tools diagnostics check` (comm
 `pandabase-data-check`, Monday 08:20, no model turn) reads that week's `data_quality` extract and
 posts one ⚠️ message to the ops channel only when a check is flagged (`NO_REPLY` otherwise).
 
-`/diagnostics` is gitignored. The Claude review playbook lives in [CLAUDE.md](../CLAUDE.md).
+`/diagnostics` is gitignored. The Claude review playbook is the `review-diagnostics` skill ([.claude/skills/review-diagnostics/SKILL.md](../.claude/skills/review-diagnostics/SKILL.md)).
 
 ## 8. Environments & operations
 
