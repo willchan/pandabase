@@ -334,7 +334,9 @@ then sign in to Amazon **by hand** in that window: use *Screen Sharing* into the
 sit at the Mac), tick *Keep me signed in*, and visit Whole Foods on Amazon once to set the store.
 Optionally name the Chrome profile "PandaBase" (profile menu → *Customize profile*). Then go back
 to headless with `make install-chromium` (the session stays: it's the same profile). The tools
-never sign in.
+never sign in. To confirm the sign-in took — in *this* profile, not another browser — without
+loading a page: `scripts/ops/agent-run.sh cdp signin` (`signed_out` lists the stores still signed
+out). The hourly `pandabase-signin-check` posts the same to the ops channel.
 
 ### Costco (receipts only)
 

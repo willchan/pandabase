@@ -177,10 +177,10 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0 # the migrations check diffs against the base branch
-      - name: Install bats, xmllint and actionlint
+      - name: Install bats, xmllint, sqlite3 and actionlint
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq bats libxml2-utils shellcheck
+          sudo apt-get install -y -qq bats libxml2-utils shellcheck sqlite3
           GOBIN="$HOME/.local/bin" go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
           echo "$HOME/.local/bin" >>"$GITHUB_PATH"
       - uses: astral-sh/setup-uv@v7

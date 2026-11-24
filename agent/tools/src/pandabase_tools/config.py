@@ -149,6 +149,21 @@ class JobsConfig(BaseModel):
     outage_alert_minutes: int = Field(default=60, ge=0)
 
 
+class SigninConfig(BaseModel):
+    """`cdp signin` (hourly, DESIGN §6): which cookie names mean "signed in", and how often a
+    sign-out is posted again while it lasts. Names, never values; `*` ends a prefix."""
+
+    amazon_cookies: list[str] = Field(default_factory=lambda: ["at-main", "sess-at-main"])
+    # The Azure AD B2C single-sign-on cookie on signin.costco.com that Costco's silent session
+    # refresh (DESIGN §4.8) needs; its name carries the tenant.
+    costco_cookies: list[str] = Field(default_factory=lambda: ["x-ms-cpim-sso:*"])
+    repeat_hours: int = Field(default=24, ge=1)
+    # A Chrome restart that keeps at most (1 - wipe_share) of a jar of at least wipe_min_cookies
+    # cookies is reported as a wiped jar (2026-11-21: a reboot kept none).
+    wipe_share: float = Field(default=0.5, gt=0, le=1)
+    wipe_min_cookies: int = Field(default=20, ge=1)
+
+
 class ToolsConfig(BaseModel):
     api_base_url: str
     web_url: str | None = None
@@ -161,6 +176,7 @@ class ToolsConfig(BaseModel):
     cart: CartConfig = Field(default_factory=CartConfig)
     receipts: ReceiptsConfig = Field(default_factory=ReceiptsConfig)
     jobs: JobsConfig = Field(default_factory=JobsConfig)
+    signin: SigninConfig = Field(default_factory=SigninConfig)
 
     @model_validator(mode="after")
     def _one_member_per_profile(self) -> ToolsConfig:

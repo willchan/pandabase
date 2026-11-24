@@ -3,6 +3,7 @@
 # Chrome that prints its arguments), under /bin/bash as on the Mac Mini.
 
 load helpers
+bats_require_minimum_version 1.5.0
 
 setup() {
   setup_root
@@ -125,4 +126,32 @@ SH
   [ "$status" -eq 0 ]
   [[ "$output" == *"loaded com.pandabase.chromium.pandabase (port 9222, headed"* ]]
   [ "$(grep -c 'launchctl bootstrap' "$STUB/calls")" -eq 1 ]
+}
+
+# After the 2026-11-21 reboot the profile came back with no cookies, and nothing showed whether the
+# jar was empty before Chrome started or Chrome dropped it: the launcher now logs what it saw.
+@test "chromium-launch logs the profile's cookie count and keychain state before Chrome starts" {
+  data="$BATS_TEST_TMPDIR/profile"
+  mkdir -p "$data/Default"
+  sqlite3 "$data/Default/Cookies" "create table cookies (name text); insert into cookies values ('a'), ('b'), ('c');"
+  cat >"$STUB/bin/security" <<'SH'
+#!/usr/bin/env bash
+echo "security: SecKeychainCopySettings $2: User interaction is not allowed." >&2
+exit 36
+SH
+  chmod +x "$STUB/bin/security"
+  run --separate-stderr /bin/bash "$ROOT_DIR/scripts/ops/chromium-launch.sh" \
+    headless "$STUB/bin/chrome" "--user-data-dir=$data" --remote-debugging-port=9222
+  [ "$status" -eq 0 ]
+  [[ "$stderr" == *"chromium-launch: "*" chrome=157.0.8103.51 cookies=3 keychain=User_interaction_is_not_allowed. booted="* ]]
+  # Chrome still got its arguments.
+  echo "$output" | grep -qx -- "--user-data-dir=$data"
+}
+
+@test "chromium-launch logs cookies=none for a profile without a jar yet" {
+  run --separate-stderr /bin/bash "$ROOT_DIR/scripts/ops/chromium-launch.sh" \
+    headed "$STUB/bin/chrome" "--user-data-dir=$BATS_TEST_TMPDIR/new"
+  [ "$status" -eq 0 ]
+  [[ "$stderr" == *" cookies=none "* ]]
+  [ "$output" = "--user-data-dir=$BATS_TEST_TMPDIR/new" ]
 }

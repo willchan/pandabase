@@ -79,6 +79,15 @@
       "_comment": "Command payload: no model turn. Opens one Amazon and one Whole Foods product page (cart.probe_asins) and checks the add button is still found, without clicking. Prints NO_REPLY when both are fine, else one ⚠️ line for the ops channel."
     },
     {
+      "name": "pandabase-signin-check",
+      "cron": "7 * * * *",
+      "skill": "digital-receipt-scraper",
+      "command": "pandabase-tools cdp signin --reply",
+      "deliver_to": "ops_channel",
+      "timeout_seconds": 120,
+      "_comment": "Command payload: no model turn, no page load. Reads the browser's cookie names over CDP and posts when Amazon (or Costco) is signed out — at once, then daily while it lasts — when it's back, and when a Chrome restart wiped the cookie jar (2026-11-21). NO_REPLY otherwise."
+    },
+    {
       "name": "pandabase-data-check",
       "cron": "20 8 * * 1",
       "skill": "telemetry-aggregator",

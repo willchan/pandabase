@@ -510,6 +510,49 @@ describe("weekly diagnostics", () => {
     expect(md2).not.toContain("production smoke failed");
   });
 
+  // Bug (live 2026-11-21..23): a reboot left the PandaBase browser with an empty cookie jar, and
+  // the weekly report never said the browser was signed out.
+  it("reports browser sign-outs and a wiped cookie jar from the hourly sign-in check", async () => {
+    const check = (i: number, at: string, payload: Record<string, unknown>) => ({
+      id: `01G${String(i).padStart(23, "0")}`,
+      source: "agent",
+      metricType: "signin_check",
+      payload: { profile: "pandabase", ...payload },
+      createdAt: at,
+    });
+    await h.db.insert(systemTelemetry).values([
+      check(1, "2026-10-21T23:07:00.000Z", {
+        restarted: true,
+        wiped: true,
+        chrome_version: "158.0.8127.36",
+        cookies: 3,
+        cookies_before: 412,
+        changed: ["amazon_out", "costco_out"],
+        signed_out: ["amazon", "costco"],
+        alerted: true,
+      }),
+      check(2, "2026-10-22T14:07:00.000Z", {
+        restarted: false,
+        wiped: false,
+        changed: ["costco_back"],
+        signed_out: ["amazon"],
+        alerted: true,
+      }),
+    ]);
+    const md = (
+      await renderWeekly(h.db, "2026-W43", {
+        now: "2026-10-27T20:00:00.000Z",
+        config: DEFAULT_CONFIG,
+      })
+    ).markdown;
+    expect(md).toContain(
+      "Browser sign-in check: 1 Chrome restart(s), 1 wiped cookie jar(s); signed out: amazon 1, costco 1; signed in again: costco 1.",
+    );
+    expect(md).toContain("- 2026-10-21T23:07:00.000Z: Chrome 158.0.8127.36 kept 3 of 412 cookies.");
+    expect(md).toContain("Chrome restarted and lost its cookie jar 1 time(s)");
+    expect(md).toContain("read the `chromium-launch:` lines in the Chrome log");
+  });
+
   it("reports a failed production smoke with its failed checks and the rollback hint", async () => {
     const sha = "3333333ccccccccccccccccccccccccccccccccc";
     await h.db.insert(systemTelemetry).values(
