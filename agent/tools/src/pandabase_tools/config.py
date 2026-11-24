@@ -132,6 +132,11 @@ class ReceiptsConfig(BaseModel):
     # An order page with no status wording, placed at least this many days ago, is final (live
     # Whole Foods pickups never say "picked up" once they're old). None: never assume.
     assume_final_after_days: int | None = Field(default=7, ge=1)
+    # §4.5 *Refunds after the read*: every ingested order is read once more this many days after
+    # its read (a refund for a wrong or damaged item comes days later), at most
+    # `refund_recheck_max` per sweep (each is a page load). 0 turns the re-read off.
+    refund_recheck_days: int = Field(default=10, ge=1)
+    refund_recheck_max: int = Field(default=5, ge=0)
     order_list_url: str = "https://www.amazon.com/your-orders/orders?timeFilter=months-3"
     backfill_list_urls: list[str] = Field(
         default_factory=lambda: ["https://www.amazon.com/your-orders/orders?timeFilter=year-{year}"]
