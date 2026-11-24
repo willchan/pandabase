@@ -828,6 +828,23 @@ describe("store choice section (DESIGN §4.8)", () => {
     );
   });
 
+  it("counts Amazon sweeps and the printable invoices read for in-store orders", async () => {
+    await h.db.insert(systemTelemetry).values([
+      row("receipt_sweep", {
+        pages: 2,
+        printable_reads: 3,
+        printable_used: 2,
+        printable_failed: 1,
+        totals_fail: 4,
+      }),
+      row("receipt_sweep", { vendor: "costco", pages: 9, totals_fail: 7 }),
+    ]);
+    const { markdown: md } = await renderWeekly(h.db, "2026-W43", ctx);
+    expect(md).toContain(
+      "Amazon receipts: 1 sweep(s), 2 page load(s), 3 printable invoice(s) read, 2 used, 1 failed to open, 4 failed totals check(s).",
+    );
+  });
+
   it("says why nothing goes to Costco before the receipt importer", async () => {
     await h.db
       .insert(systemTelemetry)

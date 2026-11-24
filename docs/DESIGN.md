@@ -575,7 +575,10 @@ like a passing one (`status: "applied"`, `totals_check: "fail"`). Its lines are 
 off a page, so some are wrong; a later read of the order that differs replaces it (*Re-read
 orders* above), and the agents' sweeps re-read every failing order for two weeks (§6, §4.8), so a
 parser fix lands without a reset. The weekly report §3 counts them per store, with a finding and
-a `totals_fail_applied` row in the `data_quality` extract.
+a `totals_fail_applied` row in the `data_quality` extract. An in-store Whole Foods order's
+details page has no subtotal (`n/a`); the sweep reads its printable invoice instead (§6, §10 #94),
+and that read, now with a subtotal, replaces the stored receipt (the header differs) and sets its
+`totals_check`.
 
 **Held receipts** (#78/#79, §10 #83 — **retired** by §10 #90; expand → contract). From 2026-11-17
 a failing digital receipt from a `receipts.holdVendors` store was stored as a `receipt_hold`
@@ -1268,6 +1271,29 @@ JSON on stdout; exit 0 ok, 1 error, 2 usage, 3 profile locked, 4 refused URL):
   first-`$`-price × `Qty` rule stays for pages without the grid: it read a weighed item's per-lb
   price as its price, a bare quantity "2" as 1, and unsupplied units as bought, which is why 33
   of 35 checked Whole Foods orders failed the totals check (prod copy, 2026-11-17).
+  **Amazon item components** (live pages, 2026-11; `extract_component_lines`, §10 #94): the order
+  page lays items out by `data-component`, not class names. One line per
+  `[data-component=purchasedItems]` block, read after the grid and before the old rule: ASIN and
+  title from the `/dp/` or `/gp/product/` link inside it (longest text), unit price = the first
+  price in its `unitPrice` component (the page prints it twice), quantity = the integer in its
+  `quantity` component, else the bare integer badge on its `itemImage` (no "Qty" word), else 1;
+  total = unit × quantity. The same ASIN in two blocks (two shipments) is one line. A block with no
+  `unitPrice` uses the first price within that block only. Subscribe & Save lines stay at their
+  pre-discount unit price, which is what "Item(s) Subtotal" sums (the order-level discount is a
+  follow-up: `discount_cents` isn't sent yet). Why: the old rule took the widest ancestor holding
+  only this ASIN, which on a single-item page is the whole page, so the line's price was the
+  summary's first amount and the badge was missed (Σ lines == subtotal by accident), and on a
+  multi-item page the badge was missed (lines under the subtotal). Checked on one saved live
+  order: Σ lines == subtotal to the cent. Pages without `purchasedItems` keep the old rule.
+  **In-store printable invoice** (§10 #94, `Sweeper._with_printable`): a Whole Foods in-store
+  purchase's `/fopo/` details page has no subtotal, so its lines were checked against nothing
+  (`totals_check: n/a`). When a final in-store read has lines and no subtotal, the sweep opens
+  `receipts.order_printable_url` (`/uff/your-account/order-details/printable?orderID=…`: an order
+  summary and the same item grid) and uses that read when it is final, has lines and a subtotal,
+  keeping the details read's fulfillment, vendor and any date the printed one lacks. Any failure
+  opening it (a refused URL, a navigation error) keeps the details read; a sign-in or bot check
+  still stops the sweep. `receipt_sweep` carries `printable_reads`, `printable_used`,
+  `printable_failed`; the weekly report has an "Amazon receipts" line.
 - `subscriptions.py` — the Subscribe & Save step of an Amazon `receipts sweep` (§4.9): opens
   `/auto-deliveries` (`CdpDriver.subscriptions_ready` waits, bounded, for a tile and the category
   pills), parses the tiles, and syncs the list when it is whole. Output `subscriptions`:
@@ -1811,3 +1837,4 @@ docker-compose.yml (+ docker-compose.build.yml), Makefile, CLAUDE.md, README.md,
 | 91 | Daily maintenance runs from a Vercel Schedule (`schedules` in `web/vercel.json`, a `GET` path target, same time and `CRON_SECRET` bearer check), not a legacy Cron Job; production only; run on demand by the *Run maintenance* workflow (§8 *Daily maintenance*) | Vercel marks Cron Jobs legacy (Schedules public beta, 2026-11-05; no removal date yet). Schedules ship with the `vercel deploy --prod` that `deploy.yml` already runs, so they stay in code. Same path and auth means no route change and no new secret. The schedule and the cron are swapped in one deploy, because keeping both runs the job twice. Preview schedules start inactive, which keeps the shared preview DB to tier A′'s own calls. UTC rather than `America/Los_Angeles`, to keep today's time exactly (03:17 PST / 04:17 PDT) |
 | 92 | An hourly command job checks the browser's sign-ins from cookie names over CDP (no page load) and posts a sign-out at once, then daily, and ✅ on recovery; a Chrome restart that wipes the jar is posted once; the sweep skill no longer posts sign-outs | After the 2026-11-21 reboot (also Chrome's first launch on 158) the profile came back with no cookies at all; the daily Amazon sweep failed `not_signed_in` for days with one post (the skill's weekly limit) and two held Whole Foods orders went unread. A sweep only learns of a sign-out when it runs, and loading a page to check costs bot-check risk; cookie names cost nothing |
 | 93 | An idle worker backs off (10 s doubling to 120 s), an empty `jobs/claim` is one indexed read with no transaction and no `api_request` row, and expired leases are still swept whenever the read finds one | Vercel's free tier gives 4 h/month of Fluid Active CPU and had used 3h41m (2026-11-24); `/api/jobs/claim` dominated the project: ~8,640 calls/day, almost all empty, each opening a transaction, sweeping leases, reading every queued job and writing a telemetry row. Now ≤ 720 calls/day idle (−92%), each a single read. A lease that expires with nothing queued is found by the same read, so re-queueing is no slower than a poll; the worst-case wait to pick up a new job is 2 min. Idle polls are no longer in the weekly report's route counts (the `worker_heartbeat` is the liveness signal) |
+| 94 | Amazon lines are read from each item's `purchasedItems` component; an in-store order with no subtotal is read from its printable invoice (§6 *Amazon item components*) | The old rule took the widest ancestor holding only this ASIN: on a single-item page that is the whole page (its price was the order summary's first amount, the quantity badge on the image missed, the totals check passing by accident), on a multi-item page the badge was missed. 11 Amazon orders failed the totals check (prod copy, 2026-11-23). In-store details pages have no subtotal, so 33 receipts were never checked; the printable invoice has one. Cost: one extra page load per in-store order, only when the details page lacks a subtotal. A re-read with a subtotal replaces the stored receipt (§4.5), so no State Engine change |

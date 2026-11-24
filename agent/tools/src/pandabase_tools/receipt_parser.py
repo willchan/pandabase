@@ -23,7 +23,7 @@ import json
 import re
 import time
 from collections.abc import Callable
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any, Literal, cast
@@ -87,7 +87,7 @@ STATUS_DATE = re.compile(
     re.I,
 )
 ORDER_DATE = re.compile(
-    r"\b(?:order placed|ordered on|order date|placed on|purchased on)\s*:?\s*" + DATE, re.I
+    r"\b(?:order placed|ordered(?: on)?|order date|placed on|purchased on)\s*:?\s*" + DATE, re.I
 )
 QTY = re.compile(r"\b(?:qty|quantity)\s*:?\s*(\d+(?:\.\d+)?)\b", re.I)
 QTY_PREFIX = re.compile(r"^\s*(\d{1,3})\s*(?:of|x|\u00d7)\s", re.I)
@@ -319,6 +319,65 @@ def extract_grid_lines(scope: dom.Node) -> GridLines | None:
     return GridLines(out, refunded) if found else None
 
 
+# Amazon's order page (2026-11) lays items out by `data-component`: one `purchasedItems` per item
+# with `itemImage` (an /dp/ link, then a bare-integer badge: the quantity), `itemTitle`, `quantity`
+# (empty on the page, "Quantity: 2" on some) and `unitPrice` (the price twice: an offscreen copy and
+# an aria-hidden one). The order summary comes before the items. Select by these names only: class
+# names are random.
+BARE_QTY = re.compile(r"^\s*(\d{1,3})\s*$")
+
+
+def _components(root: dom.Node, name: str) -> list[dom.Node]:
+    return [n for n in root.iter() if n.attrs.get("data-component") == name]
+
+
+def _component_qty(block: dom.Node) -> float:
+    for q in _components(block, "quantity"):
+        m = QTY.search(q.text()) or BARE_QTY.match(q.text())
+        if m:
+            return float(m.group(1))
+    for image in _components(block, "itemImage"):
+        for n in image.iter():
+            m = BARE_QTY.match(n.text()) if n.tag != "a" else None
+            if m and not any(isinstance(ch, dom.Node) for ch in n.children):
+                return float(m.group(1))
+    return 1.0
+
+
+def extract_component_lines(scope: dom.Node) -> list[c.ReceiptLineIn] | None:
+    """One line per `purchasedItems` block (unit price x quantity), or None when the page has no
+    such blocks (older layouts). The same ASIN in two blocks (two shipments) is one line."""
+    blocks = [b for b in _components(scope, "purchasedItems") if not _in_recommendations(b)]
+    if not blocks:
+        return None
+    seen: dict[str, c.ReceiptLineIn] = {}
+    for block in blocks:
+        links = [(x, a) for x, a in dom.asin_links(block) if a.text().strip()]
+        if not links:
+            continue
+        asin = links[0][0]
+        title = max((a.text().strip() for x, a in links if x == asin), key=len)
+        price_el = next(iter(_components(block, "unitPrice")), None)
+        if price_el is not None:
+            price = _cents(PRICE.search(price_el.text()))
+        else:  # no unit price: the old per-block rule, never wider than the block
+            price = _cents(PRICE.search(block.text()))
+        qty = _component_qty(block)
+        prev = seen.get(asin)
+        if prev is not None:
+            qty += prev.qty
+            price = price if price is not None else prev.unit_price_cents
+        seen[asin] = c.ReceiptLineIn(
+            asin=asin,
+            raw_text=title[:300],
+            title=title[:300],
+            qty=qty,
+            unit_price_cents=price,
+            line_total_cents=round(price * qty) if price is not None else None,
+        )
+    return list(seen.values())
+
+
 def extract_lines(root: dom.Node) -> list[c.ReceiptLineIn]:
     scope = _item_scope(root)
     seen: dict[str, c.ReceiptLineIn] = {}
@@ -361,6 +420,7 @@ def parse_order_details(
     total = _cents(GRAND_TOTAL.search(text))
     refund = _cents(REFUND_TOTAL.search(text))
     grid = extract_grid_lines(_item_scope(root))
+    components = None if grid is not None else extract_component_lines(_item_scope(root))
     subtotal = _cents(SUBTOTAL.search(text))
     if grid is not None and subtotal is not None:
         subtotal -= grid.refunded_cents
@@ -390,7 +450,7 @@ def parse_order_details(
         vendor="wholefoods" if re.search(r"whole\s*foods", text, re.I) else "amazon",
         ordered_on=ordered,
         acquired_on=acquired or (ordered if IN_STORE.search(text) else None),
-        lines=grid.lines if grid is not None else extract_lines(root),
+        lines=grid.lines if grid is not None else components or extract_lines(root),
         subtotal_cents=subtotal,
         total_cents=total,
         text=text,
@@ -500,6 +560,11 @@ class SweepResult:
     errors: list[dict[str, str]] = field(default_factory=list)
     # §10 #90: orders whose lines don't add up (`totals_check: fail`); re-read next time
     totals_fail: list[str] = field(default_factory=list)
+    # §10 #94: in-store orders whose details page has no subtotal: printable invoices opened,
+    # read instead of the details page, and failed to open (the details read is kept)
+    printable_reads: int = 0
+    printable_used: int = 0
+    printable_failed: list[str] = field(default_factory=list)
 
 
 class Sweeper:
@@ -619,6 +684,9 @@ class Sweeper:
             pending=len(result.pending),
             needs_agent=len(result.needs_agent_extraction),
             totals_fail=len(result.totals_fail),
+            printable_reads=result.printable_reads,
+            printable_used=result.printable_used,
+            printable_failed=len(result.printable_failed),
             errors=len(result.errors),
             complete=result.complete,
         )
@@ -682,6 +750,7 @@ class Sweeper:
             order = parse_order_details(
                 snap, oid, self.today, assume_final_after_days=self.cfg.assume_final_after_days
             )
+            order = self._with_printable(order, result)
             if order.status in ("cancelled", "returned"):
                 result.skipped.append({"order_id": oid, "reason": order.status})
                 o["status"] = order.status
@@ -734,6 +803,47 @@ class Sweeper:
                         "closed_cycle_thread_id": self._closed_thread(res.closed_cycle_id),
                     }
                 )
+
+    def _with_printable(self, order: ParsedOrder, result: SweepResult) -> ParsedOrder:
+        """§10 #94: an in-store purchase's details page has no subtotal, so its lines are checked
+        against nothing; the printable invoice has one. Read it, and use that read when it is final,
+        has lines and has a subtotal. Any failure opening it keeps the details read."""
+        if not (
+            order.status == "final"
+            and order.fulfillment == "in_store"
+            and order.subtotal_cents is None
+            and order.lines
+        ):
+            return order
+        result.printable_reads += 1
+        try:
+            printed = parse_order_details(
+                self._open(self.cfg.order_printable_url.format(order_id=order.order_id)),
+                order.order_id,
+                self.today,
+                assume_final_after_days=self.cfg.assume_final_after_days,
+            )
+        except NotSignedIn, Challenged:
+            raise
+        except Exception as err:  # refused URL, navigation error: the details read stands
+            result.printable_failed.append(order.order_id)
+            self.tel.emit(
+                "selector_error",
+                selector="order_printable",
+                error=type(err).__name__,
+                page=order.order_id,
+            )
+            return order
+        if printed.status != "final" or not printed.lines or printed.subtotal_cents is None:
+            return order
+        result.printable_used += 1
+        return replace(
+            printed,
+            ordered_on=printed.ordered_on or order.ordered_on,
+            acquired_on=printed.acquired_on or order.acquired_on,
+            fulfillment=order.fulfillment,
+            vendor=order.vendor,
+        )
 
     def _fallback(self, order: ParsedOrder, url: str) -> dict[str, Any]:
         acquired = order.acquired_on or order.ordered_on
