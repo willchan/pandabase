@@ -10,11 +10,21 @@ authenticated HTTP API.
 |---|---|
 | [docs/PRD.md](docs/PRD.md) | You need to know *what* the product does and *why* |
 | [docs/DESIGN.md](docs/DESIGN.md) | You're changing architecture, schema, API, algorithms, or agent behavior |
-| [docs/PLAN.md](docs/PLAN.md) | You're executing a build milestone — follow its *Session protocol* |
+| [docs/PLAN.md](docs/PLAN.md) | You're executing a build milestone — follow its *Session protocol* (finished ones: `docs/PLAN-done.md`) |
 | [docs/TESTING.md](docs/TESTING.md) | You're testing across components (system test, agent eval) or touching auth/security |
 | [docs/ROADMAP.md](docs/ROADMAP.md) | You're tempted to build chores, video audits, or freezer features — they're deferred |
 
-Read only the sections your task needs.
+Read only the sections your task needs. DESIGN.md is very long (40k+ tokens): find yours with
+`grep -n '^#' docs/DESIGN.md` and read only that range, never the whole file. The same goes
+for `docs/PLAN-done.md` (finished milestones).
+
+## Sessions
+
+- **One task per session.** A session does one task and its PR. When that PR merges, stop: new
+  work starts in a fresh session, not on top of this one's context.
+- **Plan first for multi-file changes.** In plan mode, write a plan that names the files, doc
+  sections and commands, so building it doesn't need to explore again.
+- **Keep output short.** Show failures or `| tail -40` of long command output, not the whole log.
 
 ## Rules
 
@@ -30,7 +40,7 @@ Read only the sections your task needs.
 - **The docs are living.** Any PR that changes user-visible behavior updates `docs/PRD.md`; any PR
   that changes architecture, schema, API contracts, algorithms or agent behavior updates
   `docs/DESIGN.md` (including §10 *Key decisions* when a decision changes). Deviations from a
-  milestone go in that milestone's **Notes** in `docs/PLAN.md`.
+  milestone go in that milestone's **Notes** in `docs/PLAN.md` (or `docs/PLAN-done.md` once it is finished).
 - **The State Engine owns business logic and the database.** The worker and agent tools never touch
   the DB; they call the API. Domain rules live in `web/lib/domain/` as pure, tested functions.
 - **Contracts are generated.** Zod in `web/lib/contracts/` → `contracts/openapi.json` → Python
