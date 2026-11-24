@@ -656,3 +656,155 @@ def test_sweep_without_a_cycle_route_still_ingests(tmp_path: Path) -> None:
     res = sweeper(server, FakeDriver(site), tmp_path, lambda _: None).run("sweep")
     assert len(res.ingested) == 3 and not res.errors
     assert all(x["closed_cycle_thread_id"] is None for x in res.ingested)
+
+
+# Regression (prod copy 2026-11-23: 11 Amazon orders failed the totals check). Amazon's order page
+# lays items out by `data-component`: the quantity is a badge on the image (no "Qty" word) and
+# `quantity` is empty, so a multi-item page's badge was missed (3 x $12.99 read as 1 x).
+def test_amazon_item_components_read_quantity_badge() -> None:
+    o = parse("order_details_live_components.html", "114-0000010-0000010")
+    assert (o.status, o.vendor, o.fulfillment) == ("final", "amazon", "delivery")
+    assert [(x.asin, x.qty, x.unit_price_cents, x.line_total_cents) for x in o.lines] == [
+        ("B0SYNTHS01", 3.0, 1299, 3897),  # quantity badge on the image
+        ("B0SYNTHS02", 1.0, 849, 849),  # no badge, empty quantity
+        ("B0SYNTHS03", 2.0, 425, 850),  # "Quantity: 2" text
+    ]
+    assert sum(x.line_total_cents or 0 for x in o.lines) == o.subtotal_cents == 5596
+    assert o.total_cents == 5793
+
+
+def test_amazon_single_item_block_is_not_the_whole_page() -> None:
+    """A single-item order's block was the whole page, so its price was the order summary's first
+    amount and the quantity badge on the image was missed: (qty 1, $13.00) summed to the subtotal
+    by accident while the line was wrong (2 x $6.50)."""
+    o = parse("order_details_live_components_single.html", "114-0000011-0000011")
+    assert [(x.asin, x.qty, x.unit_price_cents, x.line_total_cents) for x in o.lines] == [
+        ("B0SYNTHS04", 2.0, 650, 1300)
+    ]
+    assert o.subtotal_cents == 1300
+
+
+def test_whole_foods_in_store_printable_has_subtotal() -> None:
+    """Coverage (the grid parser already handles it): the printable invoice has the subtotal the
+    in-store details page lacks."""
+    o = parse("order_details_live_instore_printable.html", "113-0000012-0000012")
+    assert (o.status, o.vendor, o.fulfillment) == ("final", "wholefoods", "in_store")
+    assert o.acquired_on == date(2026, 11, 14)
+    assert [(x.asin, x.qty, x.line_total_cents) for x in o.lines] == [
+        ("B0SYNTHI01", 1.0, 1199),
+        ("B0SYNTHI02", 2.0, 458),
+        ("B0SYNTHI03", 1.0, 309),
+        ("B0SYNTHI04", 1.0, 180),
+    ]
+    assert o.lines[1].unit_price_cents == 229
+    assert sum(x.line_total_cents or 0 for x in o.lines) == o.subtotal_cents == 2146
+
+
+def test_whole_foods_in_store_details_page_has_no_subtotal() -> None:
+    o = parse("order_details_live_instore_no_subtotal.html", "113-0000012-0000012")
+    assert (o.fulfillment, o.status, len(o.lines)) == ("in_store", "final", 4)
+    assert o.subtotal_cents is None
+
+
+# --- in-store printable invoice read by the sweep ---------------------------------------------
+
+OID_STORE = "113-0000012-0000012"
+PRINTABLE = BASE + f"/uff/your-account/order-details/printable?orderID={OID_STORE}"
+
+
+def one_order_list(oid: str, placed: str = "November 14, 2026") -> str:
+    return (
+        "<html><body><div><div><span>Order placed</span><span>" + placed + "</span>"
+        f"<span>Order # {oid}</span></div><div><span>Delivered {placed[:-6]}</span></div>"
+        f'<a href="/your-orders/order-details?orderID={oid}">View order details</a>'
+        "</div></div></body></html>"
+    )
+
+
+def one_order_site(oid: str, details: str, printable: str | None = None) -> Any:
+    def go(url: str) -> tuple[str, str] | None:
+        if url == LIST:
+            return (url, one_order_list(oid))
+        if url == details_url(oid):
+            return (url, details)
+        if url == PRINTABLE.replace(OID_STORE, oid) and printable:
+            return (url, printable)
+        return None
+
+    return go
+
+
+STORE_TODAY = date(2026, 11, 20)
+
+
+def store_sweeper(server: Server, driver: FakeDriver, tmp: Path) -> Sweeper:
+    s = sweeper(server, driver, tmp, lambda _: None)
+    s.today = STORE_TODAY
+    return s
+
+
+def test_in_store_order_without_a_subtotal_is_read_from_its_printable_invoice(
+    tmp_path: Path,
+) -> None:
+    """The /fopo/ details page of an in-store purchase has no subtotal, so nothing verified its
+    lines (33 receipts with totals_check n/a). The printable invoice has one: the sweep opens it
+    second and ingests that read."""
+    server = Server("2026-11-10T19:00:00Z")
+    driver = FakeDriver(
+        one_order_site(
+            OID_STORE,
+            "order_details_live_instore_no_subtotal.html",
+            "order_details_live_instore_printable.html",
+        )
+    )
+    res = store_sweeper(server, driver, tmp_path).run("sweep")
+    assert driver.opened == [LIST, details_url(OID_STORE), PRINTABLE]
+    assert (res.printable_reads, res.printable_used) == (1, 1)
+    body = server.ingested[OID_STORE]
+    assert body["subtotal_cents"] == 2146 and len(body["lines"]) == 4
+    assert body["fulfillment"] == "in_store" and body["vendor"] == "wholefoods"
+    assert body["acquired_at"] is not None
+
+
+def test_printable_invoice_is_not_opened_when_the_details_page_has_a_subtotal(
+    tmp_path: Path,
+) -> None:
+    server = Server("2026-11-10T19:00:00Z")
+    delivery = one_order_site("114-0000010-0000010", "order_details_live_components.html")
+    driver = FakeDriver(delivery)
+    res = store_sweeper(server, driver, tmp_path).run("sweep")
+    assert not [u for u in driver.opened if "printable" in u]
+    assert (res.printable_reads, res.printable_used) == (0, 0)
+    # An in-store page that already has a subtotal needs no second page either.
+    driver = FakeDriver(one_order_site(OID_STORE, "order_details_live_instore_printable.html"))
+    (tmp_path / "b").mkdir()
+    res = store_sweeper(Server("2026-11-10T19:00:00Z"), driver, tmp_path / "b").run("sweep")
+    assert not [u for u in driver.opened if "printable" in u]
+    assert res.printable_reads == 0
+
+
+def test_printable_page_without_a_subtotal_keeps_the_details_read(tmp_path: Path) -> None:
+    server = Server("2026-11-10T19:00:00Z")
+    driver = FakeDriver(
+        one_order_site(
+            OID_STORE,
+            "order_details_live_instore_no_subtotal.html",
+            "order_details_live_instore_no_subtotal.html",
+        )
+    )
+    res = store_sweeper(server, driver, tmp_path).run("sweep")
+    assert (res.printable_reads, res.printable_used) == (1, 0)
+    assert server.ingested[OID_STORE].get("subtotal_cents") is None
+
+
+def test_an_error_opening_the_printable_page_keeps_the_details_read(tmp_path: Path) -> None:
+    server = Server("2026-11-10T19:00:00Z")
+    # The printable URL serves nothing: the driver raises, the details read is ingested anyway.
+    driver = FakeDriver(one_order_site(OID_STORE, "order_details_live_instore_no_subtotal.html"))
+    res = store_sweeper(server, driver, tmp_path).run("sweep")
+    assert OID_STORE in server.ingested and (res.printable_reads, res.printable_used) == (1, 0)
+    assert res.printable_failed == [OID_STORE] and not res.errors
+
+
+def test_guard_allows_the_printable_invoice() -> None:
+    assert guard.check_url(PRINTABLE) == PRINTABLE

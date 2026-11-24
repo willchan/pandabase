@@ -894,6 +894,10 @@ export async function renderWeekly(
   const expiredTrips = closedTrips.filter((t) => t.p.outcome === "expired");
   // Costco receipts (M10.3): the sweep, trip receipts, renames, and the delivery premium.
   const costcoSweeps = metric("receipt_sweep").filter((t) => t.p.vendor === "costco");
+  // Amazon / Whole Foods sweeps carry no `vendor`; an in-store order whose details page has no
+  // subtotal is re-read from its printable invoice (§10 #94).
+  const amazonSweeps = metric("receipt_sweep").filter((t) => t.p.vendor !== "costco");
+  const amazonSum = (k: string) => amazonSweeps.reduce((acc, t) => acc + n(t.p[k]), 0);
   const tripReceipts = metric("costco_trip_receipt");
   const renames = metric("costco_item_renamed");
   extracts["store_choice.jsonl"]!.push(
@@ -947,6 +951,12 @@ export async function renderWeekly(
       text: `The Costco receipt sweep stopped: ${sweepErrors.join(", ")}.`,
     });
   const costcoReceiptLines = [
+    ...(amazonSweeps.length
+      ? [
+          "",
+          `Amazon receipts: ${amazonSweeps.length} sweep(s), ${amazonSum("pages")} page load(s), ${amazonSum("printable_reads")} printable invoice(s) read, ${amazonSum("printable_used")} used, ${amazonSum("printable_failed")} failed to open, ${amazonSum("totals_fail")} failed totals check(s).`,
+        ]
+      : []),
     "",
     `Costco receipts: ${costcoSweeps.length} sweep(s), ${sweepSum("warehouse")} warehouse receipt(s) and ${sweepSum("online")} online order(s) imported, ${sweepSum("pages")} page load(s) + ${sweepSum("clicks")} click(s), ${unread} unread line(s), ${sweepSum("instant_savings")} instant saving(s) and ${sweepSum("item_fees")} item fee(s) applied to their item, ${sweepSum("totals_fail")} failed totals check(s)${sweepErrors.length ? `, errors: ${sweepErrors.join(", ")}` : ""}. Trip receipts linked: ${tripReceipts.length}; items renamed from online titles: ${renames.length}.`,
     ...(premiums.length

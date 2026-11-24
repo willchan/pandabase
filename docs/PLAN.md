@@ -258,6 +258,20 @@ This Week with a planned trip; the prod copy for the store split of the real cat
     `order_details_live_pickup_grid.html`). Orders already imported keep their old lines until
     they're re-imported (the all-stores reset, still the owner's call). Next: importers declare
     whether their totals are exact (replacing `holdVendors`), so a new store needs no list edit.
+  - **Amazon item components / in-store printable (2026-11-24):** prod copy 2026-11-23: 11 Amazon
+    orders fail the totals check (8 with lines over the subtotal, 3 under; gaps $0.48–$20.87), and
+    33 Whole Foods in-store receipts are `n/a` (no subtotal on the `/fopo/` details page); 1 Whole
+    Foods pickup is still $4.25 under (no saved page: not covered). A saved live Amazon order
+    (printable invoice, same component tree) showed the old rule passing by accident and missing
+    the quantity badge; items are now read per `purchasedItems` (DESIGN §6 *Amazon item
+    components*), and an in-store order with no subtotal is read from its printable invoice (§10
+    #94). Fixtures: `order_details_live_components{,_single}.html`,
+    `order_details_live_instore_{printable,no_subtotal}.html`. A re-read whose only change is a
+    subtotal replaces the stored receipt and sets its `totals_check` (checked in
+    `replaceReceiptIn`: the header key includes the subtotal), so no State Engine change. Not
+    done: the 8 "over" orders aren't explained by any saved page (save one if they still fail);
+    the WF pickup $4.25 order; Subscribe & Save `discount_cents` (the order-level discount isn't
+    sent, so a Subscribe & Save order's grand total isn't checked against it).
 
 ---
 
