@@ -954,7 +954,7 @@ export async function renderWeekly(
     ...(amazonSweeps.length
       ? [
           "",
-          `Amazon receipts: ${amazonSweeps.length} sweep(s), ${amazonSum("pages")} page load(s), ${amazonSum("printable_reads")} printable invoice(s) read, ${amazonSum("printable_used")} used, ${amazonSum("printable_failed")} failed to open, ${amazonSum("totals_fail")} failed totals check(s).`,
+          `Amazon receipts: ${amazonSweeps.length} sweep(s), ${amazonSum("pages")} page load(s), ${amazonSum("printable_reads")} printable invoice(s) read, ${amazonSum("printable_used")} used, ${amazonSum("printable_failed")} failed to open, ${amazonSum("totals_fail")} failed totals check(s), ${amazonSum("refund_rereads")} order(s) re-read for a later refund, ${amazonSum("refunds")} found refunded in full.`,
         ]
       : []),
     "",

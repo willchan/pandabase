@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Callable
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -353,6 +353,7 @@ def test_a_state_file_from_before_90_keeps_its_held_orders_for_re_reading(tmp_pa
         "done": {"a": "x"},
         "run": None,
         "recheck": state.recheck,
+        "refund_watch": {},
     }
 
 
@@ -808,3 +809,172 @@ def test_an_error_opening_the_printable_page_keeps_the_details_read(tmp_path: Pa
 
 def test_guard_allows_the_printable_invoice() -> None:
     assert guard.check_url(PRINTABLE) == PRINTABLE
+
+
+# --- refunds and deals (prod copy 2026-11-24; saved live pages) --------------------------------
+
+OID_REFUND = "113-0000013-0000013"
+REFUNDED = "order_details_live_giftcard_refunded.html"
+
+
+def test_a_gift_card_order_refunded_in_full_is_returned() -> None:
+    """Regression (live, 2026-11-24): 9 of 11 failing Amazon orders were paid by gift card, so
+    their Grand Total is $0.00. The full-refund rule (Refund Total >= Grand Total) was skipped
+    when the total was 0, so a returned order was stocked as bought. What was charged is the
+    Grand Total plus the Gift Card Amount."""
+    o = parse_order_details(
+        Snapshot("x", fixture(REFUNDED)), OID_REFUND, TODAY, assume_final_after_days=7
+    )
+    assert o.total_cents == 0
+    assert o.status == "returned"
+
+
+def test_a_partial_refund_on_a_gift_card_order_is_still_final() -> None:
+    html = fixture("order_details_live_giftcard_refunded.html").replace(
+        "<span>$17.92</span></li>\n</ul>", "<span>$5.00</span></li>\n</ul>"
+    )
+    o = parse_order_details(Snapshot("x", html), OID_REFUND, TODAY, assume_final_after_days=7)
+    assert o.status == "final" and len(o.lines) == 1
+
+
+def test_whole_foods_deals_come_off_the_subtotal() -> None:
+    """Regression (live, 2026-11-24: the one failing Whole Foods pickup, $4.25 under). Its grid's
+    item totals are what was charged, after each deal; "Item(s) Subtotal" is before them, and the
+    gap was exactly the summary's "Deals & Discounts". The subtotal sent leaves the deals out, as
+    it does refunded units."""
+    o = parse("order_details_live_pickup_deals.html", "111-0000014-0000014")
+    assert (o.status, o.vendor, o.fulfillment) == ("final", "wholefoods", "pickup")
+    assert [(x.asin, x.qty, x.line_total_cents) for x in o.lines] == [
+        ("B0SYNTHD01", 4.0, 448),
+        ("B0SYNTHD02", 2.0, 1074),
+    ]
+    assert o.subtotal_cents == 1647 - 125
+    assert sum(x.line_total_cents or 0 for x in o.lines) == o.subtotal_cents
+
+
+# --- refunds issued after an order was read ---------------------------------------------------
+
+
+def not_refunded() -> str:
+    """The same order before its refund: no Refund Total, charged in full by gift card."""
+    return (
+        fixture(REFUNDED)
+        .replace("<li><span><span>Refund Total</span></span><span>$17.92</span></li>", "")
+        .replace("Refund issued", "Delivered December 15")
+    )
+
+
+def refund_site(details: str, listed: bool = True) -> Any:
+    """The order list (this order, placed Dec 13, 2025, unless `listed` is False) and any
+    order's details page."""
+
+    def go(url: str) -> tuple[str, str] | None:
+        if url == LIST:
+            return (
+                url,
+                one_order_list(
+                    OID_REFUND if listed else "999-0000000-0000000", "December 13, 2025"
+                ),
+            )
+        if "order-details?orderID=" in url:
+            return (url, details)
+        return None
+
+    return go
+
+
+def clocked(server: Server, driver: FakeDriver, tmp: Path, now: datetime, **cfg: Any) -> Sweeper:
+    s = sweeper(server, driver, tmp, lambda _: None, **cfg)
+    s.today, s.now = now.date(), lambda: now
+    return s
+
+
+def test_an_order_refunded_after_it_was_read_is_re_read_once_and_emptied(tmp_path: Path) -> None:
+    """Regression: a passing order was never read again, so a refund issued after the read (a
+    wrong item, refunded two days after pickup) stayed a purchase. Every ingested order is re-read
+    once, `refund_recheck_days` after its read; refunded in full by then, it is sent with no
+    lines and a $0 subtotal, which replaces the stored receipt (the item counts as not bought)."""
+    server = Server("2025-12-01T19:00:00Z")
+    t0 = datetime(2025, 12, 16, 3, tzinfo=UTC)
+    first = FakeDriver(refund_site(not_refunded()))
+    clocked(server, first, tmp_path, t0).run("sweep")
+    assert len(server.ingested[OID_REFUND]["lines"]) == 1
+    state = SweepState.load(tmp_path / "receipts-will.json")
+    assert OID_REFUND in state.done and OID_REFUND in state.refund_watch
+
+    # Before the re-read is due: not opened.
+    early = FakeDriver(refund_site(REFUNDED))
+    clocked(server, early, tmp_path, t0 + timedelta(days=3)).run("sweep")
+    assert details_url(OID_REFUND) not in early.opened
+
+    server.cursor = "2025-12-25T19:00:00Z"  # the list's window has moved past the order
+    due = FakeDriver(refund_site(REFUNDED))
+    s = clocked(server, due, tmp_path, t0 + timedelta(days=10))
+    res = s.run("sweep")
+    assert details_url(OID_REFUND) in due.opened
+    body = server.ingested[OID_REFUND]
+    assert body["lines"] == [] and body["subtotal_cents"] == 0
+    assert res.refunds == [OID_REFUND]
+    metrics = s.tel.metrics("receipt_sweep")[0]
+    assert (metrics["refund_rereads"], metrics["refunds"]) == (1, 1)
+    state = SweepState.load(tmp_path / "receipts-will.json")
+    assert OID_REFUND in state.done and OID_REFUND not in state.refund_watch
+
+    # Once only.
+    later = FakeDriver(refund_site(REFUNDED))
+    clocked(server, later, tmp_path, t0 + timedelta(days=20)).run("sweep")
+    assert details_url(OID_REFUND) not in later.opened
+
+
+def test_a_re_read_without_a_refund_changes_nothing(tmp_path: Path) -> None:
+    server = Server("2025-12-01T19:00:00Z")
+    t0 = datetime(2025, 12, 16, 3, tzinfo=UTC)
+    clocked(server, FakeDriver(refund_site(not_refunded())), tmp_path, t0).run("sweep")
+    server.cursor = "2025-12-25T19:00:00Z"
+    driver = FakeDriver(refund_site(not_refunded()))
+    res = clocked(server, driver, tmp_path, t0 + timedelta(days=10)).run("sweep")
+    assert details_url(OID_REFUND) in driver.opened
+    assert res.duplicates == [OID_REFUND] and res.refunds == []
+    assert OID_REFUND not in SweepState.load(tmp_path / "receipts-will.json").refund_watch
+
+
+def test_refund_re_reads_are_capped_per_sweep(tmp_path: Path) -> None:
+    path = tmp_path / "receipts-will.json"
+    old = "2025-12-01T00:00:00+00:00"
+    ids = [f"113-0000013-00000{i:02d}" for i in range(4)]
+    path.write_text(
+        json.dumps(
+            {"done": dict.fromkeys(ids, old), "run": None, "refund_watch": dict.fromkeys(ids, old)}
+        )
+    )
+    server = Server("2025-12-25T19:00:00Z")
+    driver = FakeDriver(refund_site(not_refunded(), listed=False))
+    clocked(
+        server, driver, tmp_path, datetime(2025, 12, 26, 3, tzinfo=UTC), refund_recheck_max=2
+    ).run("sweep")
+    assert sum(any(i in u for i in ids) for u in driver.opened) == 2
+    assert sorted(set(SweepState.load(path).refund_watch) & set(ids)) == ids[2:]
+
+
+def test_a_failing_order_that_is_now_refunded_in_full_is_emptied(tmp_path: Path) -> None:
+    """The live gift-card order that failed (read before #100) and has since been refunded in
+    full: its recheck read is `returned`. It was ingested, so it's sent empty, not skipped."""
+    path = tmp_path / "receipts-will.json"
+    path.write_text(
+        json.dumps({"done": {}, "run": None, "recheck": {OID_REFUND: "2025-12-14T00:00:00+00:00"}})
+    )
+    server = Server("2025-12-25T19:00:00Z")
+    driver = FakeDriver(refund_site(REFUNDED))
+    res = clocked(server, driver, tmp_path, datetime(2025, 12, 26, 3, tzinfo=UTC)).run("sweep")
+    body = server.ingested[OID_REFUND]
+    assert body["lines"] == [] and body["subtotal_cents"] == 0 and res.refunds == [OID_REFUND]
+    state = SweepState.load(path)
+    assert OID_REFUND in state.done and state.recheck == {}
+
+
+def test_a_new_order_already_refunded_in_full_is_still_skipped(tmp_path: Path) -> None:
+    server = Server("2025-12-01T19:00:00Z")
+    driver = FakeDriver(refund_site(REFUNDED))
+    res = clocked(server, driver, tmp_path, datetime(2025, 12, 16, 3, tzinfo=UTC)).run("sweep")
+    assert OID_REFUND not in server.ingested
+    assert res.skipped == [{"order_id": OID_REFUND, "reason": "returned"}]

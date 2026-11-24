@@ -272,6 +272,19 @@ This Week with a planned trip; the prod copy for the store split of the real cat
     done: the 8 "over" orders aren't explained by any saved page (save one if they still fail);
     the WF pickup $4.25 order; Subscribe & Save `discount_cents` (the order-level discount isn't
     sent, so a Subscribe & Save order's grand total isn't checked against it).
+  - **Refunds, gift cards and deals (2026-11-24):** all 12 failing orders' details pages and
+    printable invoices were saved through the agent's `CdpDriver` (24 loads, no bot check; Claude
+    in Chrome filters page HTML out of its results, so it can't save pages). All 11 Amazon orders
+    add up under #94's rule (old reads: they need the re-read); 9 were paid by gift card (Grand
+    Total $0.00), and one of those was refunded in full, which the full-refund rule missed. The
+    Whole Foods pickup's $4.25 was its "Deals & Discounts" (grid totals are after deals), not a
+    refund. Amazon's `/uff/` printable URL is "Page Not Found" for an ordinary Amazon order.
+    Fixed (§10 #95): the gift card amount counts as charged; deals come off a grid order's
+    subtotal; every done order is re-read once ~10 days later and, refunded in full by then, sent
+    with no lines (Will: refunded items are unusable, not bought). Fixtures
+    `order_details_live_giftcard_refunded.html`, `order_details_live_pickup_deals.html`. With the
+    fix, all 12 saved pages add up (o02 reads as returned). Not done: a partial refund on a
+    multi-item Amazon order (no page seen).
 
 ---
 

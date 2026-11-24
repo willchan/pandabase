@@ -580,6 +580,12 @@ details page has no subtotal (`n/a`); the sweep reads its printable invoice inst
 and that read, now with a subtotal, replaces the stored receipt (the header differs) and sets its
 `totals_check`.
 
+**Refunds after the read** (§10 #95): the sweep reads every done order once more ~10 days
+later (§6). Refunded in full by then, it is sent with no lines and a $0 subtotal; the receipt is
+replaced like any re-read (lines and `acquired` events deleted, the items rebuilt), so the
+refunded item counts as not bought. No State Engine change: `lines` has no minimum, and 0 lines
+against a $0 subtotal is a passing totals check.
+
 **Held receipts** (#78/#79, §10 #83 — **retired** by §10 #90; expand → contract). From 2026-11-17
 a failing digital receipt from a `receipts.holdVendors` store was stored as a `receipt_hold`
 and **not applied** (`status: "held"`, `held_until`), until a re-read added up or 14 days passed.
@@ -1285,6 +1291,24 @@ JSON on stdout; exit 0 ok, 1 error, 2 usage, 3 profile locked, 4 refused URL):
   summary's first amount and the badge was missed (Σ lines == subtotal by accident), and on a
   multi-item page the badge was missed (lines under the subtotal). Checked on one saved live
   order: Σ lines == subtotal to the cent. Pages without `purchasedItems` keep the old rule.
+  **Refunds and gift cards** (live pages, 2026-11-24; §10 #95): an order paid by gift card shows
+  "Gift Card Amount: -$x" and a Grand Total of $0.00 (9 of the 11 failing Amazon orders), so
+  "refunded in full" compares the Refund Total with the Grand Total **plus** the gift card
+  amount (it was skipped when the total was 0, and a returned order was stocked). A Whole Foods
+  grid's item totals are after each deal while "Item(s) Subtotal" is before them: the summary's
+  "Deals & Discounts -$x" comes off the subtotal sent, like refunded units (the one failing pickup
+  was exactly that, not a refund). Amazon's `/uff/` printable URL is "Page Not Found" for an
+  ordinary Amazon order: there, the details page is the only source.
+  **Refunds after the read** (§4.5, §10 #95): an order counted done (passing or `n/a`) goes in the
+  state file's `refund_watch` map and is read once more `receipts.refund_recheck_days` (10) later,
+  at most `receipts.refund_recheck_max` (5) a sweep (0: off), whatever the order list says. An
+  order read before (in `refund_watch` or `recheck`) that now reads refunded in full is not
+  skipped but ingested with no lines and a $0 subtotal (a refunded item counts as not bought), so
+  the re-read replaces the stored receipt (§4.5 *Re-read orders*); any other change (a Whole
+  Foods "Refunded (n)" row) replaces it as usual, and the same read is a duplicate. A new order
+  already refunded in full is still skipped. `receipt_sweep` carries `refund_rereads` and
+  `refunds`; the weekly report's "Amazon receipts" line counts them. A multi-item Amazon order
+  refunded in part can't be pinned to an item from the page, so it stays as read.
   **In-store printable invoice** (§10 #94, `Sweeper._with_printable`): a Whole Foods in-store
   purchase's `/fopo/` details page has no subtotal, so its lines were checked against nothing
   (`totals_check: n/a`). When a final in-store read has lines and no subtotal, the sweep opens
@@ -1838,3 +1862,4 @@ docker-compose.yml (+ docker-compose.build.yml), Makefile, CLAUDE.md, README.md,
 | 92 | An hourly command job checks the browser's sign-ins from cookie names over CDP (no page load) and posts a sign-out at once, then daily, and ✅ on recovery; a Chrome restart that wipes the jar is posted once; the sweep skill no longer posts sign-outs | After the 2026-11-21 reboot (also Chrome's first launch on 158) the profile came back with no cookies at all; the daily Amazon sweep failed `not_signed_in` for days with one post (the skill's weekly limit) and two held Whole Foods orders went unread. A sweep only learns of a sign-out when it runs, and loading a page to check costs bot-check risk; cookie names cost nothing |
 | 93 | An idle worker backs off (10 s doubling to 120 s), an empty `jobs/claim` is one indexed read with no transaction and no `api_request` row, and expired leases are still swept whenever the read finds one | Vercel's free tier gives 4 h/month of Fluid Active CPU and had used 3h41m (2026-11-24); `/api/jobs/claim` dominated the project: ~8,640 calls/day, almost all empty, each opening a transaction, sweeping leases, reading every queued job and writing a telemetry row. Now ≤ 720 calls/day idle (−92%), each a single read. A lease that expires with nothing queued is found by the same read, so re-queueing is no slower than a poll; the worst-case wait to pick up a new job is 2 min. Idle polls are no longer in the weekly report's route counts (the `worker_heartbeat` is the liveness signal) |
 | 94 | Amazon lines are read from each item's `purchasedItems` component; an in-store order with no subtotal is read from its printable invoice (§6 *Amazon item components*) | The old rule took the widest ancestor holding only this ASIN: on a single-item page that is the whole page (its price was the order summary's first amount, the quantity badge on the image missed, the totals check passing by accident), on a multi-item page the badge was missed. 11 Amazon orders failed the totals check (prod copy, 2026-11-23). In-store details pages have no subtotal, so 33 receipts were never checked; the printable invoice has one. Cost: one extra page load per in-store order, only when the details page lacks a subtotal. A re-read with a subtotal replaces the stored receipt (§4.5), so no State Engine change |
+| 95 | A refunded item counts as not bought: an order is re-read once ~10 days after it's done, and one refunded in full since is sent with no lines (replacing the receipt); "refunded in full" adds the gift card amount to the Grand Total; a Whole Foods grid's deals come off the subtotal sent (§6 *Refunds and gift cards*, *Refunds after the read*) | Live pages (2026-11-24): the 11 failing Amazon orders all add up under #94's rule (old reads, fixed by a re-read); one of them was refunded in full but paid by gift card (Grand Total $0.00), which the old rule couldn't see; the failing Whole Foods pickup's gap was exactly its "Deals & Discounts". A passing order was never read again, so a refund for a wrong item issued days after pickup was lost. Will (2026-11-24): refunded items are generally unusable, so they don't go in the pantry. Cost: one page load per order ~10 days later, capped per sweep. A partial refund on a multi-item Amazon order isn't attributable to an item from the page and stays as read |

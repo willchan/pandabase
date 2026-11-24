@@ -42,4 +42,6 @@ form's `action`, `ASIN.n` inputs, and visible text.
 | `order_details_live_components.html` | live Amazon order laid out by `data-component`: summary first, three `purchasedItems` (a quantity badge on the image, a "Quantity: 2" text, a plain one), Subscribe & Save discount in the summary |
 | `order_details_live_components_single.html` | the same with one item: a single-item order's block used to be the whole page |
 | `order_details_live_instore_printable.html` | live Whole Foods in-store printable invoice (`/uff/…/printable`): an order summary with Item(s) Subtotal, "Purchased at", the item grid (a weighed row bought by count) |
+| `order_details_live_giftcard_refunded.html` | live Amazon order paid by gift card (Grand Total $0.00, "Gift Card Amount: -$x") and refunded in full ("Refund issued", Refund Total = what was charged) |
+| `order_details_live_pickup_deals.html` | live Whole Foods pickup grid with "Deals & Discounts" in the summary: item totals are after the deals, the subtotal before |
 | `order_details_live_instore_no_subtotal.html` | the details-page shape of the same in-store order: item grid, no subtotal or grand total |

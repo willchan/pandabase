@@ -165,6 +165,34 @@ describe("re-reading an order (PLAN M11.2)", () => {
     await nothingToRebuild();
   });
 
+  // The sweep re-reads an order after it was ingested; one refunded in full by then (a wrong or
+  // damaged item: unusable, so not bought) comes back with no lines and a net subtotal of $0.
+  it("an order refunded in full after it was read is replaced by an empty receipt", async () => {
+    const first = await ingestReceipt(
+      h.db,
+      order(day(0), [COFFEE, RICE], "ORDER-1", { total: 1000 }),
+      ctx(day(0)),
+    );
+    expect(first.totals_check).toBe("pass");
+    const again = await ingestReceipt(
+      h.db,
+      order(day(0), [], "ORDER-1", { total: 0 }),
+      ctx(day(10)),
+    );
+    expect(again).toMatchObject({
+      duplicate: false,
+      replaced: true,
+      receipt_id: first.receipt_id,
+      totals_check: "pass",
+      lines: [],
+    });
+    expect(await linesOf(first.receipt_id)).toEqual([]);
+    expect(await acquired(first.receipt_id)).toEqual([]);
+    expect(await productOf(COFFEE.asin)).toMatchObject({ timesBought: 0 });
+    expect(await productOf(RICE.asin)).toMatchObject({ timesBought: 0 });
+    await nothingToRebuild();
+  });
+
   it("a paper or manual receipt is never replaced", async () => {
     const manual = {
       ...order(day(0), [COFFEE]),

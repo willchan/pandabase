@@ -96,6 +96,8 @@ GRAND_TOTAL = re.compile(
     r"\b(?:grand total|order total|total charged|total)\s*:?\s*\$\s?([\d,]+)\.(\d{2})", re.I
 )
 REFUND_TOTAL = re.compile(r"\brefund total\s*:?\s*\$\s?([\d,]+)\.(\d{2})", re.I)
+GIFT_CARD = re.compile(r"\bgift card amount\s*:?\s*-\s*\$\s?([\d,]+)\.(\d{2})", re.I)
+DEALS = re.compile(r"\bdeals\s*&\s*discounts\s*:?\s*-\s*\$\s?([\d,]+)\.(\d{2})", re.I)
 SUBTOTAL = re.compile(r"\bitem\(?s\)?\s*subtotal\s*:?\s*\$\s?([\d,]+)\.(\d{2})", re.I)
 NOT_ORDER_ITEMS = re.compile(
     r"\b(?:recommended|customers (?:who|also)|sponsored|inspired by|frequently bought|you might)\b",
@@ -423,9 +425,14 @@ def parse_order_details(
     components = None if grid is not None else extract_component_lines(_item_scope(root))
     subtotal = _cents(SUBTOTAL.search(text))
     if grid is not None and subtotal is not None:
-        subtotal -= grid.refunded_cents
+        # The grid's totals are what was charged: refunded units and deals left out, while
+        # "Item(s) Subtotal" counts both (§6 *Whole Foods item grid*).
+        subtotal -= grid.refunded_cents + (_cents(DEALS.search(text)) or 0)
     status = order_status(text)
-    if status != "cancelled" and refund is not None and total and refund >= total:
+    # A gift card pays before the Grand Total ($0.00 when it pays it all): what was charged is
+    # the two together, and a refund that covers it is a full one.
+    charged = None if total is None else total + (_cents(GIFT_CARD.search(text)) or 0)
+    if status != "cancelled" and refund is not None and charged and refund >= charged:
         status = "returned"  # refunded in full: nothing to stock
     elif (
         status == "unknown"
@@ -528,6 +535,9 @@ class SweepState:
     # DESIGN §4.5, §10 #90): applied as read but not done, so every sweep re-reads it for
     # `RECHECK_DAYS` and a fixed parser's read replaces the receipt
     recheck: dict[str, str] = field(default_factory=dict)
+    # order_id → when it was read and counted done: read once more `refund_recheck_days` later,
+    # so a refund issued after the read reaches the receipt (§4.5 *Refunds after the read*)
+    refund_watch: dict[str, str] = field(default_factory=dict)
 
     @classmethod
     def load(cls, path: Path) -> SweepState:
@@ -535,12 +545,25 @@ class SweepState:
             data = json.loads(path.read_text())
         except FileNotFoundError:
             return cls()
-        return cls(done=dict(data.get("done", {})), run=data.get("run"), recheck=load_recheck(data))
+        return cls(
+            done=dict(data.get("done", {})),
+            run=data.get("run"),
+            recheck=load_recheck(data),
+            refund_watch=dict(data.get("refund_watch", {})),
+        )
 
     def save(self, path: Path) -> None:
         tmp = path.with_suffix(".tmp")
         tmp.write_text(
-            json.dumps({"done": self.done, "run": self.run, "recheck": self.recheck}, indent=1)
+            json.dumps(
+                {
+                    "done": self.done,
+                    "run": self.run,
+                    "recheck": self.recheck,
+                    "refund_watch": self.refund_watch,
+                },
+                indent=1,
+            )
         )
         tmp.replace(path)
 
@@ -565,6 +588,10 @@ class SweepResult:
     printable_reads: int = 0
     printable_used: int = 0
     printable_failed: list[str] = field(default_factory=list)
+    # §4.5 *Refunds after the read*: ingested orders read again, and those found refunded in
+    # full (sent with no lines, which empties the stored receipt)
+    refund_rereads: int = 0
+    refunds: list[str] = field(default_factory=list)
 
 
 class Sweeper:
@@ -687,6 +714,8 @@ class Sweeper:
             printable_reads=result.printable_reads,
             printable_used=result.printable_used,
             printable_failed=len(result.printable_failed),
+            refund_rereads=result.refund_rereads,
+            refunds=len(result.refunds),
             errors=len(result.errors),
             complete=result.complete,
         )
@@ -728,15 +757,27 @@ class Sweeper:
                 oid,
                 {"order_id": oid, "ordered_on": since[:10], "status": "final", "details_url": ""},
             )
+        # Orders read before (§4.5 *Refunds after the read*): failing ones, and done ones whose
+        # one refund re-read is due. Read whatever the list says: refunded in full, they're sent
+        # empty rather than skipped.
+        due = self._refund_rereads_due()
+        for oid in due:
+            run["collected"].setdefault(
+                oid,
+                {"order_id": oid, "ordered_on": "", "status": "final", "details_url": ""},
+            )
+        read_before = set(self.state.recheck) | set(due)
         orders = sorted(
             run["collected"].values(), key=lambda o: (o["ordered_on"] or "9999", o["order_id"])
         )
         handled = 0
         for o in orders:
             oid = o["order_id"]
-            if oid in self.state.done:
+            if oid in self.state.done and oid not in due:
                 continue
-            if o["status"] in ("cancelled", "returned"):
+            if oid in read_before:
+                pass
+            elif o["status"] in ("cancelled", "returned"):
                 result.skipped.append({"order_id": oid, "reason": o["status"]})
                 continue
             if o["status"] == "pending":  # in flight per the list; "unknown" gets a closer look
@@ -751,6 +792,15 @@ class Sweeper:
                 snap, oid, self.today, assume_final_after_days=self.cfg.assume_final_after_days
             )
             order = self._with_printable(order, result)
+            if oid in due:
+                result.refund_rereads += 1
+                self.state.refund_watch.pop(oid, None)
+                self.state.save(self.path)
+            refunded = order.status == "returned" and oid in read_before
+            if refunded:
+                # Ingested before and refunded in full since: nothing was kept (a refunded item
+                # counts as not bought). No lines and a $0 net subtotal replace the receipt.
+                order = replace(order, status="final", lines=[], subtotal_cents=0)
             if order.status in ("cancelled", "returned"):
                 result.skipped.append({"order_id": oid, "reason": order.status})
                 o["status"] = order.status
@@ -760,7 +810,7 @@ class Sweeper:
                 o["status"] = "pending"
                 continue
             o["status"] = "final"
-            if not order.lines:
+            if not order.lines and not refunded:
                 self.tel.emit("selector_error", selector="asin_links", error="zero_asins", page=url)
                 result.needs_agent_extraction.append(self._fallback(order, url))
                 if oid not in run["fallback"]:
@@ -784,7 +834,11 @@ class Sweeper:
                 result.totals_fail.append(oid)
             else:
                 self.state.recheck.pop(oid, None)
+                if oid not in self.state.done and not refunded and self.cfg.refund_recheck_max:
+                    self.state.refund_watch[oid] = self.now().isoformat()
                 self.state.done[oid] = self.now().isoformat()
+            if refunded:
+                result.refunds.append(oid)
             self.state.save(self.path)
             if res.status == "held":
                 continue
@@ -803,6 +857,17 @@ class Sweeper:
                         "closed_cycle_thread_id": self._closed_thread(res.closed_cycle_id),
                     }
                 )
+
+    def _refund_rereads_due(self) -> list[str]:
+        """Done orders whose one refund re-read is due, oldest first, at most
+        `refund_recheck_max` (each is a page load; the rest wait for the next sweep)."""
+        cutoff = self.now() - timedelta(days=self.cfg.refund_recheck_days)
+        due = sorted(
+            (since, oid)
+            for oid, since in self.state.refund_watch.items()
+            if oid in self.state.done and datetime.fromisoformat(since) <= cutoff
+        )
+        return [oid for _, oid in due[: self.cfg.refund_recheck_max]]
 
     def _with_printable(self, order: ParsedOrder, result: SweepResult) -> ParsedOrder:
         """§10 #94: an in-store purchase's details page has no subtotal, so its lines are checked

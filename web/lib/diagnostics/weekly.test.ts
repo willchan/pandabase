@@ -828,7 +828,7 @@ describe("store choice section (DESIGN §4.8)", () => {
     );
   });
 
-  it("counts Amazon sweeps and the printable invoices read for in-store orders", async () => {
+  it("counts Amazon sweeps, printable invoices read for in-store orders and refund re-reads", async () => {
     await h.db.insert(systemTelemetry).values([
       row("receipt_sweep", {
         pages: 2,
@@ -836,12 +836,14 @@ describe("store choice section (DESIGN §4.8)", () => {
         printable_used: 2,
         printable_failed: 1,
         totals_fail: 4,
+        refund_rereads: 5,
+        refunds: 1,
       }),
       row("receipt_sweep", { vendor: "costco", pages: 9, totals_fail: 7 }),
     ]);
     const { markdown: md } = await renderWeekly(h.db, "2026-W43", ctx);
     expect(md).toContain(
-      "Amazon receipts: 1 sweep(s), 2 page load(s), 3 printable invoice(s) read, 2 used, 1 failed to open, 4 failed totals check(s).",
+      "Amazon receipts: 1 sweep(s), 2 page load(s), 3 printable invoice(s) read, 2 used, 1 failed to open, 4 failed totals check(s), 5 order(s) re-read for a later refund, 1 found refunded in full.",
     );
   });
 
