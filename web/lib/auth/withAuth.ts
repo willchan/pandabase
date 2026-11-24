@@ -32,6 +32,11 @@ export interface AuthedContext<P> {
    * Resolve the actor. Agent writes name the human with `actor_discord_id` (unknown → 403;
    * missing → 400 when `required`). Sessions act as their member; worker/cron as systems.
    */
+  /**
+   * Don't write this request's `api_request` row (an idle `jobs/claim` poll: ~8.6k/day on the
+   * worker's 10 s base interval; DESIGN §10). Errors are always recorded.
+   */
+  skipTelemetry(): void;
   actor(discordId: string | null | undefined, opts?: { required?: boolean }): Promise<Actor>;
 }
 
@@ -82,19 +87,22 @@ export function withAuth<P = Record<string, never>>(
     await app.requestBoundary();
     const started = performance.now();
     let scope: Scope | null = null;
+    let skipTelemetry = false;
     let res: Response;
     try {
       res = await run();
     } catch (err) {
       res = toErrorResponse(err);
     }
-    await recordApiRequest(app.db, app.now(), {
-      route: opts.route,
-      method: req.method,
-      status: res.status,
-      latencyMs: Math.round(performance.now() - started),
-      scope,
-    });
+    if (!(skipTelemetry && res.status < 400)) {
+      await recordApiRequest(app.db, app.now(), {
+        route: opts.route,
+        method: req.method,
+        status: res.status,
+        latencyMs: Math.round(performance.now() - started),
+        scope,
+      });
+    }
     return res;
 
     async function run(): Promise<Response> {
@@ -133,6 +141,9 @@ export function withAuth<P = Record<string, never>>(
           principal,
           params,
           app,
+          skipTelemetry: () => {
+            skipTelemetry = true;
+          },
           actor: (discordId, o) => resolveActor(app, principal, discordId, o?.required ?? false),
         });
       } catch (err) {

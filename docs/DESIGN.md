@@ -301,7 +301,10 @@ All routes under `/web/app/api`. Payloads defined once as **Zod schemas** in `we
 - **Cron:** `/api/cron/maintenance` requires `Authorization: Bearer ${CRON_SECRET}` (the Vercel
   Schedule `maintenance` in `web/vercel.json`, daily 11:17 UTC; §8 *Daily maintenance*).
 - **Latency middleware:** every request logs `api_request {route, method, status, latencyMs,
-  scope}` (source `api`); a telemetry failure never fails the request.
+  scope}` (source `api`); a telemetry failure never fails the request. The one exception is an
+  idle `POST /api/jobs/claim` (`{job: null}`): it writes no row (§10 #93), so the weekly report's
+  per-route count and latency for that route cover real claims only; worker liveness is the
+  `worker_heartbeat`.
 
 ### 3.2 Routes (v1)
 
@@ -335,7 +338,7 @@ All routes under `/web/app/api`. Payloads defined once as **Zod schemas** in `we
 | `POST /api/jobs` | agent | Create audit job (`media_r2_key` must be a `media/…` key from upload-url) |
 | `GET /api/jobs/notifications` | agent | Completed/failed jobs not yet replied to in Discord |
 | `POST /api/jobs/{id}/notified` | agent | Mark reply sent |
-| `POST /api/jobs/claim` | worker | Lease next queued job (+ presigned media GET and keyframe PUT URLs); `{job: null}` when empty |
+| `POST /api/jobs/claim` | worker | Lease next queued job (+ presigned media GET and keyframe PUT URLs); `{job: null}` when empty. An idle poll is one indexed `LIMIT 1` read (a queued job of a requested type, or an expired lease) with no transaction and no telemetry row |
 | `POST /api/jobs/complete` | worker | Result or failure for the claimed attempt (`attempt` echoed; stale → 409) |
 | `POST /api/telemetry` | agent, worker | Telemetry events (batched) |
 | `GET /api/health/worker` | agent | Latest `worker_heartbeat`: `{heartbeat: {at, version, sha, vlm_model, text_model, ollama_ok} \| null}` (worker-sourced rows only). The Mac Mini deploy health check (§8) waits for one from the new image's `sha` |
@@ -1053,7 +1056,7 @@ unchanged event keeps its row.
    from text + image; asks once if ambiguous.
 2. Agent → `POST /api/media/upload-url` → PUT bytes to R2 (`media/{yyyy}/{mm}/{ulid}.{ext}`).
 3. Agent → `POST /api/jobs` with type, key, actor, Discord message/channel, current cycle.
-4. Worker loop (every 10s): `POST /api/jobs/claim` → lease 5 min (`jobs.leaseMinutes`),
+4. Worker loop (every 10s while jobs flow; each empty poll, Ollama outage or API error doubles the wait up to `POLL_MAX_INTERVAL_SECONDS` (120), a job or a restart resets it): `POST /api/jobs/claim` → lease 5 min (`jobs.leaseMinutes`),
    `attempts += 1`; the response carries `attempt`, a presigned media GET and
    `jobs.maxKeyframes` presigned keyframe PUTs (`jobs.presignSeconds` = 900).
    Download via presigned GET, normalize (EXIF rotate, resize to ≤ 2048px), save keyframe(s) to
@@ -1617,7 +1620,7 @@ over 200k `<option>`s and took ~35s under `next dev` (2s after both changes).
 `DEV_AUTH_BYPASS`, `R2_ENDPOINT` (optional S3 origin override; only the system test's local R2 stub
 sets it). Worker: `PANDABASE_API_URL`, `WORKER_API_TOKEN`, `OLLAMA_URL`
 (`http://host.docker.internal:11434`), `OLLAMA_VLM_MODEL` (`qwen3.8:27b`), `OLLAMA_TEXT_MODEL`
-(`qwen3.8:27b`), `POLL_INTERVAL_SECONDS` (10), `HOUSEHOLD_TZ`, `PROMPTS_DIR` (set by the image).
+(`qwen3.8:27b`), `POLL_INTERVAL_SECONDS` (10), `POLL_MAX_INTERVAL_SECONDS` (120, idle backoff ceiling), `HOUSEHOLD_TZ`, `PROMPTS_DIR` (set by the image).
 Agent tools: `PANDABASE_API_URL`, `PANDABASE_AGENT_API_TOKEN` (`.env`'s `AGENT_API_TOKEN`),
 `PANDABASE_CONFIG`, from `~/.config/pandabase/agent.env` (mode 600; `PANDABASE_AGENT_ENV` overrides
 the path); the process env wins. Mac Mini updater (`.env`):
@@ -1807,3 +1810,4 @@ docker-compose.yml (+ docker-compose.build.yml), Makefile, CLAUDE.md, README.md,
 | 90 | Held receipts (#83) are retired: a failing digital receipt is applied as read, the sweeps re-read a `totals_check: fail` order for 14 days, and a differing read replaces it; holds left on production are released (applied as read) by the next daily cron, then `receipt_hold` is dropped in a contract PR (§4.5 *Failing totals*, *Held receipts*) | They existed because an applied misread couldn't be corrected (§10 #83); since M11.2 a re-read replaces it. Holding costs a lost purchase for up to 14 days (the cart re-buys the item, no cycle closure). Expand → contract: stop holding and move the agent's re-read from `held` to `totals_check: fail` first, keep reading the table, then drop it. Releasing the last holds at once rather than waiting for their expiry: applying as read is what this decision does for every new failing receipt, and it records the purchases ~10 days sooner. The re-read is bounded (14 days, then `done`) because a re-read costs a page load per sweep, and only a deployed parser fix changes the read |
 | 91 | Daily maintenance runs from a Vercel Schedule (`schedules` in `web/vercel.json`, a `GET` path target, same time and `CRON_SECRET` bearer check), not a legacy Cron Job; production only; run on demand by the *Run maintenance* workflow (§8 *Daily maintenance*) | Vercel marks Cron Jobs legacy (Schedules public beta, 2026-11-05; no removal date yet). Schedules ship with the `vercel deploy --prod` that `deploy.yml` already runs, so they stay in code. Same path and auth means no route change and no new secret. The schedule and the cron are swapped in one deploy, because keeping both runs the job twice. Preview schedules start inactive, which keeps the shared preview DB to tier A′'s own calls. UTC rather than `America/Los_Angeles`, to keep today's time exactly (03:17 PST / 04:17 PDT) |
 | 92 | An hourly command job checks the browser's sign-ins from cookie names over CDP (no page load) and posts a sign-out at once, then daily, and ✅ on recovery; a Chrome restart that wipes the jar is posted once; the sweep skill no longer posts sign-outs | After the 2026-11-21 reboot (also Chrome's first launch on 158) the profile came back with no cookies at all; the daily Amazon sweep failed `not_signed_in` for days with one post (the skill's weekly limit) and two held Whole Foods orders went unread. A sweep only learns of a sign-out when it runs, and loading a page to check costs bot-check risk; cookie names cost nothing |
+| 93 | An idle worker backs off (10 s doubling to 120 s), an empty `jobs/claim` is one indexed read with no transaction and no `api_request` row, and expired leases are still swept whenever the read finds one | Vercel's free tier gives 4 h/month of Fluid Active CPU and had used 3h41m (2026-11-24); `/api/jobs/claim` dominated the project: ~8,640 calls/day, almost all empty, each opening a transaction, sweeping leases, reading every queued job and writing a telemetry row. Now ≤ 720 calls/day idle (−92%), each a single read. A lease that expires with nothing queued is found by the same read, so re-queueing is no slower than a poll; the worst-case wait to pick up a new job is 2 min. Idle polls are no longer in the weekly report's route counts (the `worker_heartbeat` is the liveness signal) |

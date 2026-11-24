@@ -1,6 +1,14 @@
 // Job lifecycle (DESIGN §5): upload URL → create → claim → lease expiry → re-claim → complete →
 // notifications → notified; retries and final failure; Trash Cam and merge-suggest results.
-import { auditJob, inventoryEvent, inventoryState, item, receipt, reviewItem } from "@pandabase/db";
+import {
+  auditJob,
+  inventoryEvent,
+  inventoryState,
+  item,
+  receipt,
+  reviewItem,
+  systemTelemetry,
+} from "@pandabase/db";
 import { and, eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ALEX, SAM, setup, type Harness } from "@/test/harness";
@@ -365,5 +373,42 @@ describe("job lifecycle", () => {
       body: {},
     });
     expect(early.status).toBe(409);
+  });
+});
+
+describe("idle claim polls", () => {
+  const apiRows = async () =>
+    (await h.db.select().from(systemTelemetry).where(eq(systemTelemetry.metricType, "api_request")))
+      .map((r) => r.payload as { route: string })
+      .filter((p) => p.route === "POST /api/jobs/claim");
+
+  it("an empty claim writes no api_request row; a real claim still does", async () => {
+    // Regression: the worker's 10 s idle polls each wrote a telemetry row (Vercel CPU).
+    expect(await claim()).toBeNull();
+    expect(await claim()).toBeNull();
+    expect(await apiRows()).toHaveLength(0);
+    await create();
+    expect(await claim()).not.toBeNull();
+    expect(await apiRows()).toHaveLength(1);
+  });
+
+  it("releases an expired lease and re-claims it when nothing is queued", async () => {
+    await create();
+    const first = (await claim())!;
+    await h.db.update(auditJob).set({ leaseExpiresAt: "2000-01-01T00:00:00.000Z" });
+    expect((await claim())!.id).toBe(first.id); // only the sweep makes it claimable again
+  });
+
+  it("claims only requested types and never storage_audit", async () => {
+    await create({ job_type: "paper_receipt", media_r2_key: "media/2026/10/r.jpg" });
+    const only = async (types: string[]) =>
+      (
+        await h.call<{ job: Claimed | null }>(HANDLERS.jobsClaim.POST, "/api/jobs/claim", {
+          auth: "worker",
+          body: { job_types: types },
+        })
+      ).body.job;
+    expect(await only(["trash_cam"])).toBeNull();
+    expect(await only(["merge_suggest", "paper_receipt"])).not.toBeNull();
   });
 });
