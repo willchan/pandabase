@@ -1,6 +1,6 @@
 ---
 name: verify
-description: How to see a PandaBase change working before calling it done — seeded phone screenshots for UI changes, the read-only prod copy for data/importer/prediction changes, and real-page-shaped fixtures for importer changes. Read before finishing any change to web pages, components, domain logic, importers, predictions or diagnostics.
+description: How to see a PandaBase change working before calling it done — seeded phone screenshots for UI changes (open only the ones that show the change), the read-only prod copy for data/importer/prediction changes, and real-page-shaped fixtures for importer changes. Read before finishing any change to web pages, components, domain logic, importers, predictions or diagnostics.
 ---
 
 # Verifying a PandaBase change
@@ -31,8 +31,16 @@ page load or anything that touches production.
    `dev-seeded` one from `.claude/launch.json`.
 2. It exits 1 on any console error, page error, failed request or HTTP ≥ 400 — fix those, don't
    wave them through (a hydration warning is an error).
-3. **Open every PNG and look**: layout at 390 px, both themes, empty and long states, the bottom
-   nav not covering content, text that fits. Iterate until it looks right, then re-shoot.
+3. **Open the PNGs that show the change and look**: layout at 390 px, empty and long states, the
+   bottom nav not covering content, text that fits. Open one theme; open both when the change
+   touches colors, theme tokens, contrast or images. Shots of paths your change doesn't alter
+   only need the exit code.
+   Every image you open stays in the session's context and is re-read on every later turn, so
+   open only what you need. The shot run itself is free: its exit code covers errors on every
+   path and theme.
+   With more than about 4 shots to look at, have a subagent open them and report what it saw, so
+   the images stay out of this session. Iterate until it looks right, re-shooting only the path
+   you're fixing, then re-shoot the full set once.
 4. Put the final seeded shots in the PR. They are synthetic, so they may be pushed — but not onto
    `main`: commit them to a `shots/<topic>` branch made from an empty tree and link them in the PR
    body by raw URL (as #41 and #45 did):
