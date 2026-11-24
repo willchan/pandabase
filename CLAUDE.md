@@ -126,7 +126,8 @@ pnpm db:migrations-status    # read-only: applied migrations vs db/migrations (d
 (cd worker && uv run python ../scripts/deploy/web_smoke.py --base-url URL [--migrations F])   # read-only prod smoke (Python 3.14)
 make eval-agent              # tier B: real OpenClaw + skills on local Ollama (EVAL_MODEL); skips if unavailable
 make check                   # everything CI runs
-make ops-check               # shellcheck, actionlint, compose/plists, deploy bats tests, migration check, smoke ruff/mypy
+make ops-check               # shellcheck, actionlint, compose/plists, deploy bats tests, migration check, smoke ruff/mypy,
+                             # finished milestones out of docs/PLAN.md (python3 scripts/docs/check_plan_done.py)
 bats scripts/deploy/tests    # Mac Mini updater + migration check (git/docker/network stubbed)
 scripts/deploy/check-migrations.sh --base origin/main   # new migrations must not DROP/RENAME (unless marked)
 ```

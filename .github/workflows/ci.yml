@@ -165,7 +165,8 @@ jobs:
 
   ops:
     # Mac Mini ops (PLAN M8/M9): shellcheck, actionlint, compose files, plists, deploy-script tests
-    # (bats), the backward-compatible-migration check, make dry runs, smoke helpers' ruff/mypy.
+    # (bats), the backward-compatible-migration check, make dry runs, smoke helpers' ruff/mypy,
+    # and that finished milestones have left docs/PLAN.md (scripts/docs/check_plan_done.py).
     runs-on: ubuntu-latest
     env:
       MIGRATIONS_BASE: origin/${{ github.base_ref || 'main' }}
